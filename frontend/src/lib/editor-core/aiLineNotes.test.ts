@@ -189,19 +189,31 @@ describe("lore check notes (ADR-0098)", () => {
     expect(noteNotice(2, 2)).toBe("2 notes couldn't be matched and were skipped.");
   });
 
-  it("surfaces a backend error and installs nothing; no invocation", async () => {
+  it("an unusable reply (cut off) installs nothing but its cost is still recorded", async () => {
     const { ctrl, editor, costs } = setup();
     fakeStream(reply({ ok: false, error: "cut off", notes: null }));
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(ctrl.error).toBe("cut off");
     expect(ctrl.lineNotes).toBeNull();
+    expect(ctrl.meta).toBeNull();
     expect(lineNoteState(editor.state).notes).toHaveLength(0);
+    expect(costs).toEqual([0.02]);
+    expect(api.aiAppendInvocation).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stream that fails before finishing records nothing", async () => {
+    const { ctrl, costs } = setup();
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      yield { type: "error", error: "provider down" } as never;
+    });
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(ctrl.error).toBe("provider down");
     expect(costs).toEqual([]);
     expect(api.aiAppendInvocation).not.toHaveBeenCalled();
   });
 
-  it("refuses to show notes when the selected text changed during the call", async () => {
-    const { editor, ctrl } = setup();
+  it("refuses to show notes when the selected text changed during the call, but records the paid reply", async () => {
+    const { editor, ctrl, costs } = setup();
     vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
       editor.view.dispatch(editor.state.tr.insertText("Oh. ", 1));
       yield { type: "done", ...(reply() as object) } as never;
@@ -209,6 +221,8 @@ describe("lore check notes (ADR-0098)", () => {
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(ctrl.error).toMatch(/Document changed during the AI call/);
     expect(ctrl.lineNotes).toBeNull();
+    expect(costs).toEqual([0.02]);
+    expect(api.aiAppendInvocation).toHaveBeenCalledTimes(1);
   });
 
   it("refuses another run while notes are open, with a visible notice", async () => {

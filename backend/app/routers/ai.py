@@ -687,7 +687,7 @@ async def ai_chat_stream(
 
 
 def _reply_shape(
-    project: ProjectService, request: AIGenerateRequest, rendered: Any
+    request: AIGenerateRequest, rendered: Any
 ) -> tuple[dict[str, Any] | None, LineEditsStreamCollector | LineNotesStreamCollector | None]:
     """The structured reply a streaming generate asks for: the provider's
     `response_schema` and the collector that reads the finished list onto the
@@ -696,7 +696,7 @@ def _reply_shape(
     if request.response_format == "line_edits":  # #2460
         return LINE_EDITS_RESPONSE_SCHEMA, LineEditsStreamCollector()
     if request.response_format == "notes":  # #2490
-        checked = checked_against(project, rendered)
+        checked = checked_against(rendered)
         return NOTES_RESPONSE_SCHEMA, LineNotesStreamCollector({c["id"] for c in checked}, checked)
     return None, None
 
@@ -768,7 +768,7 @@ async def ai_generate_stream(
     # drift into caching or placing lore in one mode but not the other.
     system_blocks = one_shot_system_blocks(system_prompt, rendered)
 
-    response_schema, collector = _reply_shape(project, request, rendered)
+    response_schema, collector = _reply_shape(request, rendered)
     events = ai_providers.chat_stream(
         resolved.to_call(
             system_prompt=system_prompt,

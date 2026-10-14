@@ -113,23 +113,27 @@ class ReadLineNotesReplyTests(unittest.TestCase):
 
 
 class CheckedAgainstTests(unittest.TestCase):
-    def test_send_order_deduplicated_with_a_name_fallback(self) -> None:
-        with TemporaryDirectory() as tmp:
-            service = open_test_project(Path(tmp).resolve() / "project", "Checked Tests")
-            a = service.create_lore_entry(CreateLoreEntryRequest(title="Aria", entry_type="lore:character"))
-            b = service.create_lore_entry(CreateLoreEntryRequest(title="Bram", entry_type="lore:character"))
-            rendered = SimpleNamespace(
-                send_lore_stable_ids=[b.id, a.id],
-                send_lore_volatile_ids=[a.id, "lore_gone"],
-            )
-            self.assertEqual(
-                checked_against(service, rendered),  # type: ignore[arg-type]
-                [
-                    {"id": b.id, "name": "Bram"},
-                    {"id": a.id, "name": "Aria"},
-                    {"id": "lore_gone", "name": "lore_gone"},
-                ],
-            )
+    def test_send_order_deduplicated_named_as_the_model_saw_them(self) -> None:
+        # The name is the rendered block's `name=` (the as-of-scene name, e.g.
+        # after a renaming mutation), not the stored title; an id with no block
+        # falls back to the id.
+        rendered = SimpleNamespace(
+            send_lore_stable_ids=["lore_b", "lore_a"],
+            send_lore_volatile_ids=["lore_a", "lore_gone"],
+            send_lore_stable_entries={
+                "lore_b": '<character id="lore_b" name="Bram &amp; Son" aliases="B">\n<body>Bram is &lt;tall&gt;.</body>\n</character>',
+                "lore_a": "<character id='lore_a' name='Captain \"Aria\" Voss'><body/></character>",
+            },
+            send_lore_volatile_entries={"lore_a": '<character id="lore_a" name="stale">x</character>'},
+        )
+        self.assertEqual(
+            checked_against(rendered),  # type: ignore[arg-type]
+            [
+                {"id": "lore_b", "name": "Bram & Son"},
+                {"id": "lore_a", "name": 'Captain "Aria" Voss'},
+                {"id": "lore_gone", "name": "lore_gone"},
+            ],
+        )
 
 
 class GenerateNotesRouteTests(unittest.TestCase):

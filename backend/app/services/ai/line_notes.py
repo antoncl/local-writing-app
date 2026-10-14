@@ -11,17 +11,17 @@ cite lore it was shown.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
+from xml.etree import ElementTree
 
 from app.models.ai import LineNote
 from app.services.ai.entry_patch import load_json_object
-from app.services.ai.helpers import _attr_or_item, _safe_read_node
 from app.services.ai.providers import StreamDelta, StreamDone, StreamEvent
 
 if TYPE_CHECKING:
     from app.services.ai.templates import RenderedTemplate
-    from app.services.project_service import ProjectService
 
 NOTES_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -49,12 +49,11 @@ LINE_NOTES_TRUNCATED_ERROR = (
 LINE_NOTES_UNREADABLE_ERROR = "The model's reply wasn't a readable list of notes."
 
 
-def parse_line_notes(raw: str) -> list[LineNote] | None:
-    """The notes in ``raw``, or ``None`` when it isn't a readable note list (no
-    JSON object, or no ``notes`` array). An empty list is a valid answer
-    ("nothing contradicts the lore"). Unusable items are skipped rather than
-    failing the list: not an object, or a non-string/empty ``quote``,
-    ``problem`` or ``entry``."""
+def _read_notes(raw: str) -> tuple[list[LineNote], int] | None:
+    """`(notes, skipped)` read from ``raw``, or ``None`` when it isn't a readable
+    note list (no JSON object, or no ``notes`` array). Unusable items are skipped
+    and counted rather than failing the list: not an object, or a
+    non-string/empty ``quote``, ``problem`` or ``entry``."""
     obj = load_json_object(raw)
     items = obj.get("notes") if obj is not None else None
     if not isinstance(items, list):
@@ -67,13 +66,14 @@ def parse_line_notes(raw: str) -> list[LineNote] | None:
         if not all(isinstance(v, str) and v for v in (quote, problem, entry)):
             continue
         notes.append(LineNote(quote=quote, problem=problem, entry=entry))
-    return notes
+    return notes, len(items) - len(notes)
 
 
-def _count_items(raw: str) -> int:
-    obj = load_json_object(raw)
-    items = obj.get("notes") if obj is not None else None
-    return len(items) if isinstance(items, list) else 0
+def parse_line_notes(raw: str) -> list[LineNote] | None:
+    """The notes in ``raw``, or ``None`` when it isn't a readable note list. An
+    empty list is a valid answer ("nothing contradicts the lore")."""
+    read = _read_notes(raw)
+    return read[0] if read is not None else None
 
 
 def read_line_notes_reply(
@@ -84,24 +84,38 @@ def read_line_notes_reply(
     `entry` is not an id the run sent."""
     if truncated:
         return None, 0, LINE_NOTES_TRUNCATED_ERROR
-    parsed = parse_line_notes(content)
-    if parsed is None:
+    read = _read_notes(content)
+    if read is None:
         return None, 0, LINE_NOTES_UNREADABLE_ERROR
+    parsed, skipped = read
     kept = [n for n in parsed if n.entry in sent_ids]
-    return kept, _count_items(content) - len(kept), None
+    return kept, skipped + len(parsed) - len(kept), None
 
 
-def checked_against(project: ProjectService, rendered: RenderedTemplate) -> list[dict[str, str]]:
+_OPENING_TAG = re.compile(r"<[^\s/>]+(\s[^>]*?)/?>")
+
+
+def _block_name(xml: str) -> str | None:
+    """The `name` attribute of a lore block's opening tag - the entry's name as
+    the model was shown it (as of the scene, after mutations), not its stored
+    title."""
+    match = _OPENING_TAG.match(xml.lstrip())
+    if match is None:
+        return None
+    try:
+        name = ElementTree.fromstring(f"<x{match.group(1)}/>").get("name")
+    except ElementTree.ParseError:
+        return None
+    return name or None
+
+
+def checked_against(rendered: RenderedTemplate) -> list[dict[str, str]]:
     """Every lore entry the run sent - stable then volatile tier, in send order,
-    de-duplicated - as `{"id", "name"}`, the name being the entry's title (what
-    the lore block's `name=` attribute carries; the id when it has none)."""
+    de-duplicated - as `{"id", "name"}`, the name read from the entry's rendered
+    lore block (the id when it has none)."""
+    blocks = {**rendered.send_lore_volatile_entries, **rendered.send_lore_stable_entries}
     ids = list(dict.fromkeys([*rendered.send_lore_stable_ids, *rendered.send_lore_volatile_ids]))
-    out: list[dict[str, str]] = []
-    for entry_id in ids:
-        entry = _safe_read_node(project, entry_id)
-        title = _attr_or_item(entry, "title") if entry is not None else None
-        out.append({"id": entry_id, "name": title if isinstance(title, str) and title else entry_id})
-    return out
+    return [{"id": i, "name": _block_name(blocks.get(i, "")) or i} for i in ids]
 
 
 class LineNotesStreamCollector:

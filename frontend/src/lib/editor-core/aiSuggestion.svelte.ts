@@ -54,7 +54,7 @@ import {
   stepLineEdit,
   stepLineNote,
 } from "@/lib/editor-core/lineEditSuggestions";
-import { fetchLineNotes, noteNotice } from "@/lib/editor-core/aiLineNotes";
+import { fetchLineNotes, noteNotice, type NotesDone } from "@/lib/editor-core/aiLineNotes";
 import {
   hasMutationMarker,
   markerNotice,
@@ -579,21 +579,17 @@ export class AiSuggestionController {
       }
       if (out.kind === "stale") return;
       if (out.kind === "error") {
+        // A reply that arrived but can't be used (cut off, unreadable, the text
+        // moved) was still paid for: record it, then show the error.
+        if (out.res) {
+          this.#recordNotesArrival(out.res, run, 0);
+          this.meta = null;
+        }
         this.error = out.message;
         return;
       }
       const { res, placed, dropped, checkedAgainst } = out;
-      this.meta = {
-        provider: res.provider,
-        model: res.model,
-        latency_ms: res.latency_ms,
-        truncated: res.truncated,
-        wordCount: placed.length,
-        usage: res.usage ?? null,
-        cost_usd: res.cost_usd ?? null,
-      };
-      if (typeof res.cost_usd === "number") this.#deps.onInvocationCost(res.cost_usd);
-      this.#persistAcceptedInvocation(run.entry, null);
+      this.#recordNotesArrival(res, run, placed.length);
       this.#anchorPos = null;
       const notice = noteNotice(placed.length, dropped);
       if (placed.length === 0) {
@@ -618,6 +614,22 @@ export class AiSuggestionController {
       this.generating = false;
       this.updateToolbarPosition();
     }
+  }
+
+  // A check has nothing to accept, so its cost and telemetry are recorded when the
+  // reply arrives - usable or not.
+  #recordNotesArrival(res: NotesDone, run: OutputRun, placedCount: number): void {
+    this.meta = {
+      provider: res.provider,
+      model: res.model,
+      latency_ms: res.latency_ms,
+      truncated: res.truncated,
+      wordCount: placedCount,
+      usage: res.usage ?? null,
+      cost_usd: res.cost_usd ?? null,
+    };
+    if (typeof res.cost_usd === "number") this.#deps.onInvocationCost(res.cost_usd);
+    this.#persistAcceptedInvocation(run.entry, null);
   }
 
   // Follow the open note list like #watchLineEdits: keep the count and the checked

@@ -18,7 +18,8 @@ export type NotesOutcome =
   | { kind: "cancelled" }
   // The writer left the document (or switched scenes) mid-call: not theirs to see.
   | { kind: "stale" }
-  | { kind: "error"; message: string }
+  // `res`: the finished reply when there was one - paid for even when unusable.
+  | { kind: "error"; message: string; res?: NotesDone }
   | {
       kind: "ready";
       res: NotesDone;
@@ -83,9 +84,9 @@ export async function fetchLineNotes(args: NotesRunArgs): Promise<NotesOutcome> 
     if (streamError !== null || !res) {
       return { kind: "error", message: streamError ?? "The model's reply ended before it finished." };
     }
-    if (res.ok === false) return { kind: "error", message: res.error || "Unknown error" };
+    if (res.ok === false) return { kind: "error", message: res.error || "Unknown error", res };
     if (editor.state.doc.textBetween(from, to, "\n\n", " ") !== selectionText) {
-      return { kind: "error", message: "Document changed during the AI call. Re-select the text and retry." };
+      return { kind: "error", message: "Document changed during the AI call. Re-select the text and retry.", res };
     }
     const { placed, dropped } = placeLineNotes(editor.state.doc, from, to, res.notes ?? []);
     return {

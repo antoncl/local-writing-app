@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from project_fixtures import open_test_project
+
+from app.models import CreateLoreEntryRequest
 from app.services.ai.field_contract import FieldContract, without_field_contract
+from app.services.ai.helpers import _fields
+from app.services.machine_settings import DEFAULT_PALETTE
+from app.services.machine_settings import palette as machine_palette
+from app.services.project.default_schema import DEFAULT_METADATA_SCHEMA
 
 
 def _scalar(**over):
@@ -125,6 +135,45 @@ class WithoutFieldContractTests(unittest.TestCase):
     def test_empty_stored_leaves_text_unchanged(self) -> None:
         rendered = "Some prose naming Nimitz."
         self.assertEqual(without_field_contract(rendered, []), rendered)
+
+
+class ColorFieldContractTests(unittest.TestCase):
+    """#2484 — a colour field's value space is the palette, so the descriptor
+    lists the swatch ids and the contract line tells the model to pick one."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(root, "Color Contract")
+        schema_path = root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["hue"] = {"name": "Hue", "type": "color"}
+        character = data["entry_types"].get("lore:character") or {}
+        character["fields"] = ["hue", *(character.get("fields") or [])]
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+        self.hero = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_color_descriptor_carries_palette_ids_and_renders_one_of(self) -> None:
+        schema = self.service.read_metadata_schema()
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
+        ids = [s.id for s in machine_palette()]
+        self.assertEqual(by_id["hue"]["options"], ids)
+        fc = FieldContract()
+        fc.store(by_id["hue"])
+        self.assertIn("one of:", fc.render)
+        self.assertIn("slate-blue", fc.render)
+
+    def test_builtin_color_description_examples_are_real_swatch_ids(self) -> None:
+        description = DEFAULT_METADATA_SCHEMA["fields"]["color"]["description"]
+        examples = re.findall(r"'([^']+)'", description)
+        self.assertTrue(examples)
+        palette_ids = {s["id"] for s in DEFAULT_PALETTE}
+        for name in examples:
+            self.assertIn(name, palette_ids)
 
 
 if __name__ == "__main__":

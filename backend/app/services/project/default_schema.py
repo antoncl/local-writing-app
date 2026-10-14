@@ -419,7 +419,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Color",
             "description": (
                 "A palette swatch name for tinting this entry in lists and the "
-                "manuscript tree (e.g. 'moss', 'amber', 'slate') — not a hex code, "
+                "manuscript tree (e.g. 'moss', 'amber', 'slate-blue') — not a hex code, "
                 "and not a description of a color."
             ),
             "type": "color",

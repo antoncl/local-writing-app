@@ -16,6 +16,7 @@
   import { formattingToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { countWords } from "@/lib/utils/wordCount";
   import { handleSectionArrow, type SectionNeighbours } from "@/lib/editor-core/sectionKeyboardBridge";
+  import { onEditorBlur } from "@/lib/editor-core/editorBlur";
   import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 
   let {
@@ -194,7 +195,7 @@
       },
       onSelectionUpdate: updateMenu,
       onFocus: updateMenu,
-      onBlur: hideMenu,
+      onBlur: onEditorBlur(hideMenu),
     });
     const mounted = editor;
     onEditorReady(mounted, "ready");

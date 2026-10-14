@@ -44,6 +44,7 @@
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
+  import { onEditorBlur } from "@/lib/editor-core/editorBlur";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -1110,7 +1111,7 @@
       },
       onUpdate: ({ transaction }) => handleEditorUpdate(transaction),
       onSelectionUpdate: handleEditorSelectionUpdate,
-      onBlur: handleEditorBlur,
+      onBlur: onEditorBlur(handleEditorBlur),
       // Reveal toggles are meta-only transactions (no doc change), so onUpdate
       // wouldn't catch them — sync interiority state on every transaction.
       onTransaction: () => updateInteriorityState(),

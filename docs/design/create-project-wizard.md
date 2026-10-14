@@ -107,6 +107,7 @@ two **conditional** branches so nobody is asked what they will never use (#318's
 you can default; skipping should never be the attractive option"):
 
 ```
+0. Welcome                (first run only: Create a new project | Open an existing project, #2467)
 1. Root folder            (first-run / no root configured — unconditional when shown)
 2. Location + inheritance  → declares the chain; everything downstream resolves against it
 3. AI policy = the GATE    → resolved from the chain, or asked when nothing to inherit
@@ -143,6 +144,20 @@ harmless because nothing classifies on scene count at runtime. The one caution t
 **seed at creation only — never add an "open a project with no scenes → make one" fallback**, the one
 change that *would* hand a container a stray scene. (Scene-counting to infer book-ness survives only
 in test *containment* assertions, `test_open_non_leaf.py`, which already document this.)
+
+**Step 0 — Welcome (first run only, #2467).** A fresh install has no projects folder, so the wizard
+opens itself — and a writer who already has a project on disk must not be stranded in a create flow.
+The step offers two large choices and no generic Next. *Create* continues to step 1. *Open* shows the
+wizard's own directory picker ("Open Your Project"); the pick must be a project folder (the listing's
+`is_project`), else an inline error keeps the writer on the step. Cancelling the picker also returns
+here. Opening still needs a projects folder, because books must live under it (#441) so inheritance
+has a bound. The wizard therefore suggests one: **the parent of the topmost ancestor project** —
+walk up from the picked folder while each parent is itself a project, so a book's series and world
+chain stay under the root — and shows it in the same `ProjectsFolderPicker` as step 1. The chosen
+root must contain the project (separator-aware, case-insensitive on Windows paths: `D:\Books2` is not
+inside `D:\Books`), else Open is disabled. **Open** saves the root, then opens the project; a failure
+at either point keeps the wizard open with the reason inline. The walk and the containment rule live
+in `lib/utils/openExistingProject.ts`.
 
 **Step 1 — Root folder (machine substrate).** Establish `default_projects_folder`. Reuses the
 existing machine-settings write (`PUT /api/settings/machine`, `machine_settings.py:40-51`;

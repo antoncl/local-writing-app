@@ -7,17 +7,40 @@ import {
   type WizardSnapshot,
 } from "@/lib/utils/wizardSteps";
 
-const EMPTY: WizardSnapshot = { rootFolderDraft: "", title: "", pickedFolder: "" };
+const EMPTY: WizardSnapshot = { rootFolderDraft: "", title: "", pickedFolder: "", openProjectPath: "" };
 
 describe("activeSteps", () => {
   it("includes the root-folder step only on first run", () => {
     expect(activeSteps(true).map((s) => s.id)).toEqual([
+      "start",
       "root",
       "location",
       "ai",
       "review",
       "describe",
     ]);
+  });
+
+  it("collapses to start + open_root while opening an existing project", () => {
+    expect(activeSteps(true, true).map((s) => s.id)).toEqual(["start", "open_root"]);
+  });
+
+  it("keeps the open flow's steps after the root save flips needsRootFolder", () => {
+    expect(activeSteps(false, true).map((s) => s.id)).toEqual(["start", "open_root"]);
+  });
+
+  it("keeps start (but not root) when a first-run session's root is already saved", () => {
+    expect(activeSteps(false, false, true).map((s) => s.id)).toEqual([
+      "start",
+      "location",
+      "ai",
+      "review",
+      "describe",
+    ]);
+  });
+
+  it("never offers start or open_root on a plain returning-user run", () => {
+    expect(activeSteps(false).map((s) => s.id)).toEqual(["location", "ai", "review", "describe"]);
   });
 
   it("drops the root-folder step once a default folder is configured", () => {
@@ -39,7 +62,7 @@ describe("activeSteps", () => {
 describe("indexOfStep", () => {
   it("locates a step within the active list", () => {
     const steps = activeSteps(true);
-    expect(indexOfStep(steps, "location")).toBe(1);
+    expect(indexOfStep(steps, "location")).toBe(2);
   });
 
   it("reports -1 for a step not in the active list (root, second run)", () => {
@@ -48,6 +71,17 @@ describe("indexOfStep", () => {
 });
 
 describe("stepComplete", () => {
+  it("never completes the start step (it advances through its two choices)", () => {
+    expect(stepComplete("start", { ...EMPTY, rootFolderDraft: "D:/writing" })).toBe(false);
+  });
+
+  it("gates open_root on a root that contains the project", () => {
+    const base = { ...EMPTY, openProjectPath: "D:/Books/Saga" };
+    expect(stepComplete("open_root", base)).toBe(false);
+    expect(stepComplete("open_root", { ...base, rootFolderDraft: "D:/Books" })).toBe(true);
+    expect(stepComplete("open_root", { ...base, rootFolderDraft: "D:/Other" })).toBe(false);
+  });
+
   it("gates the root step on a chosen folder", () => {
     expect(stepComplete("root", EMPTY)).toBe(false);
     expect(stepComplete("root", { ...EMPTY, rootFolderDraft: "  " })).toBe(false);

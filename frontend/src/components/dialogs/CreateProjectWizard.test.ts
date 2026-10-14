@@ -51,3 +51,23 @@ describe("CreateProjectWizard AI step", () => {
     expect(screen.queryByText("Book A Local")).toBeNull();
   });
 });
+
+// #2467: a first-run writer with an existing project needs a way out of create.
+describe("CreateProjectWizard Welcome step", () => {
+  it("offers create / open on a first run", async () => {
+    createWizard.defaultProjectsFolder = "";
+    createWizard.start();
+    render(CreateProjectWizard);
+    expect(await screen.findByTestId("wizard-create-new")).toBeTruthy();
+    expect(screen.getByTestId("wizard-open-existing")).toBeTruthy();
+  });
+
+  it("is absent on a New project... run", async () => {
+    createWizard.defaultProjectsFolder = "C:/projects";
+    createWizard.start();
+    expect(createWizard.currentStep.id).toBe("location");
+    render(CreateProjectWizard);
+    expect(screen.queryByTestId("wizard-open-existing")).toBeNull();
+    expect(screen.queryByTestId("wizard-create-new")).toBeNull();
+  });
+});

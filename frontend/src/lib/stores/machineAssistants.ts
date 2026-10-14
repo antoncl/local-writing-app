@@ -4,7 +4,7 @@
 // roster store so an open project's pane/chat picker reflects the change.
 
 import { api } from "@/lib/api";
-import { isAssistantListed, refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import type { AssistantEntrySummary, EntryMetadata } from "@/lib/types";
 
@@ -32,11 +32,8 @@ export async function hireMachineAssistant(
     ...created,
     metadata: { ...created.metadata, ...modelMetadata({ provider, tier, model }) },
   });
-  // Create alone only writes the OPEN PROJECT's order (backend design #333), so
-  // with a project open the hire would be unlisted machine-wide. List it on the
-  // machine layer, topmost (creating one is a statement of intent about it).
-  const listed = (await loadMachineAssistants()).filter(isAssistantListed).map((entry) => entry.id);
-  await api.reorderAssistants([created.id, ...listed.filter((id) => id !== created.id)], MACHINE);
+  // The backend lists it topmost on the machine layer and leaves the open
+  // project's order alone (#2449) — no follow-up reorder needed here.
   await refreshAssistantEntries();
 }
 

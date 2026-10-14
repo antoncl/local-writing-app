@@ -12,8 +12,8 @@
   import {
     deleteMachineAssistant,
     hireMachineAssistant,
+    loadMachineAssistants,
     machineAssistantEntriesStore,
-    refreshMachineAssistants,
     reorderMachineAssistants,
     unlistMachineAssistant,
     updateMachineAssistant,
@@ -60,7 +60,10 @@
   }
 
   onMount(() => {
-    void act(refreshMachineAssistants);
+    // Load directly rather than via the error-swallowing refresh: a failed load
+    // must show in the error line, not as "No machine assistants yet" (which
+    // invites hiring a duplicate).
+    void act(async () => machineAssistantEntriesStore.set(await loadMachineAssistants()));
   });
 
   function beginHire(): void {

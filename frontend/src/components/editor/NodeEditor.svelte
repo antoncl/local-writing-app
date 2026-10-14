@@ -1,19 +1,18 @@
 <script lang="ts">
 
   import { untrack } from "svelte";
-  import { todoActions } from "@/lib/stores/todoActions.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
-  import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
-  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
-  import FootDock from "@/components/editor/FootDock.svelte";
-  import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
+  import { DetailsDetach } from "@/lib/editor-core/detailsDetach.svelte";
+  import { contentOverrideMarks } from "@/lib/editor-core/contentOverrideMarks";
+  import EditorTitleField from "@/components/editor/EditorTitleField.svelte";
+  import EditorFooter from "@/components/editor/EditorFooter.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
-  import { EntryProposalController, bodyAdopter } from "@/lib/stores/entryProposal.svelte";
-  import { refreshTagNodes, resolveAdoptedTagFields, tagById } from "@/lib/stores/tagNodes";
+  import { wireEntryReview } from "@/lib/editor-core/entryReviewWiring.svelte";
+  import { tagById } from "@/lib/stores/tagNodes";
   import { plotNodeEntriesStore } from "@/lib/stores/plotlines";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -28,21 +27,20 @@
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, NavigateTarget, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
+  import type { AssistantEntrySummary, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, NavigateTarget, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaLayersStore, metadataSchemaStore } from "@/lib/stores/schema";
   import { snapshotLayerId } from "@/lib/utils/layerAuthoring";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { referenceIndexStore, referrerFieldIndexStore } from "@/lib/stores/references";
-  import { backlinksFor } from "@/lib/views/backlinks";
+  import { BacklinksSync } from "@/lib/editor-core/backlinksSync.svelte";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { RailUndoController } from "@/lib/rail/railUndoController.svelte";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import { stopEditingEngaged } from "@/lib/editor-core/stopFieldEditable";
   import { scrubRefreshAction } from "@/lib/editor-core/scrubRefreshAction";
-  import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
-  import { wireReviewFreeze } from "@/lib/editor-core/reviewFreeze.svelte";
+  import { deriveBodyShape, documentLabelFor, entryTypesForDocument } from "@/lib/editor-core/documentPresentation";
   import { buildBodyTabs, tabIdForField } from "@/lib/editor-core/bodyTabs";
   import { restoredBodyTab } from "@/lib/editor-core/bodyTabRestore";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
@@ -324,19 +322,6 @@
   let effectiveTitle = $derived(titleMutated ? String(scrub.overrides?.title ?? "") : title);
   let bodyMutated = $derived(scrubbed && scrub.overrides != null && "body" in scrub.overrides);
 
-  // ADR-0095 §8 decision 7: the title input's own edit draft while scrubbed —
-  // re-seeded from `effectiveTitle` on every stop change (a scrub step, or the
-  // refresh after this stop's own save lands), never touched by a keystroke
-  // elsewhere. `commitTitleStopEdit` is the blur/Enter gesture in the snippet.
-  let titleStopDraft = $state("");
-  $effect(() => {
-    if (scrubbed) titleStopDraft = effectiveTitle;
-  });
-  function commitTitleStopEdit() {
-    if (!scrubbed || titleStopDraft === effectiveTitle) return;
-    void bodyHost?.commitStopFieldEdit("title", titleStopDraft);
-  }
-
   // The read-only body overlay (§4.4, buffer-safe): rendered-markdown of the
   // effective body. The TipTap buffer underneath is never touched — unsaved
   // base edits survive a scrub round-trip untouched. Base body reads from the
@@ -372,8 +357,8 @@
   let lineEditReview: AiSuggestionController | null = $state.raw(null);
   let lastMetadataReloadToken = $state(0);
   let lastTitleReloadToken = $state(0);
-  let backlinks: Backlink[] = $state([]);
-  let lastBacklinksSceneId: string | null = $state(null);
+  const backlinksSync = new BacklinksSync();
+  const backlinks = $derived(backlinksSync.items);
   // The prompt-invocation modal ("fill inputs, then fire") is a self-contained
   // subsystem (#631): its draft/assistant/estimate state + the InputsDialog
   // render branch live in PromptInvocationDialog, opened imperatively below.
@@ -401,27 +386,6 @@
   // what closes the wipe bug (a save that omits it strips a forked prompt's
   // output config, see api.ts savePromptEntry).
   let contextStrategyDraft = $state<PromptContextStrategy | null>(null);
-
-  let backlinksReq = 0;
-  // Backlinks = the open node's referrers (#194): membership from the in-memory
-  // reverse index, rows from `resolve_references`. A request token drops out-of-
-  // order resolves when the anchor or the index changes mid-flight. The field
-  // index + schema + loreEntries (#2075, ADR-0089 §6) give each row its own
-  // field/detail instead of collapsing to one any-field row per referrer.
-  async function refreshBacklinks(
-    anchorId: string,
-    referenceIndex: ReadonlyMap<string, ReadonlySet<string>>,
-    fieldIndex: ReadonlyMap<string, import("@/lib/views/referenceIndex").FieldReferrer[]>,
-  ) {
-    lastBacklinksSceneId = anchorId;
-    const req = ++backlinksReq;
-    try {
-      const next = await backlinksFor(anchorId, referenceIndex, { fieldIndex, schema: metadataSchema, loreEntries });
-      if (req === backlinksReq) backlinks = next;
-    } catch {
-      if (req === backlinksReq) backlinks = [];
-    }
-  }
 
   // Compose the save event from the parent's title/status/metadata plus
   // whichever body view owns the current body content. ProseBodyView
@@ -518,16 +482,27 @@
   const bodyFrozen = $derived(
     documentKind === "plot_card" && typeof metadata.scene === "string" && metadata.scene !== "",
   );
-  const entryReview = new EntryProposalController();
-  $effect.pre(() => {
-    entryReview.nodeId = scene?.id ?? null;
-    entryReview.schema = metadataSchema;
-    // `title`/`status` live off `metadata` in their own shell state, but a patch
-    // can flip them (a rename / a status change), so fold them into the metadata
-    // view the controller diffs against — else their flip's "current" side reads
-    // as unset. Adoption routes them back out (onAdoptFields below).
-    entryReview.metadata = { ...metadata, title, status };
-    entryReview.bodyFrozen = bodyFrozen;
+  // The review wiring (controller, feed, adopt routing, freeze) lives in
+  // lib/editor-core/entryReviewWiring; the adopt writes land on THIS shell's state.
+  const entryReview = wireEntryReview({
+    scene: () => scene,
+    metadataSchema: () => metadataSchema,
+    bodyFrozen: () => bodyFrozen,
+    title: () => title,
+    setTitle: (next) => (title = next),
+    status: () => status,
+    setStatus: (next) => (status = next),
+    metadata: () => metadata,
+    setMetadata: (next) => (metadata = next),
+    createLayerId: () => createLayerId,
+    rawBodyMode: () => rawBodyMode,
+    rawBody: () => rawBody,
+    setRawBody: (body) => (rawBody = body),
+    proseView: () => bodyHost,
+    readLiveBody: () => bodyHost?.getBody(),
+    emitChange,
+    flushReviewCommit: () => onFlushReviewCommit,
+    reviewFreezeSignal: () => onReviewFreeze,
   });
   // ADR-0096 §8: the strip's schema (to tell a `list`-typed field apart from
   // an ordinary one when a park captures `listReviews`) and whether this
@@ -542,62 +517,11 @@
   });
   // ADR-0096 §8 "Adopting": write a settled list unit into the pane's
   // metadata exactly as any field edit, then save through the pane's normal
-  // autosave (mirrors `onAdoptFields` just below).
+  // autosave (mirrors the entry review's `onAdoptFields`).
   snapshots.onAdoptListField = (fieldId, list) => {
     metadata = { ...metadata, [fieldId]: list };
     emitChange();
   };
-  entryReview.onAdoptFields = async (fields) => {
-    // `title`/`status` are proposable but stored off `metadata` (saved via the
-    // top-level payload fields, and the backend applies a rename on post), so
-    // route an adopted flip to the matching shell state and keep it out of the
-    // metadata merge — else the merge would set a phantom key the save ignores.
-    // emitChange (below) packages title + status + metadata into the one PUT.
-    const next = { ...fields };
-    if ("title" in next) {
-      title = String(next.title ?? "");
-      delete next.title;
-    }
-    if ("status" in next) {
-      status = String(next.status ?? "");
-      delete next.status;
-    }
-    // ADR-0082 §2 / #1797: an ADOPTED tag-vocabulary flip may still carry
-    // unresolved titles (the validator never mints — see entryProposal's
-    // module note). Resolve/mint them now, only because the author accepted
-    // this field — the same `createLayerId` the metadata panel's own picker
-    // threads for its "Create ‹x›" (P5), so an AI-accepted tag lands at the
-    // identical layer a hand-typed one would. A rejection here is left to
-    // propagate — deliberately not caught: `EntryProposalController.commit()`
-    // (round 2, Y1) is what turns it into `commitError` + an aborted commit
-    // that keeps the review open, so there's nothing to handle at this layer.
-    // Shared with treeActions' create-from-draft accept moment (#1821) —
-    // see `resolveAdoptedTagFields`'s doc comment.
-    await resolveAdoptedTagFields(next, metadataSchema, createLayerId ?? null);
-    metadata = { ...metadata, ...next };
-  };
-  // Body adopt/read route to the ACTIVE body view: the raw editor for a code body
-  // (a prompt template — #711), TipTap otherwise. Both sides are plain strings, so
-  // the run-diff review reads a template exactly as it reads prose. `rawBody` feeds
-  // the save the same way a keystroke does (the rawBodyMode effect → emitChange).
-  entryReview.onAdoptBody = bodyAdopter({
-    rawBodyMode: () => rawBodyMode,
-    setRawBody: (body) => (rawBody = body),
-    proseView: () => bodyHost,
-  });
-  entryReview.onEmitChange = emitChange;
-  entryReview.readCurrentBody = () =>
-    rawBodyMode ? rawBody : (bodyHost?.getBody() ?? scene?.body ?? "");
-  // The one explicit post that ends a commit — the pane controller cancels the
-  // (frozen) timer and PUTs once (body + metadata together).
-  entryReview.onFlush = () => {
-    if (scene?.id) return onFlushReviewCommit?.(scene.id);
-  };
-  // ADR-0090 §4: mark a review item done once its Propose-launched patch adopts.
-  // The write goes through the todo controller like every other todo write;
-  // its `run` surfaces a failure without undoing the adopt.
-  entryReview.onReviewItemAdopted = (reviewItemId) => todoActions.markReviewItemDone(reviewItemId);
-
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review. Participation is DATA-DRIVEN, not
@@ -650,39 +574,6 @@
     }
     return { fields, side: entryReview.fieldSide() };
   });
-  // The hooks the pane's close path uses to commit or discard the review.
-  const reviewCommitter = {
-    hasChanges: () => entryReview.hasPendingChanges,
-    commit: () => entryReview.commit(),
-    discard: () => entryReview.abandon(),
-  };
-  // Freeze while reviewing, thaw (null) the instant the review ends or the pane
-  // unmounts. Fires only on a genuine transition (entry id / `reviewing`) — never on
-  // App recreating the inline `onReviewFreeze` arrow each render, which used to
-  // thrash begin/endReviewLock into an unbounded flush loop (#1965). The wiring lives
-  // in editor-core so the reactivity contract is unit-testable off the mega-component.
-  wireReviewFreeze({
-    entryId: () => scene?.id ?? null,
-    reviewing: () => reviewing,
-    committer: () => reviewCommitter,
-    signal: () => onReviewFreeze,
-  });
-  // Reset accumulated review resolution whenever the proposal identity changes,
-  // so a superseding commit starts clean instead of inheriting prior adoptions.
-  $effect(() => {
-    entryReview.proposal;
-    entryReview.resetResolution();
-  });
-  // A patch touching a tag-vocabulary field (#1797/#1799) may name a tag that
-  // was created elsewhere since this pane last refreshed its roster — pull it
-  // so a title the backend DID resolve to a real id (`tagTitleById` just
-  // stale) renders as that tag's title, not a false "new tag" candidate
-  // (`MetadataPanel`'s flip-chip strip tells the two apart by roster
-  // membership alone). Never mints anything itself — only ACCEPT does that.
-  $effect(() => {
-    if (entryReview.proposesTagField) refreshTagNodes();
-  });
-
   // Editor-pane handle exports — forwarded to EditorBodyHost (#2029) and called
   // by the editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
   // reloadScene re-seeds whichever body the shape mounts — TipTap for prose,
@@ -885,17 +776,12 @@
     if (untrack(() => editorRailLayout.collapsed) !== collapsed) editorRailLayout.setCollapsed(collapsed);
   });
 
-  // ---- Detach Details into a subordinate pane (ADR-0062 reuse, #1258) --------
-  // A detached pane copies the prompt sub-tab pattern: register the same
-  // `metaContent` snippet under an ephemeral, host-scoped id and tile it beside
-  // the editor. It needs no per-document store — every metadata field emits up
-  // into `metadata` here, so the pane is a live view, never a second owner.
-  const detailsPaneId = $derived(hostPaneId ? `details:${hostPaneId}` : null);
-  // Detached-ness is DERIVED from the layout, not held as `$state`: dragging the
-  // pane can restructure the tree and remount this editor, which would reset a
-  // local flag (snapping the rail back + orphaning the pane). The layout survives
-  // that remount, so the husk stays and the new instance re-registers the content.
-  const detailsDetached = $derived(!!detailsPaneId && workspaceLayout.isPlaced(detailsPaneId));
+  // ---- Detach Details into a subordinate pane (lib/editor-core/detailsDetach) ----
+  const details = new DetailsDetach({
+    hostPaneId: () => hostPaneId,
+    canDetach: () => canDetachDetails,
+    railIsPane: () => railIsPane,
+  });
   // Front matter (#2054): the rail's existing collapse gains a meaning on a
   // prose body — its facts render at the head of the document and its trailing
   // material as an appendix after it. Never both: the rail is collapsed to its
@@ -903,26 +789,10 @@
   // its pane. Other shapes keep their collapsed rail with nothing shown.
   // Gated on the schema like the rail itself: no schema, no rail, no blocks.
   let frontMatterMode = $derived(
-    !!scene && !!metadataSchema && !railIsPane && !railOpen && !detailsDetached && bodyShape === "prose",
+    !!scene && !!metadataSchema && !railIsPane && !railOpen && !details.detached && bodyShape === "prose",
   );
   // Offer detach only where there is a host pane AND a rail to tear out.
   let canDetachDetails = $derived(!!hostPaneId && !!scene && !!metadataSchema && !railIsPane);
-
-  function detachDetails(): void {
-    if (!detailsPaneId || !hostPaneId || detailsDetached || !canDetachDetails) return;
-    openSubordinatePane(detailsPaneId, hostPaneId, reattachDetails, { beside: hostPaneId, edge: "right" });
-  }
-  function reattachDetails(): void {
-    if (detailsPaneId) closeSubordinatePane(detailsPaneId); // idempotent; also the pane's own onClose
-  }
-
-  // Fold Details back if the node stops having a rail (a none-shape node renders
-  // metadata as the whole pane, which would double-mount the snippet). Teardown
-  // on editor close is the subordinatePanes cascade's job, not ours — so a
-  // transient remount leaves the pane in place rather than tearing it down.
-  $effect(() => {
-    if (railIsPane && detailsDetached) reattachDetails();
-  });
   let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
   let rollupCostKind = $derived(rollupCostFor(scene, documentKind));
   $effect.pre(() => {
@@ -974,31 +844,8 @@
   let documentNameLabel = $derived(
     metadataSchema && entryType ? effectiveFieldLabel(metadataSchema, entryType, "title") : "Title",
   );
-  // structure_node has no schema kind of its own — Acts/Chapters share
-  // kind="manuscript" in the metadata schema. Reuse the manuscript entry types so
-  // the type selector still lists Act/Chapter/Scene/etc.
-  // The entry-type control's options. For most kinds `documentKind` IS the schema
-  // kind, so we list that kind's concrete sub-types (a switchable variant set —
-  // prompt:base ↔ prompt:roleplay). Two kinds don't line up 1:1: `structure_node`
-  // is a scene, and `plot_template`'s schema kind is `plot` — but plot's other
-  // entry_types (plotline, board) are DISTINCT node classes, not interchangeable
-  // variants, so a template offers only its own type (never a reclassify), and
-  // showing it also fixes the otherwise-blank select (S4c finding #2).
-  // The plot document kinds are synthetic shapes whose schema `kind` is "plot", not
-  // their documentKind — so the kind-filter below finds nothing and the type select
-  // falls back to the raw entry_type id ("plot:template_instance") instead of a name.
-  // List just the node's own type: the plot classes (card / template / plotline / deck) are
-  // distinct, so a cross-class reclassify is never offered (the #720 call, now
-  // generalized past plot_template). A plotline is edited on its board node by default,
-  // but can also be opened in a full pane (ADR-0053 §3, the escape hatch) — same rule.
-  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline", "plot_deck"]);
-  let documentEntryTypes = $derived(
-    OWN_TYPE_ONLY.has(documentKind)
-      ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)
-      : Object.entries(metadataSchema?.entry_types ?? {}).filter(
-          ([, definition]) => definition.kind === (documentKind === "structure_node" ? "manuscript" : documentKind) && !definition.abstract,
-        ),
-  );
+  // The entry-type control's options (see entryTypesForDocument).
+  let documentEntryTypes = $derived(entryTypesForDocument(metadataSchema, documentKind, entryType));
   let activeEntryType = $derived(metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()]);
   // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
   // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =
@@ -1035,48 +882,14 @@
   // override-reset affordances, which stay whole-card-locked at a stop too
   // (added back explicitly at each of those call sites as `|| scrubbed`).
   let editorReadOnly = $derived(snapshotParked || reviewing || (inheritedReadOnly && documentKind !== "prompt"));
-  // Title/body have no rail row, so their override tell renders beside the
-  // thing it marks instead (#2184 slice 3, ADR-0039 Amendment 4 §9): after the
-  // title input, and on the Body tab label. Lore only (§5) — a prompt's title
-  // and body change only by cloning, never by override.
-  let overriddenContentForPanel = $derived(
-    documentKind === "lore" && scene && "overridden_content" in scene
-      ? ((scene as unknown as { overridden_content?: string[] }).overridden_content ?? [])
-      : [],
-  );
-  let inheritedTitleForPanel = $derived(
-    documentKind === "lore" && scene && "inherited_title" in scene
-      ? ((scene as unknown as { inherited_title?: string | null }).inherited_title ?? null)
-      : null,
-  );
-  let contentOverrideSourceLabel = $derived(scene?.source_layer_label ?? "inherited");
-  // Same gate the rail's reset marks use (`MetadataPanel`'s `canResetOverride`):
-  // a reset handler is wired AND the pane is not read-only.
-  // ADR-0095 §8: hidden at a stop too (`!scrubbed`) — a title/body override
-  // reset edits base/override state, never a mutation set (title's own stop
-  // edit is the input in `chatTitleField` below, a different gesture).
+  // Title/body override marks (lib/editor-core/contentOverrideMarks). Gate: a
+  // reset handler is wired AND the pane is not read-only; ADR-0095 §8: hidden at
+  // a stop too (`!scrubbed`) — title's own stop edit is the input in
+  // `chatTitleField`, a different gesture.
   let canResetContentOverride = $derived(onResetField != null && !editorReadOnly && !scrubbed);
-  let titleOverrideMark = $derived(
-    canResetContentOverride && overriddenContentForPanel.includes("title")
-      ? {
-          chipText: `Reset to ${contentOverrideSourceLabel}`,
-          tooltip:
-            inheritedTitleForPanel != null
-              ? `Overridden here — ${contentOverrideSourceLabel}'s title is "${inheritedTitleForPanel}".`
-              : `Overridden here — ${contentOverrideSourceLabel}'s title.`,
-          ariaLabel: `Reset the title to ${contentOverrideSourceLabel}'s`,
-        }
-      : null,
-  );
-  let bodyOverrideMark = $derived(
-    canResetContentOverride && overriddenContentForPanel.includes("body")
-      ? {
-          chipText: `Reset to ${contentOverrideSourceLabel}…`,
-          tooltip: `Overridden here — the body you see is this layer's, not ${contentOverrideSourceLabel}'s.`,
-          ariaLabel: `Reset the body to ${contentOverrideSourceLabel}'s`,
-        }
-      : null,
-  );
+  const overrideMarks = $derived(contentOverrideMarks(scene, documentKind, canResetContentOverride));
+  let titleOverrideMark = $derived(overrideMarks.title);
+  let bodyOverrideMark = $derived(overrideMarks.body);
   // The title mark resets at once, like a rail field (§9's mockup notes). The
   // body mark asks first — resetting throws away prose this layer wrote, and
   // removing the override isn't snapshotted.
@@ -1084,7 +897,7 @@
     onResetField?.("title");
   }
   function resetBodyOverride() {
-    const source = contentOverrideSourceLabel;
+    const source = overrideMarks.sourceLabel;
     confirmService.request({
       title: `Reset the body to ${source}'s?`,
       message: `The body this layer wrote for “${title}” is removed, and it shows ${source}'s body again. The title and fields are not touched.`,
@@ -1115,19 +928,13 @@
       title = titleReload.title;
     }
   });
-  // Re-source backlinks when the open node changes or either reverse index
-  // rebuilds (a referrer was saved/deleted) — reading the index also closes the
-  // open-during-initial-load race the old one-shot fetch had.
+  // Re-source backlinks on a node change or a reverse-index rebuild (backlinksSync).
   $effect.pre(() => {
-    const anchorId = sceneId;
-    const referenceIndex = $referenceIndexStore;
-    const fieldIndex = $referrerFieldIndexStore;
-    if (anchorId) {
-      void refreshBacklinks(anchorId, referenceIndex, fieldIndex);
-    } else if (lastBacklinksSceneId !== null) {
-      lastBacklinksSceneId = null;
-      backlinks = [];
-    }
+    backlinksSync.sync(sceneId, $referenceIndexStore, () => ({
+      fieldIndex: $referrerFieldIndexStore,
+      schema: metadataSchema,
+      loreEntries,
+    }));
   });
 </script>
 
@@ -1190,14 +997,14 @@
 <!-- Register the detached pane's content while Details is torn out (#1258). A
      fresh registrar mounts on detach and tears down on reattach — same shape as
      CodeBodyView's sub-tab registration. -->
-{#if detailsDetached && detailsPaneId}
+{#if details.detached && details.paneId}
   <RegionRegistrar
     regions={{
-      [detailsPaneId]: {
+      [details.paneId]: {
         title: "Details",
         body: detailsPaneBody,
         closable: true,
-        onClose: reattachDetails,
+        onClose: details.reattach,
       },
     }}
   />
@@ -1209,64 +1016,22 @@
      setup chips, no eyebrow). Each input carries its own `aria-label`, so it
      needs no label wrapper. State/persistence stay entirely in NodeEditor. -->
 {#snippet chatTitleField()}
-  {#if scrubbed}
-    {#if stopEditable}
-      <!-- ADR-0095 §8 decision 7: a title edit AT A STOP saves this stop's
-           mutation set (a `replace` row, removed when it lands back on the
-           base title) — never `emitChange`/`handleTitleInput`, which write
-           the base. Commits on blur/Enter, Esc reverts, the same gesture the
-           rail's inline scalar inputs use (RailScalarCell's `.fr-edit`
-           Escape/focusout handling) — this is a bespoke input (the shell's
-           own title header/chat-row field, not a rail row), so the gesture is
-           reimplemented here rather than shared. -->
-      <input
-        class="title-input"
-        class:mutated={titleMutated}
-        aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (editing this stop)`}
-        bind:value={titleStopDraft}
-        onkeydown={(e) => {
-          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-          else if (e.key === "Escape") {
-            titleStopDraft = effectiveTitle;
-            (e.currentTarget as HTMLInputElement).blur();
-          }
-        }}
-        onblur={commitTitleStopEdit}
-      />
-    {:else}
-      <!-- Effective title as of the scrub point — read-only (parked/
-           reviewing/inherited wins over the scrub axis). -->
-      <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
-    {/if}
-  {:else if snapshotParked}
-    <!-- Parked: the title flips with the body and the rail, and is
-         read-only like them. Leaving it editable let an author type
-         into a document they were not looking at. -->
-    <input
-      class="title-input"
-      class:flipped={snapshots.titleDiffers}
-      class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
-      readonly
-      aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
-      value={snapshots.titleForView}
-    />
-  {:else if reviewing}
-    <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
-         title, so the author can't edit an entry mid-review — the review
-         is a transaction that writes once, not a co-editing surface. -->
-    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
-  {:else if inheritedReadOnly}
-    <!-- Inherited prompt (ADR-0049 Library or an ancestor project, #676):
-         read-only in place. The title cannot be renamed here; clone it
-         to edit. -->
-    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
-  {:else if bodyFrozen}
-    <!-- A written card shows its scene's title (ADR-0097 §3); rename it on the board
-         or in the scene. -->
-    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (written as a scene, read-only)`} value={title} />
-  {:else}
-    <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
-  {/if}
+  <EditorTitleField
+    bind:title
+    {scrubbed}
+    {stopEditable}
+    {titleMutated}
+    {effectiveTitle}
+    {snapshotParked}
+    {snapshots}
+    {reviewing}
+    {inheritedReadOnly}
+    {bodyFrozen}
+    {documentLabel}
+    {documentNameLabel}
+    onInput={handleTitleInput}
+    onCommitStop={(draft) => { void bodyHost?.commitStopFieldEdit("title", draft); }}
+  />
 {/snippet}
 
 <div
@@ -1295,7 +1060,7 @@
     model={{
       scene, documentKind, bodyShape, rawBodyLanguage, loadedSceneId, entryType, title, metadata,
       metadataSchema, editorReadOnly, bodyFrozen, inheritedReadOnly, reviewing, scrubbed, snapshotParked,
-      overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, resolveListMemberTitle, detailsDetached, chatTitleField, metaContent,
+      overlayBodyHtml, snapshotRibbon, scrub, snapshots, entryReview, resolveListMemberTitle, detailsDetached: details.detached, chatTitleField, metaContent,
       stopUnit, backlinks,
       frontMatter: frontMatterMode ? frontMatter : undefined, appendix: frontMatterMode ? appendix : undefined,
       activeBodyTab, createLayerId,
@@ -1320,34 +1085,23 @@
       label={`${documentLabel} details`}
       content={metaContent}
       undo={railUndo}
-      detached={detailsDetached}
-      onDetach={canDetachDetails ? detachDetails : undefined}
-      onReattach={reattachDetails}
+      detached={details.detached}
+      onDetach={canDetachDetails ? details.detach : undefined}
+      onReattach={details.reattach}
     />
   {/if}
 
-  <!-- Foot-docked: the lore card's two time-axes share ONE dock (ADR-0088 S2).
-       For a scene, or a lore entry with no mutations, FootDock degrades to
-       exactly ADR-0044's snapshot strip with no mode control. Gated on a prose
-       body: the read-only compare overlay is prose. -->
-  {#if (documentKind === "manuscript" || documentKind === "lore") && scene && bodyShape === "prose"}
-    <FootDock {snapshots} {scrub} {documentKind} writesLabel={snapshotWritesLabel} {stopEditable} />
-  {/if}
-
-  <!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text. -->
-  {#if lineEditReview?.lineEdits}
-    <LineEditReviewBar lineEdits={lineEditReview.lineEdits} meta={lineEditReview.meta} generating={lineEditReview.generating}
-      onAcceptAll={() => lineEditReview?.acceptAllLineEdits()} onRejectAll={() => lineEditReview?.rejectAllLineEdits()}
-      onRetry={() => lineEditReview?.retry()} />
-  {/if}
-
-  <footer class="status">
-    {#if scene}
-      {dirty ? "Unsaved changes" : `Loaded ${scene.title}`}
-    {:else}
-      No scene open
-    {/if}
-  </footer>
+  <EditorFooter
+    {snapshots}
+    {scrub}
+    {documentKind}
+    dockVisible={(documentKind === "manuscript" || documentKind === "lore") && !!scene && bodyShape === "prose"}
+    {snapshotWritesLabel}
+    {stopEditable}
+    {lineEditReview}
+    sceneTitle={scene ? scene.title : null}
+    {dirty}
+  />
 </div>
 
 <!-- The prompt-invocation modal (#631). Rendered unconditionally: it shows
@@ -1439,50 +1193,5 @@
     height: 100%;
     overflow: auto;
     overscroll-behavior: contain;
-  }
-
-  .title-input[readonly] {
-    background: var(--inset);
-    cursor: default;
-  }
-  /* The same two colours as the body and the rail — one vocabulary, and never a
-     glyph (§J). Two rules rather than one with a variable, so a state class
-     cannot silently outrank an identity class for a single property. */
-  .title-input.flipped {
-    color: var(--diff-now);
-    font-weight: 600;
-    box-shadow: inset 0 -2px 0 var(--diff-now-edge);
-  }
-  /* Dotted, matching the body and the rail — the greyscale channel is shape. */
-  .title-input.flipped.flip-was {
-    color: var(--diff-was);
-    box-shadow: none;
-    background-image: repeating-linear-gradient(
-      to right,
-      var(--diff-was-edge) 0 3px,
-      transparent 3px 6px
-    );
-    background-repeat: no-repeat;
-    background-position: 0 100%;
-    background-size: 100% 2px;
-  }
-  .title-input.mutated {
-    color: var(--mutation-color);
-    font-weight: 600;
-  }
-
-  .title-input {
-    border: 0;
-    border-bottom: 1px solid var(--divider);
-    border-radius: 0;
-    font-family: var(--serif);
-    font-size: var(--fs-2xl);
-    font-weight: 700;
-    padding-left: 0;
-  }
-
-  .title-input:focus {
-    border-bottom-color: var(--accent);
-    outline: none;
   }
 </style>

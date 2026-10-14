@@ -232,7 +232,7 @@
   <InputsDialog
     entry={entry}
     description={promptEntryDescription(descCtx, entry)}
-    declaredInputs={effectivePromptInputs(entry)}
+    declaredInputs={effectivePromptInputs(entry).filter((input) => !input.hidden)}
     drafts={drafts}
     assistantId={assistantId}
     defaultAssistantLabel={assistantDisplayName(defaultAssistantId) || "use machine default"}

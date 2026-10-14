@@ -897,21 +897,13 @@
 
     // Ctrl+J runs the default cursor prompt offered on this document; the rest
     // of the keys (slash menu, Tab, Escape) belong to every prose body (#1893).
-    if (
-      event.key.toLowerCase() === "j" &&
-      (event.ctrlKey || event.metaKey) &&
-      !event.altKey &&
-      !event.shiftKey
-    ) {
+    // Only claimed when a prompt is offered here, so the key stays the browser's
+    // on a body with none (e.g. a research note).
+    if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey) {
+      const entry = defaultPromptForSurface(promptCtx, event.shiftKey ? "selection" : "cursor", scene?.entry_type);
+      if (!entry) return false;
       event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "cursor", scene?.entry_type);
-      if (entry) void aiSuggestion.runPromptEntry(entry);
-      return true;
-    }
-    if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
-      event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "selection", scene?.entry_type);
-      if (entry) void aiSuggestion.runPromptEntry(entry);
+      void aiSuggestion.runPromptEntry(entry);
       return true;
     }
 

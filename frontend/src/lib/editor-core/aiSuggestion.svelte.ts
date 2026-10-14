@@ -39,9 +39,13 @@ import { editorCallback } from "@/lib/editor-core/editorCallback";
 import { placeLineEdits } from "@/lib/editor-core/lineEdits";
 import {
   acceptAllLineEdits,
+  acceptCurrentLineEdit,
+  currentLineEdit,
   installLineEdits,
   lineEditState,
   rejectAllLineEdits,
+  rejectCurrentLineEdit,
+  stepLineEdit,
 } from "@/lib/editor-core/lineEditSuggestions";
 import {
   hasMutationMarker,
@@ -90,9 +94,10 @@ export class AiSuggestionController {
   suggestionId: string | null = $state(null);
   meta: AiSuggestionMeta | null = $state(null);
   toolbarPosition: AiToolbarPosition = $state({ x: 0, y: 0, visible: false });
-  // Pending line edits (#2460): how many are still to review. Null when no edit
-  // list is open.
-  lineEdits: { remaining: number } | null = $state(null);
+  // Pending line edits (#2460), for the review bar: how many are still to
+  // review, the current one's 1-based place among them and its reason. Null
+  // when no edit list is open.
+  lineEdits: { remaining: number; index: number; currentReason: string } | null = $state(null);
 
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
@@ -163,8 +168,6 @@ export class AiSuggestionController {
     if (this.suggestionId) {
       const range = this.#findSuggestionRange(this.suggestionId);
       if (range) pos = range.from;
-    } else if (this.lineEdits) {
-      pos = lineEditState(editor.state).edits[0]?.from ?? null;
     } else if (this.#anchorPos !== null) {
       const docSize = editor.state.doc.content.size;
       pos = Math.max(0, Math.min(this.#anchorPos, docSize));
@@ -531,8 +534,8 @@ export class AiSuggestionController {
         cost_usd: res.cost_usd ?? null,
       };
       this.#lineEditRange = { from, to };
-      this.lineEdits = { remaining: placed.length };
-      installLineEdits(editor.view, placed);
+      installLineEdits(editor.view, placed, to);
+      this.#syncLineEdits(editor);
       this.#watchLineEdits(editor);
       if (dropped > 0) {
         this.#deps.onNotice?.(
@@ -561,9 +564,7 @@ export class AiSuggestionController {
       }
       const { edits, accepted } = lineEditState(editor.state);
       if (edits.length > 0) {
-        const changed = this.lineEdits?.remaining !== edits.length;
-        if (changed) this.lineEdits = { remaining: edits.length };
-        if (changed || transaction.docChanged || transaction.selectionSet) this.updateToolbarPosition();
+        this.#syncLineEdits(editor);
         return;
       }
       // Resolved or dropped to nothing. Telemetry once, and only if the writer
@@ -577,6 +578,24 @@ export class AiSuggestionController {
     });
     editor.on("transaction", onTransaction);
     this.#stopWatchingLineEdits = () => editor.off("transaction", onTransaction);
+  }
+
+  // Publish the plugin's view of the open list (count, current place, reason),
+  // writing only on change so unrelated transactions don't churn the bar.
+  #syncLineEdits(editor: Editor): void {
+    const { edits } = lineEditState(editor.state);
+    const current = currentLineEdit(editor.state);
+    if (!current) return;
+    const next = {
+      remaining: edits.length,
+      index: edits.indexOf(current) + 1,
+      currentReason: current.reason,
+    };
+    const old = this.lineEdits;
+    if (old && old.remaining === next.remaining && old.index === next.index && old.currentReason === next.currentReason) {
+      return;
+    }
+    this.lineEdits = next;
   }
 
   #closeLineEdits(): void {
@@ -594,6 +613,26 @@ export class AiSuggestionController {
   rejectAllLineEdits(): void {
     const editor = this.#deps.getEditor();
     if (editor && this.lineEdits) rejectAllLineEdits(editor.view);
+  }
+
+  nextLineEdit(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) stepLineEdit(editor.view, 1);
+  }
+
+  prevLineEdit(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) stepLineEdit(editor.view, -1);
+  }
+
+  acceptCurrentLineEdit(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) acceptCurrentLineEdit(editor.view);
+  }
+
+  rejectCurrentLineEdit(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) rejectCurrentLineEdit(editor.view);
   }
 
   // Retry for an open edit list: drop what's left and ask again on the same text.

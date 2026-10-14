@@ -17,6 +17,12 @@
   cursor: text;
 }
 
+/* The Line edit review bar (#2460) is sticky at the frame's bottom; keep
+   scroll-into-view targets clear of it. */
+.editor-wrap:has(.line-edit-review-bar) {
+  scroll-padding-bottom: 48px;
+}
+
 /* Body sections (#2009, #2030): the long_text sections render INSIDE the
    .editor-wrap scroll frame, after the prose, as one column. With sections
    present the prose must not force-fill the frame (its `flex: 1 0 auto`

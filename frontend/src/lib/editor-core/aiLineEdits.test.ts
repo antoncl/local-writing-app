@@ -81,7 +81,7 @@ describe("line edits (#2460)", () => {
     });
     expect(editor.state.doc.textContent).toBe(TEXT);
     expect(lineEditState(editor.state).edits).toHaveLength(2);
-    expect(ctrl.lineEdits).toEqual({ remaining: 2 });
+    expect(ctrl.lineEdits).toEqual({ remaining: 2, index: 1, currentReason: "livelier" });
     expect(ctrl.generating).toBe(false);
     expect(ctrl.meta?.model).toBe("m");
     expect(costs).toEqual([0.01]);
@@ -102,7 +102,7 @@ describe("line edits (#2460)", () => {
       reply({ edits: [{ find: "cat", replace: "dog", reason: "r" }, { find: "ghost", replace: "x", reason: "r" }] }),
     );
     await a.ctrl.runPromptEntryWithInputs(ENTRY, {});
-    expect(a.ctrl.lineEdits).toEqual({ remaining: 1 });
+    expect(a.ctrl.lineEdits).toMatchObject({ remaining: 1 });
     expect(a.notices).toEqual(["1 edit couldn't be matched to the text and was skipped."]);
 
     const b = setup();
@@ -143,7 +143,7 @@ describe("line edits (#2460)", () => {
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     const [first, second] = lineEditState(editor.state).edits;
     acceptLineEdit(editor.view, first.id);
-    expect(ctrl.lineEdits).toEqual({ remaining: 1 });
+    expect(ctrl.lineEdits).toMatchObject({ remaining: 1, index: 1, currentReason: "fresher" });
     expect(api.aiAppendInvocation).not.toHaveBeenCalled();
     rejectLineEdit(editor.view, second.id);
     expect(ctrl.lineEdits).toBeNull();
@@ -229,6 +229,34 @@ describe("line edits (#2460)", () => {
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[1][0].selection).toBe(TEXT);
     expect(editor.state.doc.textContent).toBe(TEXT);
-    expect(ctrl.lineEdits).toEqual({ remaining: 2 });
+    expect(ctrl.lineEdits).toMatchObject({ remaining: 2 });
+  });
+
+  it("collapses the selection when the edits are installed", async () => {
+    const { editor, ctrl } = setup();
+    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    expect(editor.state.selection.empty).toBe(false);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(editor.state.selection.empty).toBe(true);
+    expect(editor.state.selection.to).toBe(editor.state.doc.content.size - 1);
+  });
+
+  it("next / prev move the current edit and its reason; accept/reject current advance it", async () => {
+    const { editor, ctrl } = setup();
+    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    ctrl.nextLineEdit();
+    expect(ctrl.lineEdits).toEqual({ remaining: 2, index: 2, currentReason: "fresher" });
+    ctrl.nextLineEdit();
+    expect(ctrl.lineEdits).toMatchObject({ index: 1, currentReason: "livelier" });
+    ctrl.prevLineEdit();
+    expect(ctrl.lineEdits).toMatchObject({ index: 2 });
+    ctrl.rejectCurrentLineEdit();
+    expect(editor.state.doc.textContent).toBe(TEXT);
+    expect(ctrl.lineEdits).toEqual({ remaining: 1, index: 1, currentReason: "livelier" });
+    ctrl.acceptCurrentLineEdit();
+    expect(editor.state.doc.textContent).toBe("The dog sat on the mat.");
+    expect(ctrl.lineEdits).toBeNull();
+    expect(api.aiAppendInvocation).toHaveBeenCalledTimes(1);
   });
 });

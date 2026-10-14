@@ -2,13 +2,15 @@
  *
  *  The placed edits live in this plugin's state, NOT in the document: the
  *  original text stays untouched until an edit is accepted. Each edit shows as
- *  its old text struck through, the new text right after it, and a small
- *  accept / reject pair; the reason is the hover title. Positions are mapped
+ *  its old text struck through (muted) and the new text right after it,
+ *  underlined; no buttons in the text. One edit is the CURRENT one (stronger
+ *  tint): clicking an edit selects it, and the review bar / Alt-keys step
+ *  through them and accept or reject the current one. Positions are mapped
  *  through every transaction, and an edit is dropped once the writer edits
  *  inside it (its range no longer holds the text the model quoted). */
 import { Extension } from "@tiptap/core";
 import type { EditorState } from "@tiptap/pm/state";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { PlacedEdit } from "./lineEdits";
 
@@ -18,27 +20,48 @@ export type LineEditState = {
   edits: LineEditSuggestion[];
   /** How many edits were accepted since the list was installed. */
   accepted: number;
+  /** The edit the review bar and keys act on; null only when `edits` is empty. */
+  currentId: number | null;
 };
 
 type LineEditMeta =
   | { type: "install"; edits: PlacedEdit[] }
-  | { type: "resolve"; ids: number[]; accepted: boolean };
+  | { type: "resolve"; ids: number[]; accepted: boolean }
+  | { type: "current"; id: number };
 
 export const LINE_EDIT_OLD_CLASS = "line-edit-old";
 export const LINE_EDIT_NEW_CLASS = "line-edit-new";
+export const LINE_EDIT_CURRENT_CLASS = "line-edit-current";
 
 const pluginKey = new PluginKey<LineEditState>("line-edit-suggestions");
-const EMPTY: LineEditState = { edits: [], accepted: 0 };
+const EMPTY: LineEditState = { edits: [], accepted: 0, currentId: null };
 
 // Text of a range the way `find` was matched: leaves as the placement sentinel.
 const rangeText = (state: EditorState, from: number, to: number) => state.doc.textBetween(from, to, "\n", "￼");
+
+// The edit at or after `pos` by position, wrapping to the first.
+function nextByPosition(edits: LineEditSuggestion[], pos: number): number | null {
+  return (edits.find((e) => e.from >= pos) ?? edits[0])?.id ?? null;
+}
 
 export function lineEditState(state: EditorState): LineEditState {
   return pluginKey.getState(state) ?? EMPTY;
 }
 
-export function installLineEdits(view: EditorView, edits: PlacedEdit[]): void {
-  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "install", edits } satisfies LineEditMeta));
+/** The current edit, or undefined when none is pending. */
+export function currentLineEdit(state: EditorState): LineEditSuggestion | undefined {
+  const { edits, currentId } = lineEditState(state);
+  return edits.find((e) => e.id === currentId);
+}
+
+/** `collapseTo`: put the caret there (the end of the revised range), so the
+ *  selection highlight doesn't sit over the passage under review. No scroll. */
+export function installLineEdits(view: EditorView, edits: PlacedEdit[], collapseTo?: number): void {
+  const tr = view.state.tr.setMeta(pluginKey, { type: "install", edits } satisfies LineEditMeta);
+  if (collapseTo !== undefined) {
+    tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(collapseTo, tr.doc.content.size))));
+  }
+  view.dispatch(tr);
 }
 
 function resolve(view: EditorView, ids: number[], accepted: boolean): void {
@@ -63,6 +86,48 @@ function resolve(view: EditorView, ids: number[], accepted: boolean): void {
   view.dispatch(tr);
 }
 
+/** Bring the current edit into view without moving the caret or taking focus. */
+function revealCurrent(view: EditorView): void {
+  const edit = currentLineEdit(view.state);
+  if (!edit) return;
+  try {
+    const { node } = view.domAtPos(edit.from);
+    const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+    el?.scrollIntoView?.({ block: "nearest" });
+  } catch {
+    /* a position outside the rendered doc: nothing to reveal */
+  }
+}
+
+export function setCurrentLineEdit(view: EditorView, id: number): void {
+  const { edits, currentId } = lineEditState(view.state);
+  if (currentId === id || !edits.some((e) => e.id === id)) return;
+  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "current", id } satisfies LineEditMeta));
+}
+
+/** Make the next (+1) or previous (-1) edit by position current, wrapping, and scroll to it. */
+export function stepLineEdit(view: EditorView, dir: 1 | -1): void {
+  const { edits, currentId } = lineEditState(view.state);
+  if (edits.length === 0) return;
+  const at = edits.findIndex((e) => e.id === currentId);
+  setCurrentLineEdit(view, edits[(at + dir + edits.length) % edits.length].id);
+  revealCurrent(view);
+}
+
+export function acceptCurrentLineEdit(view: EditorView): void {
+  const { currentId } = lineEditState(view.state);
+  if (currentId === null) return;
+  resolve(view, [currentId], true);
+  revealCurrent(view);
+}
+
+export function rejectCurrentLineEdit(view: EditorView): void {
+  const { currentId } = lineEditState(view.state);
+  if (currentId === null) return;
+  resolve(view, [currentId], false);
+  revealCurrent(view);
+}
+
 export const acceptLineEdit = (view: EditorView, id: number) => resolve(view, [id], true);
 export const rejectLineEdit = (view: EditorView, id: number) => resolve(view, [id], false);
 export const acceptAllLineEdits = (view: EditorView) =>
@@ -70,38 +135,18 @@ export const acceptAllLineEdits = (view: EditorView) =>
 export const rejectAllLineEdits = (view: EditorView) =>
   resolve(view, lineEditState(view.state).edits.map((e) => e.id), false);
 
-function button(label: string, glyph: string, testid: string, onPress: () => void): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "line-edit-btn";
-  btn.textContent = glyph;
-  btn.setAttribute("aria-label", label);
-  btn.title = label;
-  btn.dataset.testid = testid;
-  // mousedown + preventDefault: the click never blurs the editor.
-  btn.addEventListener("mousedown", (e) => {
+function widgetFor(view: EditorView, edit: LineEditSuggestion, current: boolean): HTMLElement {
+  const added = document.createElement("span");
+  added.className = current ? `${LINE_EDIT_NEW_CLASS} ${LINE_EDIT_CURRENT_CLASS}` : LINE_EDIT_NEW_CLASS;
+  added.contentEditable = "false";
+  added.title = edit.reason;
+  added.textContent = edit.replace;
+  // mousedown + preventDefault: selecting never blurs the editor.
+  added.addEventListener("mousedown", (e) => {
     e.preventDefault();
-    onPress();
+    setCurrentLineEdit(view, edit.id);
   });
-  return btn;
-}
-
-function widgetFor(view: EditorView, edit: LineEditSuggestion): HTMLElement {
-  const wrap = document.createElement("span");
-  wrap.className = "line-edit-widget";
-  wrap.contentEditable = "false";
-  if (edit.replace) {
-    const added = document.createElement("span");
-    added.className = LINE_EDIT_NEW_CLASS;
-    added.title = edit.reason;
-    added.textContent = edit.replace;
-    wrap.append(added);
-  }
-  wrap.append(
-    button("Accept edit", "✓", "line-edit-accept", () => acceptLineEdit(view, edit.id)),
-    button("Reject edit", "✕", "line-edit-reject", () => rejectLineEdit(view, edit.id)),
-  );
-  return wrap;
+  return added;
 }
 
 export const LineEditSuggestions = Extension.create({
@@ -117,7 +162,8 @@ export const LineEditSuggestions = Extension.create({
           apply: (tr, old, _oldState, newState) => {
             const meta = tr.getMeta(pluginKey) as LineEditMeta | undefined;
             if (meta?.type === "install") {
-              return { edits: meta.edits.map((e) => ({ ...e, id: nextId++ })), accepted: 0 };
+              const edits = meta.edits.map((e) => ({ ...e, id: nextId++ }));
+              return { edits, accepted: 0, currentId: nextByPosition(edits, 0) };
             }
             if (old.edits.length === 0) return old;
             let edits = old.edits;
@@ -131,26 +177,63 @@ export const LineEditSuggestions = Extension.create({
               });
             }
             let accepted = old.accepted;
+            let currentId = meta?.type === "current" ? meta.id : old.currentId;
             if (meta?.type === "resolve") {
               edits = edits.filter((e) => !meta.ids.includes(e.id));
               if (meta.accepted) accepted += meta.ids.length;
             }
-            return { edits, accepted };
+            if (!edits.some((e) => e.id === currentId)) {
+              // The current edit went (resolved, or dropped by typing): the next
+              // one by position from where it was becomes current.
+              const was = old.edits.find((e) => e.id === old.currentId);
+              currentId = nextByPosition(edits, was ? tr.mapping.map(was.from, 1) : 0);
+            }
+            return { edits, accepted, currentId };
           },
         },
         props: {
+          // A click on the struck-through old text selects that edit (the new
+          // text's widget handles its own mousedown).
+          handleClick: (view, _pos, event) => {
+            const target = event.target as HTMLElement | null;
+            const id = Number(target?.closest?.("[data-line-edit-id]")?.getAttribute("data-line-edit-id"));
+            if (id > 0) setCurrentLineEdit(view, id);
+            return false;
+          },
+          // Alt+Down / Alt+Up step, Alt+Enter accepts, Alt+Backspace rejects the
+          // current edit - only while edits are pending, so the keys are free otherwise.
+          handleKeyDown: (view, event) => {
+            if (lineEditState(view.state).edits.length === 0) return false;
+            if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+            const act =
+              event.key === "ArrowDown" ? () => stepLineEdit(view, 1)
+              : event.key === "ArrowUp" ? () => stepLineEdit(view, -1)
+              : event.key === "Enter" ? () => acceptCurrentLineEdit(view)
+              : event.key === "Backspace" ? () => rejectCurrentLineEdit(view)
+              : null;
+            if (!act) return false;
+            event.preventDefault();
+            act();
+            return true;
+          },
           decorations: (state) => {
-            const { edits } = lineEditState(state);
+            const { edits, currentId } = lineEditState(state);
             if (edits.length === 0) return DecorationSet.empty;
             const decos: Decoration[] = [];
             for (const edit of edits) {
+              const current = edit.id === currentId;
               decos.push(
-                Decoration.inline(edit.from, edit.to, { class: LINE_EDIT_OLD_CLASS, title: edit.reason }),
+                Decoration.inline(edit.from, edit.to, {
+                  class: current ? `${LINE_EDIT_OLD_CLASS} ${LINE_EDIT_CURRENT_CLASS}` : LINE_EDIT_OLD_CLASS,
+                  title: edit.reason,
+                  "data-line-edit-id": String(edit.id),
+                }),
               );
+              if (!edit.replace) continue;
               decos.push(
-                Decoration.widget(edit.to, (view) => widgetFor(view, edit), {
+                Decoration.widget(edit.to, (view) => widgetFor(view, edit, current), {
                   side: 1,
-                  key: `line-edit-${edit.id}-${edit.to}-${edit.replace}`,
+                  key: `line-edit-${edit.id}-${edit.to}-${edit.replace}-${current}`,
                   stopEvent: () => true,
                 }),
               );

@@ -91,6 +91,7 @@
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
+  import LineEditReviewBar from "./LineEditReviewBar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
@@ -1265,9 +1266,6 @@
     suggestionId={aiSuggestion.suggestionId}
     error={aiSuggestion.error}
     meta={aiSuggestion.meta}
-    lineEdits={aiSuggestion.lineEdits}
-    onAcceptAll={() => aiSuggestion.acceptAllLineEdits()}
-    onRejectAll={() => aiSuggestion.rejectAllLineEdits()}
     onAccept={() => aiSuggestion.accept()}
     onRetry={() => aiSuggestion.retry()}
     onDiscard={() => aiSuggestion.revert()}
@@ -1328,6 +1326,18 @@
          with its clearance. -->
     <div class="prose-appendix prose-column" data-testid="prose-appendix">{@render appendix()}</div>
   {/if}
+  <LineEditReviewBar
+    lineEdits={aiSuggestion.lineEdits}
+    meta={aiSuggestion.meta}
+    generating={aiSuggestion.generating}
+    onPrev={() => aiSuggestion.prevLineEdit()}
+    onNext={() => aiSuggestion.nextLineEdit()}
+    onAccept={() => aiSuggestion.acceptCurrentLineEdit()}
+    onReject={() => aiSuggestion.rejectCurrentLineEdit()}
+    onAcceptAll={() => aiSuggestion.acceptAllLineEdits()}
+    onRejectAll={() => aiSuggestion.rejectAllLineEdits()}
+    onRetry={() => aiSuggestion.retry()}
+  />
 </div>
 
 <MutationDialogs

@@ -945,38 +945,25 @@ button.row-action-add.active {
   border-radius: 2px;
 }
 
-/* Line edits (#2460): the original stays in the text, struck through, with the
-   proposed wording right after it and a quiet accept / reject pair. The reason
-   is the hover title. */
+/* Line edits (#2460), kept quiet: the original stays in the text, struck
+   through and muted; the proposed wording follows it with an accent underline.
+   The CURRENT edit (the one the review bar acts on) gets a faint tint on both
+   parts. The reason is the hover title; the controls live in the review bar. */
 .editor-body .line-edit-old {
-  background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--text-3);
   text-decoration: line-through;
   border-radius: 2px;
 }
-.editor-body .line-edit-widget {
-  display: inline;
-  margin-left: 2px;
-}
 .editor-body .line-edit-new {
-  background: var(--accent-soft);
-  color: var(--accent-emphasis);
+  margin-left: 2px;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
   border-radius: 2px;
-  padding: 0 1px;
-}
-.editor-body .line-edit-btn {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: var(--fs-xs);
-  line-height: 1;
-  padding: 0 3px;
   cursor: pointer;
-  border-radius: 3px;
 }
-.editor-body .line-edit-btn:hover {
-  background: var(--inset);
-  color: var(--text);
+.editor-body .line-edit-current {
+  background: var(--accent-soft);
 }
 
 /* Spans of body text attributed to a specific character (roleplay

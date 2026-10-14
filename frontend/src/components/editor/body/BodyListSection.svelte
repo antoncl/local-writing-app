@@ -6,6 +6,8 @@
   // stacked MetadataLongTextEditors). Storage is unchanged: every write is a
   // whole-array `on.change`, mirroring ListValueEditor's own add/remove/
   // reorder recipe (index-based, `reorderByPosition`/`dropPositionFromEvent`).
+  // A scalar section (`item_type` sugar, #2483) holds bare values in a flat
+  // array instead of records; the item helpers below absorb that difference.
   import { tick } from "svelte";
   import type { Editor } from "@tiptap/core";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
@@ -70,8 +72,11 @@
   function recordOf(item: MetadataValue): Record<string, MetadataValue> {
     return item != null && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, MetadataValue>) : {};
   }
+  // A scalar section (the `item_type` sugar, #2483) stores bare values in a flat
+  // array: the item IS the member's value. These helpers are the one place the
+  // two storage shapes differ.
   function memberValue(item: MetadataValue, key: string): MetadataValue {
-    return recordOf(item)[key] ?? null;
+    return model.section.scalar ? (item ?? null) : (recordOf(item)[key] ?? null);
   }
   function stringOf(v: MetadataValue): string {
     return typeof v === "string" ? v : "";
@@ -90,11 +95,16 @@
 
   function writeMember(index: number, key: string, value: MetadataValue) {
     const copy = items.slice();
-    copy[index] = { ...recordOf(copy[index]), [key]: value };
+    copy[index] = model.section.scalar ? value : { ...recordOf(copy[index]), [key]: value };
     on.change(copy);
   }
   function clearMember(index: number, key: string) {
     const copy = items.slice();
+    if (model.section.scalar) {
+      copy[index] = "";
+      on.change(copy);
+      return;
+    }
     const record = { ...recordOf(copy[index]) };
     delete record[key];
     copy[index] = record;
@@ -102,7 +112,7 @@
   }
 
   function addItem() {
-    on.change([...items, {}]);
+    on.change([...items, model.section.scalar ? "" : {}]);
   }
   function removeItem(index: number) {
     const copy = items.slice();
@@ -296,7 +306,9 @@
              the caret is inside an emptied editor. -->
         {@const text = stringOf(memberValue(item, member.key))}
         <div class="bs-member" class:is-empty={!text}>
-          <h4 class="bs-h4">{member.name || member.key}</h4>
+          {#if !model.section.scalar}
+            <h4 class="bs-h4">{member.name || member.key}</h4>
+          {/if}
           <div class="bs-body">
             {#if model.readOnly}
               <FieldValue field={memberField(member)} value={memberValue(item, member.key)} ariaLabel={member.name} />

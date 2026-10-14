@@ -38,6 +38,17 @@ const SECTION: BodyListSectionType = {
     { key: "required", name: "Required", type: "boolean" },
     { key: "id", name: "Id", type: "text" },
   ],
+  scalar: false,
+};
+
+// #2483: the item_type sugar — a flat array of bare strings.
+const SCALAR_SECTION: BodyListSectionType = {
+  id: "beats",
+  label: "Beats",
+  titleKey: null,
+  proseMembers: [{ key: "value", name: "Beats", type: "long_text" }],
+  factMembers: [],
+  scalar: true,
 };
 
 const ITEMS: MetadataValue[] = [
@@ -211,5 +222,54 @@ describe("BodyListSection", () => {
     expect(members.map((m) => m.classList.contains("is-empty"))).toEqual([false, true, true, true]);
     // The label stays inside the member block, so the one-line rest state keeps its name.
     expect(members[1].querySelector(".bs-h4")?.textContent).toBe("Guidance");
+  });
+
+  describe("scalar items (flat long_text list, #2483)", () => {
+    const FLAT = ["first beat", "second beat"];
+
+    it("readOnly renders each bare string", () => {
+      const { container } = mount(FLAT, true, undefined, SCALAR_SECTION);
+      const text = container.textContent ?? "";
+      expect(text).toContain("first beat");
+      expect(text).toContain("second beat");
+    });
+
+    it("the editor is seeded with the bare string, not an empty record", () => {
+      const { container } = mount(FLAT, false, undefined, SCALAR_SECTION);
+      const editors = container.querySelectorAll('[data-testid="mock-long-text"]');
+      expect(editors).toHaveLength(2);
+      expect(editors[0].textContent).toContain("first beat");
+    });
+
+    it("+ Add item appends an empty string, not {}", async () => {
+      const { onChange } = mount(FLAT, false, undefined, SCALAR_SECTION);
+      await fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
+      expect(onChange).toHaveBeenLastCalledWith(["first beat", "second beat", ""]);
+    });
+
+    it("does not render the per-member label (it would repeat the section heading)", () => {
+      const { container } = mount(FLAT, false, undefined, SCALAR_SECTION);
+      expect(container.querySelector(".bs-h4")).toBeNull();
+    });
+
+    it("remove item 1 leaves the flat remainder", async () => {
+      const { onChange } = mount(FLAT, false, undefined, SCALAR_SECTION);
+      await fireEvent.click(screen.getAllByRole("button", { name: /^Remove item/ })[0]);
+      expect(onChange).toHaveBeenLastCalledWith(["second beat"]);
+    });
+
+    it("an edit writes the bare string into the flat array, not a {value} record", async () => {
+      const { container, onChange } = mount(FLAT, false, undefined, SCALAR_SECTION);
+      const emits = container.querySelectorAll('[data-testid="mock-long-text-emit"]');
+      await fireEvent.click(emits[1]);
+      expect(onChange).toHaveBeenLastCalledWith(["first beat", "edited"]);
+    });
+  });
+
+  it("an edit in a record list (plot beats) still writes the member into the record", async () => {
+    const { container, onChange } = mount(ITEMS, false);
+    const first = container.querySelectorAll(".bs-item")[0].querySelector('[data-testid="mock-long-text-emit"]')!;
+    await fireEvent.click(first);
+    expect(onChange).toHaveBeenLastCalledWith([{ ...(ITEMS[0] as object), function: "edited" }, ITEMS[1]]);
   });
 });

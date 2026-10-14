@@ -1,7 +1,17 @@
 # ADR-0098: A lore check answers with notes, not edits
 
-**Status:** Proposed (2026-10-14) — #2488
+**Status:** Living draft (2026-10-14) — #2488
 **Verified against `ecea329d` (2026-10-14).**
+
+### How this ADR is kept
+
+This ADR is a living draft while the feature is built. It is approved once the design and the feature set have settled, not before the first slice.
+- Each slice's PR rewrites the sections it changes in place, and re-pins the commit above. There are no amendment sections while the draft is live.
+- On approval the status becomes Accepted, and from then on a change is an amendment, as for any ADR.
+
+**Settled:** a check answers with notes, never edits; nothing is written; a note names its entry by id; notes and edits share one review surface; the check is offered on scenes.
+
+**Open, expected to change:** how the check gathers its lore (decisions 6 and 8). The first version checks only the lore it is given, and the deferred tool lookups may replace or extend that.
 
 ## Context
 
@@ -94,16 +104,23 @@ The measurement says nothing about lore that the passage doesn't name.
    - the entries those link to through their reference fields, again excluding *Manual only* and *Never include*;
    - the scene's own reference-field targets (its point-of-view character, its location).
 
+   The prompt also includes the *Relevant lore* picker, the box Expand and Describe already show. Entries the writer picks there are sent too, so lore the passage doesn't name (a pronoun, a title, an implication) can still be checked when the writer knows it matters.
+
    **Why this fits ADR-0092:**
    - The template places the set with `use()`. Because the prompt names it explicitly, it is declared lore, and automatic lore stays off one-shot runs.
    - The *always* entries come along as declared lore does today. They define the world, and a contradiction with them is exactly what the check is for.
    - Declared lore is never budgeted (ADR-0086 §1). A selection naming many entries sends all of them, bounded by the selection the writer chose.
 
    **What the template does:**
-   - If `lore_named_in(selection)` is empty, it calls `stop("Nothing in the selection names a lore entry.")`, so a check with no lore to check against never reaches the model.
+   - If neither `lore_named_in(selection)` nor the picker gives an entry, it calls `stop("Nothing in the selection names a lore entry, and none was picked.")`, so a check with no lore to check against never reaches the model.
    - The helper's logic lives in `lore_selection.py`. `helpers.py`, which is near its size cap, only registers it, and its documentation lands in `docs/prompts/reference.md` with the vocabulary gate.
 7. **Lore is checked as of the selection.** Entries resolve at the selection's start: earlier scenes' mutations and the ones anchored in this scene before the selection count, while the ones after it don't. Without this, a change of state placed later in the scene reads as a contradiction of the text before it. `lore_as_of` already carries a position in the scene for its `"start"` value, and the check needs that position to be the selection's.
-8. **No tool calling in this ADR.**
+8. **The review says what was checked.** The footer lists the entries the run sent: "Checked against: Kaela, The Meridian, …". The check sees only the lore it was given, so "No contradictions found." means none against *those* entries, and the list shows the writer what was left out.
+9. **No tool calling in the first version.** Tool lookups are deferred, not rejected (see Deferred).
+
+## Deferred
+
+- **Tool lookups for lore the passage doesn't name.** The measurement above covers only named lore, where lore in the prompt found as much at a third to two-thirds of the latency. A passage that says "she", "the captain" or "the ship" names nothing the matcher finds, and only the writer's picks cover it. The next step is a second measurement: the same models, passages whose contradicted lore is reached only by pronoun, title or implication, with tools (the model looks entries up by name) against named lore plus picks. If tools find clearly more, decision 6 gains a tool path for models that report tool support, shown in the assistant lists since #2485. Until then the picker and the "Checked against" list are the answer.
 
 ## Rejected alternatives
 
@@ -116,7 +133,6 @@ The measurement says nothing about lore that the passage doesn't name.
   
   The lore block already gives each entry an id, and checking the id against the set that was sent turns an invented reference into a counted drop.
 - **Automatic lore on this one-shot run.** ADR-0092 rejected it: on Roleplay it would detect and expand on every beat, uncached. A per-prompt exception would reopen that for any author who copies the prompt. A declared helper keeps the rule and shows in the template.
-- **Tool lookups as the mechanism.** At this scale they found the same or two more contradictions, at 1.4–2.9× the latency, and only on models that support tools. They are reconsidered only against a measured case where the lore the passage needs is *not* named in it.
 - **Offering the check on lore entries.** On an entry's own pane the helper names the entry itself, and the model is handed the *saved* entry to check the unsaved draft against. Checking an entry against other entries is a different job (lore against lore), excluded below.
 - **A conversation instead of an inline action.** It would get automatic lore for free, but the result is a transcript rather than notes at the words they're about. The writer is reading prose, and the notes belong on it, the same lesson as the Line edit card: put the decision beside the item.
 - **Lore as of the end of the scene (today's default).** It turns every later mutation in the same scene into a false contradiction.
@@ -126,7 +142,6 @@ The measurement says nothing about lore that the passage doesn't name.
 - No writes to the document or to any lore entry. A note never fixes anything.
 - No persisted notes, no note history, no notes on save.
 - No lore against lore (entry against entry), and no scene against other scenes.
-- No tool calling.
 - No gating by model size.
 
 ## Consequences
@@ -135,5 +150,6 @@ The measurement says nothing about lore that the passage doesn't name.
 - One prompt-vocabulary helper (`lore_named_in`) and a selection position for `lore_as_of`. Both are documented in `docs/prompts/reference.md`, with the vocabulary gate.
 - `PROMPT_OUTPUT_HANDLER_KEYS`, `OUTPUT_HANDLER_KEYS` and `spec/prompt-disposition-labels.json` gain `inline_notes`. The stale comment on `AIGenerateRequest.response_format` (it still says only the non-streaming route serves line edits) is corrected.
 - A check's notes are lost when its document closes. The run is paid for and the result is temporary. Keeping notes (as TODOs, or anywhere) would be a later decision with its own ADR.
-- A selection that names many entries sends all of them and every *always* entry, unbudgeted.
+- A selection that names many entries sends all of them, every picked entry and every *always* entry, unbudgeted.
+- A contradiction with lore the passage doesn't name, and that the writer didn't pick, goes unseen in the first version. The "Checked against" list makes that visible rather than silent.
 - On the measured passage a 3B model found 7 of 20 where 9B models found 18–20. The check is only as good as the assistant, which is the writer's choice.

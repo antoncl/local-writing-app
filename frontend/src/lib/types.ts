@@ -112,6 +112,7 @@ export type {
   AIGenerateRequest,
   AIContextPresetResponse,
   AIGenerateResponse,
+  LineEdit,
   AIInvocation,
   AIInvocationList,
   CreateAIInvocationRequest,

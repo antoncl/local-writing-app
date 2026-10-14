@@ -66,7 +66,11 @@ export function surfaceForStrategy(
   // before the registry so it is honestly "no editor surface", not "misconfigured".
   if (output?.handler === FINALIZE_OUTPUT_HANDLER) return null;
   const handler = outputHandlerFor(output);
-  if (handler) return handler.key === "inline" ? inlineDestinationFor(output) : "conversation";
+  if (handler) {
+    // `inline_edits` always revises the selection (it has no destination to declare).
+    if (handler.key === "inline_edits") return "selection";
+    return handler.key === "inline" ? inlineDestinationFor(output) : "conversation";
+  }
   return output?.handler ? null : "conversation";
 }
 

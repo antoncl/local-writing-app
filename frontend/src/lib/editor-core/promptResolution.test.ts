@@ -754,6 +754,15 @@ describe("unknown handlers fail closed — including Object.prototype keys (#169
   });
 });
 
+describe("inline_edits surface (#2460)", () => {
+  it("is a selection prompt whatever destination it declares", () => {
+    expect(promptSurfaceFor(ctx(), prompt("p", "prompt:general", { output: { handler: "inline_edits" } }))).toBe("selection");
+    expect(
+      promptSurfaceFor(ctx(), prompt("p", "prompt:general", { output: { handler: "inline_edits", destination: "cursor" } })),
+    ).toBe("selection");
+  });
+});
+
 describe("inputValuesFromDrafts (#2129/#2130 — the shared coerce+expand loop)", () => {
   it("coerces a text input, drops an empty one, and expands a context_pick selector", () => {
     const villain: NodePickerRef = { id: "tagged:lore:villain", kind: "tag", title: "villain", selector: { kind: "lore", expr: { tagged: "villain" } } };

@@ -57,6 +57,7 @@ from app.services.ai.chat import (
 )
 from app.services.ai.extraction import run_entry_patch_extraction
 from app.services.ai.history_budget import apply_history_window
+from app.services.ai.line_edits import LINE_EDITS_RESPONSE_SCHEMA, read_line_edits_reply
 from app.services.ai.preview import (
     PreviewError,
     PreviewRequest,
@@ -417,6 +418,7 @@ async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResp
 
 @router.post("/api/ai/generate", response_model=AIGenerateResponse)
 async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AIGenerateResponse:
+    line_edits = request.response_format == "line_edits"  # #2460
     with translate_errors():
         try:
             rendered, session_id = build_preview(
@@ -490,12 +492,18 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
             messages=chat_messages,
             system_blocks=system_blocks,
             session_id=session_id,
+            response_schema=LINE_EDITS_RESPONSE_SCHEMA if line_edits else None,
         ),
         provider_name=resolved.provider,
         settings=settings,
         policy=policy,
     )
     truncated = result.stop_reason in {"max_tokens", "length"}
+    ok, error, edits = result.ok, result.error, None
+    if line_edits and ok:
+        edits, edits_error = read_line_edits_reply(result.content, truncated=truncated)
+        if edits_error is not None:
+            ok, error = False, edits_error
     usage_wire, cost_usd = await translate_usage_to_cost(
         result.usage,
         provider=result.provider,
@@ -514,13 +522,14 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         model=result.model,
         latency_ms=result.latency_ms,
         policy=policy,
-        ok=result.ok,
-        error=result.error,
+        ok=ok,
+        error=error,
         stop_reason=result.stop_reason,
         truncated=truncated,
         session_id=session_id,
         usage=usage_wire,
         cost_usd=cost_usd,
+        edits=edits,
     )
 
 
@@ -646,6 +655,11 @@ async def ai_chat_stream(
 async def ai_generate_stream(
     project: CurrentProject, request: AIGenerateRequest, http_request: Request
 ) -> StreamingResponse:
+    if request.response_format != "text":
+        # #2460: an edit list is read whole, so only the non-streaming route serves it.
+        raise HTTPException(
+            status_code=422, detail="response_format is not supported on the streaming route."
+        )
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():

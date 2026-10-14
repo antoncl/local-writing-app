@@ -945,6 +945,40 @@ button.row-action-add.active {
   border-radius: 2px;
 }
 
+/* Line edits (#2460): the original stays in the text, struck through, with the
+   proposed wording right after it and a quiet accept / reject pair. The reason
+   is the hover title. */
+.editor-body .line-edit-old {
+  background: var(--danger-soft);
+  color: var(--danger);
+  text-decoration: line-through;
+  border-radius: 2px;
+}
+.editor-body .line-edit-widget {
+  display: inline;
+  margin-left: 2px;
+}
+.editor-body .line-edit-new {
+  background: var(--accent-soft);
+  color: var(--accent-emphasis);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.editor-body .line-edit-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  padding: 0 3px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.editor-body .line-edit-btn:hover {
+  background: var(--inset);
+  color: var(--text-1);
+}
+
 /* Spans of body text attributed to a specific character (roleplay
    prompts). The inline style on the span sets `--character-color` from
    the lore id hash; this rule paints the underline and a faint wash so

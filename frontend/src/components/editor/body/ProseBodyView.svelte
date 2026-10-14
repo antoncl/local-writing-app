@@ -40,6 +40,7 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import { LineEditSuggestions } from "@/lib/editor-core/lineEditSuggestions";
   import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
@@ -1067,6 +1068,7 @@
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher, describe: describeEntry }),
         SearchMatchHighlight,
+        LineEditSuggestions,
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",
@@ -1259,6 +1261,9 @@
     suggestionId={aiSuggestion.suggestionId}
     error={aiSuggestion.error}
     meta={aiSuggestion.meta}
+    lineEdits={aiSuggestion.lineEdits}
+    onAcceptAll={() => aiSuggestion.acceptAllLineEdits()}
+    onRejectAll={() => aiSuggestion.rejectAllLineEdits()}
     onAccept={() => aiSuggestion.accept()}
     onRetry={() => aiSuggestion.retry()}
     onDiscard={() => aiSuggestion.revert()}

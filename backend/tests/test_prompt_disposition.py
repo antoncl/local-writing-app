@@ -57,6 +57,11 @@ class DispositionMappingTests(unittest.TestCase):
             "Revise prose",
         )
 
+    def test_inline_edits_always_revises_prose(self) -> None:
+        # #2460: it targets the selection, so no destination is needed.
+        self.assertEqual(prompt_disposition(_strategy("inline_edits"), is_snippet=False), "Revise prose")
+        self.assertEqual(prompt_runnable("Revise prose", []), "")
+
     def test_conversation_splits_on_commit(self) -> None:
         # No strategy at all (every new prompt, ADR-0065 Amendment 2) → plain Chat.
         self.assertEqual(prompt_disposition(None, is_snippet=False), "Chat")
@@ -127,6 +132,7 @@ class StampedReadModelTests(unittest.TestCase):
     EXPECTED_TITLES = {
         "Roleplay": ("Continue", ""),
         "Describe": ("Revise prose", ""),
+        "Line edit": ("Revise prose", ""),
         "Revise entry": ("Revise entities", ""),
         # ADR-0091 §4: the Propose default, same shelf as Revise entry.
         "Follow a change": ("Revise entities", ""),

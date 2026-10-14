@@ -19,44 +19,63 @@
     suggestionId: string | null;
     error: string | null;
     meta: AiSuggestionMeta | null;
+    // Pending line edits (#2460): the toolbar then offers Accept all / Reject all.
+    lineEdits?: { remaining: number } | null;
+    onAcceptAll?: () => void;
+    onRejectAll?: () => void;
     onAccept: () => void;
     onRetry: () => void;
     onDiscard: () => void;
     onDismissError: () => void;
   }
 
-  let { position, generating, suggestionId, error, meta, onAccept, onRetry, onDiscard, onDismissError }: Props = $props();
+  let {
+    position, generating, suggestionId, error, meta, lineEdits = null,
+    onAcceptAll, onRejectAll, onAccept, onRetry, onDiscard, onDismissError,
+  }: Props = $props();
 </script>
 
-{#if position.visible && (generating || suggestionId || error)}
+{#if position.visible && (generating || suggestionId || lineEdits || error)}
   <div
     class="ai-inline-toolbar"
     class:ai-inline-toolbar-loading={generating}
-    class:ai-inline-toolbar-error={error && !suggestionId}
+    class:ai-inline-toolbar-error={error && !suggestionId && !lineEdits}
     class:ai-inline-toolbar-below={position.placement === "below"}
     style={`left: ${position.x}px; top: ${position.y}px;`}
   >
     {#if generating}
       <span class="ai-toolbar-spinner" aria-hidden="true">⟳</span>
       <span class="ai-toolbar-status">Generating…</span>
-    {:else if error && !suggestionId}
+    {:else if error && !suggestionId && !lineEdits}
       <span class="ai-toolbar-status">⚠ {error}</span>
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onDismissError(); }} title="Dismiss">
         Dismiss
       </button>
-    {:else if suggestionId}
-      <button type="button" class="ai-toolbar-btn ai-toolbar-accept" onmousedown={(e) => { e.preventDefault(); onAccept(); }} title="Accept (keep the text)">
-        Accept
-      </button>
+    {:else if suggestionId || lineEdits}
+      {#if lineEdits}
+        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" data-testid="line-edit-accept-all" onmousedown={(e) => { e.preventDefault(); onAcceptAll?.(); }} title="Accept every remaining edit">
+          Accept all ({lineEdits.remaining})
+        </button>
+      {:else}
+        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" onmousedown={(e) => { e.preventDefault(); onAccept(); }} title="Accept (keep the text)">
+          Accept
+        </button>
+      {/if}
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onRetry(); }} title="Retry (regenerate)" disabled={generating}>
         Retry
       </button>
-      <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={(e) => { e.preventDefault(); onDiscard(); }} title="Discard (delete the text)">
-        Discard
-      </button>
+      {#if lineEdits}
+        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" data-testid="line-edit-reject-all" onmousedown={(e) => { e.preventDefault(); onRejectAll?.(); }} title="Reject every remaining edit">
+          Reject all
+        </button>
+      {:else}
+        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={(e) => { e.preventDefault(); onDiscard(); }} title="Discard (delete the text)">
+          Discard
+        </button>
+      {/if}
       {#if meta}
         <span class="ai-toolbar-meta">
-          {meta.wordCount} words, {meta.model}{#if meta.truncated} · truncated{/if}
+          {#if !lineEdits}{meta.wordCount} words, {/if}{meta.model}{#if meta.truncated} · truncated{/if}
           {#if meta.usage}
             {@const u = meta.usage}
             {@const totalIn = u.input_tokens + u.cached_input_tokens + u.cache_write_tokens}

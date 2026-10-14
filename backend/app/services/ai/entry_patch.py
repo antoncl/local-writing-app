@@ -239,6 +239,31 @@ def _parse_patch_object(raw: str) -> dict[str, Any] | None:
     return _patch_shaped_or_empty(embedded[0]) if len(embedded) == 1 else None
 
 
+def load_json_object(raw: str) -> dict[str, Any] | None:
+    """Shape-agnostic sibling of `_parse_patch_object` (#2460): the one JSON
+    object in ``raw``, or ``None`` when there isn't exactly one readable.
+
+    Same tolerance, none of the patch-shape rules: a code fence, a missing
+    closer, unescaped quotes inside a text value, and prose around a single
+    embedded object. Several embedded objects are ambiguous, so garbled."""
+    if not raw or not raw.strip():
+        return None
+    candidate = _strip_code_fence(raw)
+    whole = _as_json_dict(candidate)
+    if whole is None:
+        whole = _as_json_dict(_close_unbalanced(candidate))
+    if whole is None:
+        whole = _as_json_dict(_escape_stray_quotes(candidate))
+    if whole is not None:
+        return whole
+    embedded = [
+        obj
+        for span in _balanced_object_spans(candidate)
+        if (obj := _as_json_dict(span)) is not None
+    ]
+    return embedded[0] if len(embedded) == 1 else None
+
+
 def _wrong_shape_reason(obj: dict[str, Any]) -> str:
     """The "parses, but not an entry" reason for a non-empty object carrying
     neither "body" nor "fields" (#2195/#2200) — names up to 5 of its keys so

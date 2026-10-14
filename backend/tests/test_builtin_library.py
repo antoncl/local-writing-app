@@ -364,6 +364,22 @@ class BuiltinLibraryTests(unittest.TestCase):
             self.assertIn('{% include "Author directions in brackets" %}', entry.body)
             self.assertIn("{{ selection }}", entry.body)
 
+    def test_line_edit_prompt_is_an_inline_edits_prompt(self) -> None:
+        """#2460: Line edit answers with a JSON edit list against the selection."""
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Line edit"))
+        self.assertTrue(entry.is_library)
+        self.assertEqual(entry.context_strategy.output.handler, "inline_edits")
+        self.assertEqual(entry.computed_metadata["disposition"], "Revise prose")
+        env = create_environment_for_project(self.service)
+        out = render_template(entry.body, context={"selection": "The room was cold.", "inputs": {}}, env=env)
+        joined = "\n".join(m.text for m in out.messages)
+        self.assertIn('{"edits": [{"find"', joined)
+        self.assertIn("Square brackets", joined)  # the shared directions snippet
+        self.assertEqual(out.messages[-1].text.strip(), "The room was cold.")
+
     def test_describe_prompt_renders_selection_senses_and_snippet(self) -> None:
         """The Describe prompt exercises the whole lane end to end: the new
         multi_select input renders as a list, the shared snippet resolves, and the

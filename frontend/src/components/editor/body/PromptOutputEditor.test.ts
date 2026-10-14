@@ -81,6 +81,18 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     expect(queryBox(/Restrict to specific fields/)).not.toBeInTheDocument();
   });
 
+  it("switching to Line edits shows its hint, no sub-form, and clears inline config", async () => {
+    render(PromptOutputEditor, { props: { contextStrategy: { output: { handler: "inline", destination: "selection" } } } });
+    await fireEvent.click(btn("Line edits"));
+    expect(btn("Line edits")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Suggests separate edits within the selection, each with a reason/)).toBeTruthy();
+    expect(queryBtn("Replace selection")).toBeNull();
+    expect(queryBox("Commit button (extract to a node)")).toBeNull();
+    // Back to inline: the stale destination was dropped, so it starts at the default.
+    await fireEvent.click(btn("Inline suggestion"));
+    expect(btn("Continue at cursor")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("headless is orthogonal to the mode — toggling it alone doesn't change the mode", async () => {
     const onChange = vi.fn();
     render(PromptOutputEditor, { props: { contextStrategy: null, onChange } });

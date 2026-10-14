@@ -4,6 +4,7 @@ import type { AIEntryPatch } from "@/lib/types";
 
 import {
   inlineHandler,
+  inlineEditsHandler,
   extractHandler,
   inlineDestinationFor,
   outputHandlerFor,
@@ -91,6 +92,19 @@ describe("the handlers' declarative bundles", () => {
       review: "inline_mark",
       activation: "inline",
     });
+  });
+
+  it("inline_edits is the scan / edit_list / inline bundle", () => {
+    expect(inlineEditsHandler).toMatchObject({
+      key: "inline_edits",
+      source: "scan",
+      review: "edit_list",
+      activation: "inline",
+    });
+  });
+
+  it("routes the inline_edits handler by its key", () => {
+    expect(outputHandlerFor({ handler: "inline_edits" })?.key).toBe("inline_edits");
   });
 
   it("extract_to_node is the transcript / patch_diff / conversation bundle", () => {

@@ -12,6 +12,7 @@
 // outbound callbacks; everything pure comes in as a plain module import.
 
 import type { Editor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 import { api } from "@/lib/api";
 import { countWords } from "@/lib/utils/wordCount";
 import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
@@ -26,11 +27,21 @@ import {
 } from "@/lib/editor-core/promptResolution";
 import {
   inlineHandler,
+  inlineEditsHandler,
+  outputHandlerFor,
   type InlineDestination,
+  type InlineEditsHost,
   type InlineGathered,
   type InlineHost,
   type OutputRun,
 } from "@/lib/editor-core/outputHandlers";
+import { placeLineEdits } from "@/lib/editor-core/lineEdits";
+import {
+  acceptAllLineEdits,
+  installLineEdits,
+  lineEditState,
+  rejectAllLineEdits,
+} from "@/lib/editor-core/lineEditSuggestions";
 import {
   hasMutationMarker,
   markerNotice,
@@ -77,6 +88,9 @@ export class AiSuggestionController {
   suggestionId: string | null = $state(null);
   meta: AiSuggestionMeta | null = $state(null);
   toolbarPosition: AiToolbarPosition = $state({ x: 0, y: 0, visible: false });
+  // Pending line edits (#2460): how many are still to review. Null when no edit
+  // list is open.
+  lineEdits: { remaining: number } | null = $state(null);
 
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
@@ -93,6 +107,10 @@ export class AiSuggestionController {
   // arrive. A setTimeout, not rAF - a hidden pane gets no frames. Cleared by
   // reset() / revert() / the stream's `finally`, so it can't fire on a dead suggestion.
   #renderTimer: ReturnType<typeof setTimeout> | null = null;
+  // The open line-edit list (#2460): the revised range (kept current through the
+  // writer's edits, for Retry) and the unsubscribe of the listener that tracks it.
+  #lineEditRange: { from: number; to: number } | null = null;
+  #stopWatchingLineEdits: (() => void) | null = null;
 
   #deps: AiSuggestionDeps;
 
@@ -108,6 +126,7 @@ export class AiSuggestionController {
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
     this.#pendingInternal = null;
+    this.#closeLineEdits();
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -129,6 +148,8 @@ export class AiSuggestionController {
     if (this.suggestionId) {
       const range = this.#findSuggestionRange(this.suggestionId);
       if (range) pos = range.from;
+    } else if (this.lineEdits) {
+      pos = lineEditState(editor.state).edits[0]?.from ?? null;
     } else if (this.#anchorPos !== null) {
       const docSize = editor.state.doc.content.size;
       pos = Math.max(0, Math.min(this.#anchorPos, docSize));
@@ -334,6 +355,7 @@ export class AiSuggestionController {
   }
 
   async retry(): Promise<void> {
+    if (this.lineEdits) return this.#retryLineEdits();
     const editor = this.#deps.getEditor();
     if (!this.suggestionId || this.generating || !editor) return;
     const wasRevision = this.#suggestionOriginal !== null;
@@ -363,7 +385,7 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
     if (!editor || !scene || this.generating || this.#deps.getDocumentKind() !== "manuscript") return;
-    if (this.suggestionId) {
+    if (this.suggestionId || this.lineEdits) {
       this.error = "Accept or revert the pending suggestion before generating another.";
       return;
     }
@@ -387,8 +409,10 @@ export class AiSuggestionController {
     const surface = promptSurfaceFor(ctx, entry);
     if (surface === "cursor" || surface === "selection") {
       const run: OutputRun = { entry, inputs, assistantId, scene };
+      const lineEdits = outputHandlerFor(entry.context_strategy?.output)?.key === "inline_edits";
       const host = this.#inlineHost(run, surface);
-      const gathered = await inlineHandler.produce(host);
+      const editsHost = this.#lineEditsHost(run);
+      const gathered = await (lineEdits ? inlineEditsHandler.produce(editsHost) : inlineHandler.produce(host));
       if (!gathered) return;
       this.error = null;
       this.#anchorPos = gathered.from;
@@ -397,7 +421,7 @@ export class AiSuggestionController {
       this.#lastInvokedInputs = inputs;
       this.#lastInvokedAssistantId = assistantId;
       this.updateToolbarPosition();
-      await inlineHandler.apply(gathered, host);
+      await (lineEdits ? inlineEditsHandler.apply(gathered, editsHost) : inlineHandler.apply(gathered, host));
       return;
     }
     // A `conversation` surface (ADR-0065) — an `extract_to_node` brainstorm or a
@@ -427,6 +451,144 @@ export class AiSuggestionController {
       },
       streamInline: (gathered) => this.#streamInline(gathered, run),
     };
+  }
+
+  // The line-edits handler's host (#2460): inline's error surface, with the
+  // controller's non-streaming run as its `apply` primitive.
+  #lineEditsHost(run: OutputRun): InlineEditsHost {
+    const inline = this.#inlineHost(run, "selection");
+    return {
+      getEditor: inline.getEditor,
+      setError: inline.setError,
+      runLineEdits: (gathered) => this.#runLineEdits(gathered, run),
+    };
+  }
+
+  // The line-edits handler's `apply`: one non-streaming call, then the edits are
+  // placed on the selection and handed to the review plugin. The document is not
+  // touched until the writer accepts an edit.
+  async #runLineEdits(gathered: InlineGathered, run: OutputRun): Promise<void> {
+    const editor = this.#deps.getEditor();
+    if (!editor) return;
+    const { from, to, selectionText, textBefore, textAfter } = gathered;
+    const { entry, inputs, assistantId, scene } = run;
+    try {
+      const res = await api.aiGenerate({
+        template_source: entry.body,
+        target_scene_id: scene.id,
+        session_id: scene.id,
+        inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
+        text_before: textBefore,
+        text_after: textAfter,
+        ...(selectionText !== undefined ? { selection: selectionText } : {}),
+        ...(assistantId ? { assistant_id: assistantId } : {}),
+        commit: false,
+        response_format: "line_edits",
+      });
+      if (!res.ok) {
+        this.error = res.error || "Unknown error";
+        return;
+      }
+      if (editor.state.doc.textBetween(from, to, "\n\n", " ") !== selectionText) {
+        this.error = "Document changed during the AI call. Re-select the text and retry.";
+        return;
+      }
+      if (typeof res.cost_usd === "number") this.#deps.onInvocationCost(res.cost_usd);
+      const { placed, dropped } = placeLineEdits(editor.state.doc, from, to, res.edits ?? []);
+      this.#anchorPos = null;
+      if (placed.length === 0) {
+        this.#deps.onNotice?.(
+          dropped > 0 ? `None of the ${dropped} suggested edits could be placed.` : "No edits suggested.",
+        );
+        return;
+      }
+      this.meta = {
+        provider: res.provider,
+        model: res.model,
+        latency_ms: res.latency_ms,
+        truncated: res.truncated,
+        wordCount: placed.length,
+        usage: res.usage ?? null,
+        cost_usd: res.cost_usd ?? null,
+      };
+      this.#lineEditRange = { from, to };
+      this.lineEdits = { remaining: placed.length };
+      installLineEdits(editor.view, placed);
+      this.#watchLineEdits(editor);
+      if (dropped > 0) {
+        this.#deps.onNotice?.(
+          `${dropped} edit${dropped === 1 ? "" : "s"} couldn't be matched to the text and ${dropped === 1 ? "was" : "were"} skipped.`,
+        );
+      }
+    } catch (e) {
+      this.error = (e as Error).message;
+    } finally {
+      this.generating = false;
+      this.updateToolbarPosition();
+    }
+  }
+
+  // Follow the open edit list: keep the remaining count and the revised range
+  // current as the writer resolves edits or types, and close the list when the
+  // last edit is gone.
+  #watchLineEdits(editor: Editor): void {
+    const onTransaction = ({ transaction }: { transaction: Transaction }) => {
+      if (transaction.docChanged && this.#lineEditRange) {
+        this.#lineEditRange = {
+          from: transaction.mapping.map(this.#lineEditRange.from, 1),
+          to: transaction.mapping.map(this.#lineEditRange.to, -1),
+        };
+      }
+      const { edits, accepted } = lineEditState(editor.state);
+      if (edits.length > 0) {
+        this.lineEdits = { remaining: edits.length };
+        this.updateToolbarPosition();
+        return;
+      }
+      // Resolved or dropped to nothing. Telemetry once, and only if the writer
+      // took at least one edit.
+      if (accepted > 0) {
+        this.#persistAcceptedInvocation(findPromptEntry(this.#deps.getPromptCtx(), this.#lastInvokedEntryId), null);
+      }
+      this.meta = null;
+      this.#closeLineEdits();
+      this.toolbarPosition = { x: 0, y: 0, visible: false };
+    };
+    editor.on("transaction", onTransaction);
+    this.#stopWatchingLineEdits = () => editor.off("transaction", onTransaction);
+  }
+
+  #closeLineEdits(): void {
+    this.#stopWatchingLineEdits?.();
+    this.#stopWatchingLineEdits = null;
+    this.#lineEditRange = null;
+    this.lineEdits = null;
+  }
+
+  acceptAllLineEdits(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) acceptAllLineEdits(editor.view);
+  }
+
+  rejectAllLineEdits(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineEdits) rejectAllLineEdits(editor.view);
+  }
+
+  // Retry for an open edit list: drop what's left and ask again on the same text.
+  async #retryLineEdits(): Promise<void> {
+    const editor = this.#deps.getEditor();
+    const range = this.#lineEditRange;
+    const entry = findPromptEntry(this.#deps.getPromptCtx(), this.#lastInvokedEntryId);
+    if (!editor || !range || this.generating) return;
+    if (!entry) {
+      this.error = "Original prompt is no longer available.";
+      return;
+    }
+    this.rejectAllLineEdits();
+    editor.chain().focus().setTextSelection(range).run();
+    await this.runPromptEntry(entry, this.#lastInvokedInputs, this.#lastInvokedAssistantId);
   }
 
   // The inline handler's `apply`: stream the generation at the gathered

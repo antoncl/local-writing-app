@@ -183,7 +183,8 @@ the few you use, while *adding* one opens a menu of all supported providers → 
 only appears behind "Add", where a menu is the right shape. Then reorder/hire assistants. **The entire assistant system already exists** and composes directly:
 - *Hire* = `ProviderTierPicker.svelte` (labels provider "Subscription" — the subscribe→hire
   metaphor) → `POST /api/assistants` (`assistants.py:403-433`, which prepends the new id to the
-  local `.order.yaml` so a fresh assistant leads).
+  `.order.yaml` of the layer the file lands on — the machine layer for the wizard's hire — so a
+  fresh assistant leads that roster; since #2449 it leaves the open project's order alone).
 - *Reorder / un-list* = embed `Assistants.svelte` (drag-reorder + list/unlist) → `POST
   /api/assistants/order` (`assistants.py:226-261`) / `POST /api/assistants/unlist`. Reorder names
   the id in the *local* book's `.order.yaml`, so it is layer-safe by construction.

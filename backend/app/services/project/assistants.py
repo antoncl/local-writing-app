@@ -388,16 +388,13 @@ class AssistantEntriesMixin:
     def _prepend_to_assistants_order(self, folder: Path, entry_id: str) -> None:
         """Put an assistant on top of the given layer's list.
 
-        Callers pass the LOCAL layer (#333), which is what makes "topmost,
-        therefore the default" (#332, ADR-0024) actually true. The caveat this
-        docstring used to carry — that the phrasing only holds at the innermost
-        layer — was a description of the bug rather than of the design: the fold
-        puts every local id ahead of the inherited remainder, so prepending to
-        the layer a file happened to land on left a machine-layer assistant
-        below the whole local list. The id here may name an assistant living at
-        any layer; that asymmetry is the point (#332's central gesture), and it
-        is why nothing needs to be moved or copied to make a shared assistant
-        lead one project's roster.
+        `create_assistant_entry` passes the layer the new file landed on
+        (#2449), so "topmost, therefore the default" (#332, ADR-0024) holds for
+        that layer's roster — the open project's for a local create, the
+        machine's for a machine-roster hire. The fold puts a layer's own ids
+        ahead of the inherited remainder, so a machine-layer prepend does not
+        lead a project that lists others itself; that is deliberate, since a
+        machine hire must not rewrite a project's curation.
         """
         order = self._read_assistants_order(folder)
         order.ids = [entry_id] + [eid for eid in order.ids if eid != entry_id]
@@ -499,18 +496,17 @@ class AssistantEntriesMixin:
         # made, so it leads the roster rather than landing in the alphabetical
         # tail.
         #
-        # The opinion goes to the LOCAL layer, not to the layer the FILE landed
-        # on (#333). Those are different questions: where a node lives is about
-        # ownership and sharing, while "this one comes first" is curation, and
-        # #332 makes curation always the open project's opinion about what it
-        # inherits. Prepending to the creation folder instead was correct only
-        # while the two coincided — once the local layer holds any `ids`, the
-        # fold puts every id it names ahead of the inherited remainder, so a
-        # machine-layer prepend landed the new assistant BELOW the whole local
-        # list and it silently stopped being the default. Writing the opinion
-        # locally keeps the file exactly where the user asked for it; nothing is
-        # moved or cloned to make it lead.
-        self._prepend_to_assistants_order(self._assistant_layer_folder_for_id(None), entry_id)
+        # It leads the roster of the layer it was created ON (#2449). A local
+        # create (the Assistants pane's +, #1452) is the open project's own, so
+        # that is the open project's roster, as before. An explicit machine
+        # create comes only from the machine-roster surfaces — Settings →
+        # Assistants and the New-project wizard — and means "add to the machine
+        # roster": it must be listed there, and it must NOT rewrite the open
+        # project's curation (#333 wrote the opinion locally, which made a
+        # Settings hire silently become the open project's default). In a
+        # project whose own `ids` name others it lands in the inherited
+        # remainder below them; the project curates it from its own pane.
+        self._prepend_to_assistants_order(target_folder, entry_id)
         return self.read_assistant_entry(entry_id)
 
     def save_assistant_entry(self, entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:

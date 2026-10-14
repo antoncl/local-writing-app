@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssistantEntry, AssistantEntrySummary } from "@/lib/types";
+import type { AssistantEntry } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -25,20 +25,15 @@ import {
   updateMachineAssistant,
 } from "@/lib/stores/machineAssistants";
 
-const S = (id: string, listed: string): AssistantEntrySummary =>
-  ({ id, title: id, entry_type: "assistant:assistant", metadata: {}, computed_metadata: { listed } }) as AssistantEntrySummary;
-
 beforeEach(() => vi.clearAllMocks());
 
-// #2444: create only writes the OPEN PROJECT's order, so a hire must be listed
-// and topmost on the MACHINE layer explicitly.
+// #2449: the backend lists a machine create topmost on the machine layer
+// itself, so a hire is create + save and nothing else — in particular no
+// reorder, which would rewrite some layer's curation.
 describe("hireMachineAssistant", () => {
-  it("creates on the machine layer, saves the model, and lists the hire topmost", async () => {
+  it("creates on the machine layer and saves the model, without reordering", async () => {
     const created = { id: "new", title: "Muse", revision: "r1", entry_type: "assistant:assistant", metadata: {} } as unknown as AssistantEntry;
     vi.mocked(api.createAssistantEntry).mockResolvedValue(created);
-    vi.mocked(api.listMachineAssistantEntries).mockResolvedValue({
-      entries: [S("a", "listed"), S("hidden", "unlisted"), S("new", "unlisted"), S("b", "listed")],
-    });
 
     await hireMachineAssistant("Muse", "anthropic", "fast", "claude-x");
 
@@ -48,7 +43,7 @@ describe("hireMachineAssistant", () => {
         metadata: { ai_provider: "anthropic", ai_capability_tier: "fast", ai_model: "claude-x" },
       }),
     );
-    expect(api.reorderAssistants).toHaveBeenCalledWith(["new", "a", "b"], "");
+    expect(api.reorderAssistants).not.toHaveBeenCalled();
   });
 });
 

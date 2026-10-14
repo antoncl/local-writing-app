@@ -12,12 +12,15 @@ const WORD_END = /[\p{L}\p{N}.,;:!?…)\]}”’]/u;
 const WORD_START = /[\p{L}\p{N}“‘([{]/u;
 // Straight quotes open or close by what precedes them.
 const STRAIGHT_QUOTE = /["']/;
+// A straight apostrophe that ends the word before it ("Honor" + "'s").
+const CONTRACTION = /^'(s|t|d|m|ll|re|ve)(?![\p{L}])/iu;
 
 // Does the prose ending in `before` (the caret's block, up to the caret) need a
 // space before `text`? `before` is "" at the start of a block.
 export function needsLeadingSpace(before: string, text: string): boolean {
   const first = text.charAt(0);
   if (!first || !(WORD_START.test(first) || STRAIGHT_QUOTE.test(first))) return false;
+  if (CONTRACTION.test(text)) return false;
   const last = before.charAt(before.length - 1);
   if (!last) return false;
   if (STRAIGHT_QUOTE.test(last)) {

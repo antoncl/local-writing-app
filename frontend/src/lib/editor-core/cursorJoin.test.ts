@@ -16,6 +16,9 @@ describe("joinAtCursor", () => {
     ['He said, "', "Go", "", "Go"], // inside an opening straight quote
     ['"Go."', "She left.", "", ' She left.'], // after a closing straight quote
     ["He said, “", "Go", "", "Go"], // inside an opening curly quote
+    ["Honor", "'s eyes narrowed.", "", "'s eyes narrowed."], // a possessive
+    ["He said,", "'Go.'", "", " 'Go.'"], // an opening single quote
+    ["It was", "'smoke', she said", "", " 'smoke', she said"], // not a contraction
     ["(", "aside", "", "aside"],
     ["word\ufffc", "next", "", "next"], // after a pill or a line break
     ["", "Night fell.", "The admiral", "Night fell. "],

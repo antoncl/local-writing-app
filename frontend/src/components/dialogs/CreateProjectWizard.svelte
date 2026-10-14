@@ -19,7 +19,8 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import { api } from "@/lib/api";
   import { createWizard as wizard } from "@/lib/stores/createWizard.svelte";
-  import { assistantEntriesStore, isAssistantListed } from "@/lib/stores/assistants";
+  import { isAssistantListed } from "@/lib/stores/assistants";
+  import { machineAssistantEntriesStore } from "@/lib/stores/machineAssistants";
   import { resetTargetLabel } from "@/lib/utils/projectReview";
   import { moveBefore } from "@/lib/utils/listOrder";
   import { get } from "svelte/store";
@@ -31,12 +32,14 @@
   // the dialog stays invisible (the documented Svelte-5 `$:` trap). So the
   // assistant roster is derived inline in the template ({@const} over the store
   // subscription) rather than via `$:`. During creation these are the
-  // machine-level default assistants the new book inherits (#547).
+  // machine-level default assistants the new book inherits (#547) — read from
+  // the MACHINE roster, not the merged one, which is whatever project happens
+  // to be open: its files, its curation (#2448).
 
   // Ephemeral drag-to-reorder state; the ordering maths is the pure moveBefore.
   let draggingId: string | null = null;
   function dropOnAssistant(targetId: string) {
-    const ids = get(assistantEntriesStore).filter(isAssistantListed).map((entry) => entry.id);
+    const ids = get(machineAssistantEntriesStore).filter(isAssistantListed).map((entry) => entry.id);
     if (draggingId && draggingId !== targetId) {
       void wizard.reorderAssistants(moveBefore(ids, draggingId, targetId));
     }
@@ -188,7 +191,7 @@
           />
 
           {#if wizard.showProviderSurface}
-            {@const listedAssistants = $assistantEntriesStore.filter(isAssistantListed)}
+            {@const listedAssistants = $machineAssistantEntriesStore.filter(isAssistantListed)}
             <section class="ai-section" aria-label="Providers">
               <h3>Providers</h3>
               <!--

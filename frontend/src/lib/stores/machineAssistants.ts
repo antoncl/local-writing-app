@@ -1,8 +1,10 @@
 // Machine-layer assistant writes (#2444) — one home shared by the New-project
 // wizard and the Machine Settings "Assistants" tab. Every call passes
-// `layer_id: ""` (the machine layer) and then refreshes the project-scoped
-// roster store so an open project's pane/chat picker reflects the change.
+// `layer_id: ""` (the machine layer) and then refreshes both rosters: the
+// machine one these surfaces show, and the project-scoped one an open
+// project's pane/chat picker reads.
 
+import { writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -10,8 +12,33 @@ import type { AssistantEntrySummary, EntryMetadata } from "@/lib/types";
 
 const MACHINE = "";
 
+// The machine layer's OWN roster (#2448) — what a machine-layer reorder or
+// un-list acts on. The merged `assistantEntriesStore` is the open project's
+// view (its files, its curation); building a machine reorder from it wrote
+// project-local ids into the machine `.order.yaml`. `writable` because the
+// wizard is a legacy-mode component (`$store` reads).
+export const machineAssistantEntriesStore = writable<AssistantEntrySummary[]>([]);
+
 export async function loadMachineAssistants(): Promise<AssistantEntrySummary[]> {
   return (await api.listMachineAssistantEntries()).entries;
+}
+
+// Monotonic guard, as in `refreshAssistantEntries`: an earlier answer must not
+// land over a later one when two refreshes overlap.
+let latest = 0;
+
+export async function refreshMachineAssistants(): Promise<void> {
+  const seq = ++latest;
+  try {
+    const entries = await loadMachineAssistants();
+    if (seq === latest) machineAssistantEntriesStore.set(entries);
+  } catch {
+    // Leave the previous list in place (backend unavailable).
+  }
+}
+
+async function refreshBoth(): Promise<void> {
+  await Promise.all([refreshMachineAssistants(), refreshAssistantEntries()]);
 }
 
 /** The provider/tier/model an assistant stores in its metadata. */
@@ -34,17 +61,17 @@ export async function hireMachineAssistant(
   });
   // The backend lists it topmost on the machine layer and leaves the open
   // project's order alone (#2449) — no follow-up reorder needed here.
-  await refreshAssistantEntries();
+  await refreshBoth();
 }
 
 export async function reorderMachineAssistants(orderedIds: string[]): Promise<void> {
   await api.reorderAssistants(orderedIds, MACHINE);
-  await refreshAssistantEntries();
+  await refreshBoth();
 }
 
 export async function unlistMachineAssistant(id: string): Promise<void> {
   await api.unlistAssistant(id, MACHINE);
-  await refreshAssistantEntries();
+  await refreshBoth();
 }
 
 /** Rename and/or re-point an assistant; omitted model fields keep what it has. */
@@ -67,7 +94,7 @@ export async function updateMachineAssistant(
     title: changes.title,
     metadata: { ...entry.metadata, ...picked },
   });
-  await refreshAssistantEntries();
+  await refreshBoth();
 }
 
 export async function deleteMachineAssistant(id: string): Promise<void> {
@@ -75,5 +102,5 @@ export async function deleteMachineAssistant(id: string): Promise<void> {
   // Same tearDown an in-app delete ends with; an open pane must not autosave
   // into a file that is gone.
   editorPanes.closeRemovedNodes([id]);
-  await refreshAssistantEntries();
+  await refreshBoth();
 }

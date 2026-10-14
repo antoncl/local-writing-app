@@ -171,6 +171,9 @@ class CreateWizard {
   ) => Promise<void> = async () => {};
   onReorderAssistants: (orderedIds: string[]) => Promise<void> = async () => {};
   onUnlistAssistant: (entryId: string) => Promise<void> = async () => {};
+  // Load the machine roster the AI step shows (#2448). Fired on every start:
+  // nothing else keeps it current while no machine write has happened.
+  onStart: () => void = () => {};
 
   // ---- Derived ----
   needsRootFolder = $derived(!this.defaultProjectsFolder.trim());
@@ -303,6 +306,7 @@ class CreateWizard {
     // with it so the shown default actually counts (#1410). First run seeds
     // after the root step instead (next()).
     this.#seedLocationFromDefault();
+    this.onStart();
     this.open = true;
   }
 

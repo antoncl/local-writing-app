@@ -844,4 +844,16 @@ describe("inline rosters honour offer_on (#2475)", () => {
     expect(defaultPromptForSurface(c, "selection", "lore:character")?.id).toBe("lore-edit");
     expect(defaultPromptForSurface(c, "selection", "research:note")).toBeNull();
   });
+
+  it("a notes prompt is in the selection list but is never the selection default (ADR-0098)", () => {
+    const checkP = inline("lore-check", ["lore:base"], "inline_notes");
+    const withCheck = ctx({ metadataSchema: isaSchema, promptEntries: [checkP, loreP] });
+    expect(inlinePromptsOfferedOn(withCheck, "selection", "lore:character").map((e) => e.id)).toEqual([
+      "lore-check",
+      "lore-edit",
+    ]);
+    expect(defaultPromptForSurface(withCheck, "selection", "lore:character")?.id).toBe("lore-edit");
+    const onlyCheck = ctx({ metadataSchema: isaSchema, promptEntries: [checkP] });
+    expect(defaultPromptForSurface(onlyCheck, "selection", "lore:character")).toBeNull();
+  });
 });

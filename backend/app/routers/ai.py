@@ -62,6 +62,11 @@ from app.services.ai.line_edits import (
     LineEditsStreamCollector,
     read_line_edits_reply,
 )
+from app.services.ai.line_notes import (
+    NOTES_RESPONSE_SCHEMA,
+    LineNotesStreamCollector,
+    checked_against,
+)
 from app.services.ai.preview import (
     PreviewError,
     PreviewRequest,
@@ -422,6 +427,8 @@ async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResp
 
 @router.post("/api/ai/generate", response_model=AIGenerateResponse)
 async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AIGenerateResponse:
+    if request.response_format == "notes":
+        raise HTTPException(status_code=422, detail="Notes are only served on the streaming route.")
     line_edits = request.response_format == "line_edits"  # #2460
     with translate_errors():
         try:
@@ -679,11 +686,25 @@ async def ai_chat_stream(
     )
 
 
+def _reply_shape(
+    project: ProjectService, request: AIGenerateRequest, rendered: Any
+) -> tuple[dict[str, Any] | None, LineEditsStreamCollector | LineNotesStreamCollector | None]:
+    """The structured reply a streaming generate asks for: the provider's
+    `response_schema` and the collector that reads the finished list onto the
+    `done` line (a list is read whole, but riding the stream lets a disconnect
+    cancel the provider call, #2464). Plain text: neither."""
+    if request.response_format == "line_edits":  # #2460
+        return LINE_EDITS_RESPONSE_SCHEMA, LineEditsStreamCollector()
+    if request.response_format == "notes":  # #2490
+        checked = checked_against(project, rendered)
+        return NOTES_RESPONSE_SCHEMA, LineNotesStreamCollector({c["id"] for c in checked}, checked)
+    return None, None
+
+
 @router.post("/api/ai/generate/stream")
 async def ai_generate_stream(
     project: CurrentProject, request: AIGenerateRequest, http_request: Request
 ) -> StreamingResponse:
-    line_edits = request.response_format == "line_edits"  # #2460
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():
@@ -747,21 +768,19 @@ async def ai_generate_stream(
     # drift into caching or placing lore in one mode but not the other.
     system_blocks = one_shot_system_blocks(system_prompt, rendered)
 
+    response_schema, collector = _reply_shape(project, request, rendered)
     events = ai_providers.chat_stream(
         resolved.to_call(
             system_prompt=system_prompt,
             messages=chat_messages,
             system_blocks=system_blocks,
             session_id=session_id,
-            response_schema=LINE_EDITS_RESPONSE_SCHEMA if line_edits else None,
+            response_schema=response_schema,
         ),
         provider_name=resolved.provider,
         settings=settings,
         policy=policy,
     )
-    # An edit list is read whole, but riding the stream lets a disconnect cancel
-    # the provider call (#2464): the collector reads it onto the `done` line.
-    collector = LineEditsStreamCollector() if line_edits else None
     if collector is not None:
         events = collector.tap(events)
     return ClosingStreamingResponse(

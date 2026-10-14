@@ -386,7 +386,9 @@ export type AIGenerateRequest = {
   max_tokens?: number;
   // "line_edits" asks the non-streaming route for a list of reasoned edits
   // (`edits` on the response) instead of a replacement passage. Default "text".
-  response_format?: "text" | "line_edits";
+  // "notes" (streaming route only) asks for lore-check notes (`notes` on the
+  // terminal line) - a problem per quote, never a replacement.
+  response_format?: "text" | "line_edits" | "notes";
 };
 
 // One reasoned edit within a revised selection (#2460).
@@ -394,6 +396,20 @@ export type LineEdit = {
   find: string;
   replace: string;
   reason: string;
+};
+
+// One lore-check note (ADR-0098): a quoted passage, what is wrong with it, and
+// the lore entry (id) it contradicts. Never carries a replacement.
+export type LineNote = {
+  quote: string;
+  problem: string;
+  entry: string;
+};
+
+// A lore entry the check was run against, with its display name.
+export type CheckedEntry = {
+  id: string;
+  name: string;
 };
 
 export type AIContextPresetResponse = {

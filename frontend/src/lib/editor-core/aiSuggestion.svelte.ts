@@ -42,12 +42,19 @@ import {
   acceptAllLineEdits,
   acceptCurrentLineEdit,
   currentLineEdit,
+  currentLineNote,
+  dismissAllLineNotes,
+  dismissCurrentLineNote,
   installLineEdits,
+  installLineNotes,
   lineEditState,
+  lineNoteState,
   rejectAllLineEdits,
   rejectCurrentLineEdit,
   stepLineEdit,
+  stepLineNote,
 } from "@/lib/editor-core/lineEditSuggestions";
+import { fetchLineNotes, noteNotice } from "@/lib/editor-core/aiLineNotes";
 import {
   hasMutationMarker,
   markerNotice,
@@ -57,6 +64,7 @@ import { joinAtCursor } from "@/lib/editor-core/cursorJoin";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
 import type {
   ChatUsage,
+  CheckedEntry,
   DocumentKind,
   EditableDocument,
   PromptEntrySummary,
@@ -79,6 +87,8 @@ export interface AiSuggestionDeps {
   }) => void;
   // Short user-facing note (e.g. "Placed 3 changes in the draft.").
   onNotice?: (message: string) => void;
+  // Open a lore entry by id (a lore-check note's "Open entry").
+  onOpenEntry?: (id: string) => void;
   onOpenChat: (payload: {
     entry: PromptEntrySummary;
     inputs: Record<string, unknown>;
@@ -110,6 +120,10 @@ export class AiSuggestionController {
   // review, the current one's 1-based place among them and its reason. Null
   // when no edit list is open.
   lineEdits: { remaining: number; index: number; currentReason: string } | null = $state(null);
+  // Pending lore-check notes (ADR-0098), likewise: how many are left, the current
+  // one's 1-based place, and the lore entries the check ran against. Null when no
+  // note list is open. Only one review (edits OR notes) is open per editor.
+  lineNotes: { remaining: number; index: number; checkedAgainst: CheckedEntry[] } | null = $state(null);
 
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
@@ -130,6 +144,8 @@ export class AiSuggestionController {
   // writer's edits, for Retry) and the unsubscribe of the listener that tracks it.
   #lineEditRange: { from: number; to: number } | null = null;
   #stopWatchingLineEdits: (() => void) | null = null;
+  // The entries the open note list's check ran against (shown in the footer).
+  #checkedAgainst: CheckedEntry[] = [];
   // Bumped by reset(): a line-edits reply that arrives after it belongs to a
   // document the writer has left, and is discarded.
   #runEpoch = 0;
@@ -163,6 +179,9 @@ export class AiSuggestionController {
     this.#stopWatchingLineEdits = null;
     if (editor && !editor.isDestroyed && lineEditState(editor.state).edits.length > 0) {
       rejectAllLineEdits(editor.view);
+    }
+    if (editor && !editor.isDestroyed && lineNoteState(editor.state).notes.length > 0) {
+      dismissAllLineNotes(editor.view);
     }
     this.#closeLineEdits();
     this.error = null;
@@ -398,7 +417,7 @@ export class AiSuggestionController {
   }
 
   async retry(): Promise<void> {
-    if (this.lineEdits) return this.#retryLineEdits();
+    if (this.lineEdits || this.lineNotes) return this.#retryLineEdits();
     const editor = this.#deps.getEditor();
     if (!this.suggestionId || this.generating || !editor) return;
     const wasRevision = this.#suggestionOriginal !== null;
@@ -436,6 +455,10 @@ export class AiSuggestionController {
       // The floating toolbar is hidden while line edits are pending, so `error`
       // would never show: say it as a notice instead.
       this.#deps.onNotice?.("Finish reviewing the line edits first — accept or reject them, or Reject all.");
+      return;
+    }
+    if (this.lineNotes) {
+      this.#deps.onNotice?.("Finish reviewing the notes first — dismiss them or Dismiss all.");
       return;
     }
     if (this.suggestionId) {
@@ -526,7 +549,130 @@ export class AiSuggestionController {
       },
       streamInline: (gathered) => this.#streamInline(gathered, run),
       runLineEdits: (gathered) => this.#runLineEdits(gathered, run),
+      runLineNotes: (gathered) => this.#runLineNotes(gathered, run),
     };
+  }
+
+  // The lore check's `apply` (ADR-0098): the call + placement live in aiLineNotes.ts;
+  // here the outcome becomes state. A check has nothing to accept, so its cost and
+  // telemetry are recorded on ARRIVAL, even for a reply with no notes.
+  async #runLineNotes(gathered: InlineGathered, run: OutputRun): Promise<void> {
+    const editor = this.#deps.getEditor();
+    if (!editor) return;
+    const { from, to } = gathered;
+    const { scene } = run;
+    const epoch = this.#runEpoch;
+    const abort = new AbortController();
+    this.#abort = abort;
+    try {
+      const out = await fetchLineNotes({
+        editor,
+        gathered,
+        run,
+        sceneIdForWire: this.#sceneIdForWire(scene),
+        signal: abort.signal,
+        isStale: () => epoch !== this.#runEpoch || this.#deps.getScene()?.id !== scene.id,
+      });
+      if (out.kind === "cancelled") {
+        if (epoch === this.#runEpoch) this.#deps.onNotice?.("Check cancelled.");
+        return;
+      }
+      if (out.kind === "stale") return;
+      if (out.kind === "error") {
+        this.error = out.message;
+        return;
+      }
+      const { res, placed, dropped, checkedAgainst } = out;
+      this.meta = {
+        provider: res.provider,
+        model: res.model,
+        latency_ms: res.latency_ms,
+        truncated: res.truncated,
+        wordCount: placed.length,
+        usage: res.usage ?? null,
+        cost_usd: res.cost_usd ?? null,
+      };
+      if (typeof res.cost_usd === "number") this.#deps.onInvocationCost(res.cost_usd);
+      this.#persistAcceptedInvocation(run.entry, null);
+      this.#anchorPos = null;
+      const notice = noteNotice(placed.length, dropped);
+      if (placed.length === 0) {
+        this.meta = null;
+        if (notice) this.#deps.onNotice?.(notice);
+        return;
+      }
+      const names = new Map(checkedAgainst.map((c) => [c.id, c.name]));
+      this.#checkedAgainst = checkedAgainst;
+      this.#lineEditRange = { from, to };
+      installLineNotes(editor.view, placed, to, {
+        openEntry: (id) => this.#deps.onOpenEntry?.(id),
+        entryName: (id) => names.get(id) ?? "",
+      });
+      this.#syncLineNotes(editor);
+      this.#watchLineNotes(editor);
+      if (notice) this.#deps.onNotice?.(notice);
+    } catch (e) {
+      this.error = (e as Error).message;
+    } finally {
+      if (this.#abort === abort) this.#abort = null;
+      this.generating = false;
+      this.updateToolbarPosition();
+    }
+  }
+
+  // Follow the open note list like #watchLineEdits: keep the count and the checked
+  // range current, and close the review when the last note is gone (no telemetry -
+  // it was recorded on arrival).
+  #watchLineNotes(editor: Editor): void {
+    const onTransaction = editorCallback(({ transaction }: { transaction: Transaction }) => {
+      if (transaction.docChanged && this.#lineEditRange) {
+        this.#lineEditRange = {
+          from: transaction.mapping.map(this.#lineEditRange.from, 1),
+          to: transaction.mapping.map(this.#lineEditRange.to, -1),
+        };
+      }
+      if (lineNoteState(editor.state).notes.length > 0) {
+        this.#syncLineNotes(editor);
+        return;
+      }
+      this.meta = null;
+      this.#closeLineEdits();
+      this.toolbarPosition = { x: 0, y: 0, visible: false };
+    });
+    editor.on("transaction", onTransaction);
+    this.#stopWatchingLineEdits = () => editor.off("transaction", onTransaction);
+  }
+
+  #syncLineNotes(editor: Editor): void {
+    const { notes } = lineNoteState(editor.state);
+    const current = currentLineNote(editor.state);
+    if (!current) return;
+    const next = { remaining: notes.length, index: notes.indexOf(current) + 1, checkedAgainst: this.#checkedAgainst };
+    const old = this.lineNotes;
+    if (old && old.remaining === next.remaining && old.index === next.index && old.checkedAgainst === next.checkedAgainst) {
+      return;
+    }
+    this.lineNotes = next;
+  }
+
+  dismissAllLineNotes(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineNotes) dismissAllLineNotes(editor.view);
+  }
+
+  dismissCurrentLineNote(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineNotes) dismissCurrentLineNote(editor.view);
+  }
+
+  nextLineNote(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineNotes) stepLineNote(editor.view, 1);
+  }
+
+  prevLineNote(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.lineNotes) stepLineNote(editor.view, -1);
   }
 
   // The line-edits handler's `apply`: one non-streaming call, then the edits are
@@ -677,6 +823,7 @@ export class AiSuggestionController {
     this.#stopWatchingLineEdits = null;
     this.#lineEditRange = null;
     this.lineEdits = null;
+    this.lineNotes = null;
   }
 
   acceptAllLineEdits(): void {
@@ -720,6 +867,7 @@ export class AiSuggestionController {
       return;
     }
     this.rejectAllLineEdits();
+    this.dismissAllLineNotes();
     editor.chain().focus().setTextSelection(range).run();
     await this.runPromptEntry(entry, this.#lastInvokedInputs, this.#lastInvokedAssistantId);
   }

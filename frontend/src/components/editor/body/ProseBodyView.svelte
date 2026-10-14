@@ -333,6 +333,8 @@
     },
     onRequestInputsDialog: (payload) => onRequestInputsDialog?.(payload),
     onNotice: (message) => editorPanes.setStatus(message),
+    onOpenEntry: (id) =>
+      void editorPanes.openNodeOfKind(id, "lore").catch((e) => editorPanes.setStatus(e instanceof Error ? e.message : String(e))),
     onOpenChat: (payload) => onOpenChat?.(payload),
   });
 

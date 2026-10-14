@@ -15,7 +15,7 @@ export type LineEditCardActions = {
   reject: () => void;
 };
 
-function button(
+export function button(
   testid: string,
   className: string,
   label: string,

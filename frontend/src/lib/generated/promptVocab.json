@@ -110,6 +110,12 @@
       "summary": "`\"\"` — shows every lore entry placed for the prompt's scene as it stood when the scene opened: earlier scenes' changes applied, none of this scene's own. By default lore is shown as it stands at the END of the scene. A draft uses this so it does not already know how the scene ends. Only `\"start\"` is accepted; anything else is an error. It applies to one-shot runs and the preview; in a chat it has no effect yet. Use it as `{% do lore_as_of(\"start\") %}`."
     },
     {
+      "name": "lore_named_in",
+      "kind": "helper",
+      "signature": "lore_named_in(text)",
+      "summary": "A list of lore ids — the lore entries whose name or alias appears in `text`, then the entries those link to through their reference fields, then the entries the prompt's own scene links to (its POV, location, ...). No duplicates; entries marked \"never include\" are left out, and \"only when picked\" entries are left out unless the scene itself links to them. It prints nothing; hand the list to `use()` to place the entries: `{% do use(lore_named_in(selection)) %}`."
+    },
+    {
       "name": "next_scene",
       "kind": "helper",
       "signature": "next_scene(x)",

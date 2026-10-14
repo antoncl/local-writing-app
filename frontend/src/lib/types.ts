@@ -113,6 +113,8 @@ export type {
   AIContextPresetResponse,
   AIGenerateResponse,
   LineEdit,
+  LineNote,
+  CheckedEntry,
   AIInvocation,
   AIInvocationList,
   CreateAIInvocationRequest,

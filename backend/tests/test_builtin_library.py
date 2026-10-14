@@ -423,6 +423,75 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertIn("Square brackets", joined)
         self.assertEqual(out.messages[-1].text.strip(), "The town is cold.")
 
+    def _render_check(self, selection: str, inputs: dict | None = None):
+        """Render "Check against lore" as if run on a scene; returns (the text, the
+        env, whose `used_nodes` is the lore the run declared)."""
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Check against lore"))
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            entry.body,
+            context={"scene": None, "selection": selection, "inputs": inputs or {}},
+            env=env,
+        )
+        return "\n".join(m.text for m in out.messages), env
+
+    def test_check_against_lore_is_an_inline_notes_prompt_on_scenes(self) -> None:
+        """#2490/ADR-0098: the lore check answers with notes, never edits, and is
+        offered on a scene selection; its reply contract is the shared snippet."""
+        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Check against lore"))
+        self.assertTrue(entry.is_library)
+        self.assertEqual(entry.entry_type, "prompt:general")
+        self.assertEqual(entry.context_strategy.output.handler, "inline_notes")
+        self.assertEqual(entry.offer_on, ["manuscript:scene"])
+        self.assertEqual(entry.computed_metadata["disposition"], "Revise prose")
+        self.assertIn('{% include "Notes reply format" %}', entry.body)
+        snippet = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Notes reply format"))
+        self.assertEqual(snippet.entry_type, "prompt:snippet")
+
+    def test_check_against_lore_renders_the_notes_reply_format(self) -> None:
+        from app.models import CreateLoreEntryRequest
+
+        self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ravenmoor", entry_type="lore:note", body="A cold town.")
+        )
+        joined, _ = self._render_check("Ravenmoor was cold.")
+        self.assertIn('{"notes": [{"quote"', joined)
+        self.assertIn("continuity checker", joined)
+        self.assertNotIn("{#", joined)  # the snippet's usage comment never leaks
+        self.assertNotIn('{"edits"', joined)
+        self.assertEqual(joined.splitlines()[-1].strip(), "Ravenmoor was cold.")
+
+    def test_check_against_lore_declares_the_lore_the_selection_names(self) -> None:
+        from app.models import CreateLoreEntryRequest
+
+        ravenmoor = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ravenmoor", entry_type="lore:note", body="A cold town.")
+        )
+        self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Elsewhere", entry_type="lore:note", body="Not mentioned.")
+        )
+        _, env = self._render_check("Ravenmoor was cold.")
+        self.assertEqual(env.used_nodes, [ravenmoor.id])  # type: ignore[attr-defined]
+
+    def test_check_against_lore_stops_when_nothing_is_named_or_picked(self) -> None:
+        from app.services.ai.helpers import TemplateStop
+
+        with self.assertRaises(TemplateStop) as ctx:
+            self._render_check("Nobody here.")
+        self.assertIn("Nothing in the selection names a lore entry", str(ctx.exception))
+
+    def test_check_against_lore_runs_on_a_pick_alone(self) -> None:
+        from app.models import CreateLoreEntryRequest
+
+        picked = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Ravenmoor", entry_type="lore:note", body="A cold town.")
+        )
+        _, env = self._render_check("Nobody here.", {"lore": [picked.id]})
+        self.assertEqual(env.used_nodes, [picked.id])  # type: ignore[attr-defined]
+
     def test_every_inline_builtin_declares_an_offer_on(self) -> None:
         """#2475: an empty `offer_on` means offered nowhere, so no shipped inline
         prompt may leave it empty."""
@@ -430,7 +499,11 @@ class BuiltinLibraryTests(unittest.TestCase):
         for summary in self._summaries().values():
             entry = self.service.read_prompt_entry(summary.id)
             strategy = entry.context_strategy
-            if strategy is None or strategy.output.handler not in ("inline", "inline_edits"):
+            if strategy is None or strategy.output.handler not in (
+                "inline",
+                "inline_edits",
+                "inline_notes",
+            ):
                 continue
             checked += 1
             self.assertTrue(entry.offer_on, f"{entry.title} declares no offer_on")

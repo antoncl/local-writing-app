@@ -150,6 +150,10 @@ export class AiSuggestionController {
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
     this.#pendingInternal = null;
+    // Leaving the document also stops its generation (#2464): the reply would be
+    // discarded anyway (the epoch below), and an abort is what frees the provider
+    // instead of letting it finish a run nobody will see.
+    this.#abort?.abort();
     this.#runEpoch += 1;
     const editor = this.#deps.getEditor();
     // Leave no orphaned edit decorations behind on the editor we're leaving. The

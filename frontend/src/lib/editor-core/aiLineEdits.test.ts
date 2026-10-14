@@ -275,6 +275,20 @@ describe("line edits (#2460)", () => {
     expect(ctrl.generating).toBe(false);
   });
 
+  it("leaving the document (reset) aborts the running request, without a cancel notice (#2464)", async () => {
+    const { ctrl, notices } = setup();
+    const spy = hangingFetch();
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    const signal = spy.mock.calls[0][1] as AbortSignal;
+    ctrl.reset();
+    expect(signal.aborted).toBe(true);
+    await run;
+    expect(ctrl.generating).toBe(false);
+    expect(ctrl.error).toBeNull();
+    expect(notices).toEqual([]);
+  });
+
   it("cancelGeneration with nothing running is a no-op (#2464)", () => {
     const { ctrl } = setup();
     expect(() => ctrl.cancelGeneration()).not.toThrow();

@@ -19,13 +19,42 @@ const panesMock = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/stores/editorPanes.svelte", () => ({ editorPanes: panesMock }));
 import { api } from "@/lib/api";
+import { get } from "svelte/store";
 import {
   deleteMachineAssistant,
   hireMachineAssistant,
+  machineAssistantEntriesStore,
+  refreshMachineAssistants,
+  reorderMachineAssistants,
   updateMachineAssistant,
 } from "@/lib/stores/machineAssistants";
+import type { AssistantEntrySummary } from "@/lib/types";
 
 beforeEach(() => vi.clearAllMocks());
+
+const row = (id: string): AssistantEntrySummary =>
+  ({ id, title: id, entry_type: "assistant:assistant", metadata: {}, computed_metadata: { listed: "listed" } }) as AssistantEntrySummary;
+
+// #2448: the wizard and Settings act on the machine layer, so they must SHOW
+// the machine roster — never the merged one, which carries the open project's
+// own files and curation. Every machine write refreshes it.
+describe("machineAssistantEntriesStore", () => {
+  it("holds the machine roster after a machine write, not the merged one", async () => {
+    vi.mocked(api.listMachineAssistantEntries).mockResolvedValue({ entries: [row("m1"), row("m2")] });
+    vi.mocked(api.listAssistantEntries).mockResolvedValue({ entries: [row("project-local"), row("m1"), row("m2")] });
+    await reorderMachineAssistants(["m2", "m1"]);
+    expect(api.reorderAssistants).toHaveBeenCalledWith(["m2", "m1"], "");
+    expect(get(machineAssistantEntriesStore).map((e) => e.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("keeps the previous roster when a refresh fails", async () => {
+    vi.mocked(api.listMachineAssistantEntries).mockResolvedValue({ entries: [row("keep")] });
+    await refreshMachineAssistants();
+    vi.mocked(api.listMachineAssistantEntries).mockRejectedValue(new Error("down"));
+    await refreshMachineAssistants();
+    expect(get(machineAssistantEntriesStore).map((e) => e.id)).toEqual(["keep"]);
+  });
+});
 
 // #2449: the backend lists a machine create topmost on the machine layer
 // itself, so a hire is create + save and nothing else — in particular no

@@ -79,6 +79,7 @@
   } from "@/lib/stores/assistants";
   import {
     hireMachineAssistant,
+    refreshMachineAssistants,
     reorderMachineAssistants,
     unlistMachineAssistant,
   } from "@/lib/stores/machineAssistants";
@@ -287,6 +288,7 @@
     createWizard.onUnlistAssistant = async (entryId) => {
       await run(() => unlistMachineAssistant(entryId));
     };
+    createWizard.onStart = () => void refreshMachineAssistants();
     createWizard.onHireAssistant = async (title, provider, tier, model) => {
       await run(() => hireMachineAssistant(title, provider, tier, model));
     };

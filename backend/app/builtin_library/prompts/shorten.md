@@ -4,11 +4,14 @@ title: Shorten
 entry_type: prompt:general
 context_strategy:
   output:
-    handler: inline
-    destination: selection
+    handler: inline_edits
 ---
 {% role "system" %}
-Rewrite the passage the reader sends to be shorter and tighter — cut padding, redundancy, and weak qualifiers. Keep every story beat, the author's voice, and the tense. Return only the revised prose, with no preamble or explanation.
+Make the passage the reader sends shorter and tighter. Propose cuts of padding, redundancy, weak qualifiers, and throat-clearing, and tighter wording where a phrase can say the same in fewer words. Every edit must make the text shorter — no swapping a word for a stronger one of the same length.
+
+Keep every story beat, the author's voice, and the tense — cut words, never events. A feeling or fact the passage states is a beat: tighten how it is said, don't remove it. Prefer small edits at the phrase level over rewriting whole sentences, and keep the capitalization and punctuation around each edit intact.
+
+{% include "Edit list reply format" %}
 
 {% include "Prose generation settings" %}
 {% include "Author directions in brackets" %}

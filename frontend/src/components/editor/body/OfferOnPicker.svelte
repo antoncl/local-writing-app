@@ -26,6 +26,9 @@
     offerOn?: string[];
     // Locked for a built-in Library prompt (the host also wraps us in `inert`).
     readOnly?: boolean;
+    // An inline (cursor / selection) prompt: offered in the editor of the
+    // chosen document types, not as a ＋New conversation (#2475).
+    inline?: boolean;
     // Outbound: the allow-list changed → parent emits its change/save.
     onChange?: () => void;
   }
@@ -34,6 +37,7 @@
     metadataSchema = null,
     offerOn = $bindable([]),
     readOnly = false,
+    inline = false,
     onChange,
   }: Props = $props();
 
@@ -69,13 +73,17 @@
 
 <details class="offer-on-editor">
   <summary>
-    Show in ＋New <small>{selectedCount}</small>
-    <small class="offer-on-hint">the subjects this conversation is offered on · checking a group covers its types</small>
+    {inline ? "Offer on" : "Show in ＋New"} <small>{selectedCount}</small>
+    <small class="offer-on-hint">
+      {inline
+        ? "the documents this prompt is offered on; none checked = offered nowhere"
+        : "the subjects this conversation is offered on"} · checking a group covers its types
+    </small>
   </summary>
   {#if rows.length === 0}
     <p class="muted offer-on-empty">No subject types defined yet.</p>
   {:else}
-    <div class="offer-on-tree" role="group" aria-label="Show in ＋New on">
+    <div class="offer-on-tree" role="group" aria-label={inline ? "Offer on" : "Show in ＋New on"}>
       {#each rows as row (row.type === "header" ? `h:${row.kind}` : `t:${row.id}`)}
         {#if row.type === "header"}
           <div class="offer-on-kind-header">{row.label}</div>

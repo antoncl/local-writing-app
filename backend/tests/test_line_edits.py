@@ -171,6 +171,27 @@ class GenerateLineEditsRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
+    def test_empty_target_scene_renders_without_a_scene(self) -> None:
+        # #2475: a non-scene document (a lore entry) sends no scene id.
+        response, mock_chat = self._post(json.dumps(_GOOD), target_scene_id="", response_format="line_edits")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"])
+        mock_chat.assert_called_once()
+
+    def test_unknown_target_scene_is_still_a_404(self) -> None:
+        response, mock_chat = self._post(json.dumps(_GOOD), target_scene_id="scene_missing")
+        self.assertEqual(response.status_code, 404)
+        mock_chat.assert_not_called()
+
+    def test_stream_route_accepts_an_empty_target_scene(self) -> None:
+        response = self.client.post(
+            "/api/ai/generate/stream",
+            json={"template_source": '{% role "system" %}{% endrole %}', "target_scene_id": ""},
+        )
+        # Past request validation: any failure comes from the pipeline, not a 422/404.
+        self.assertNotEqual(response.status_code, 422, response.text)
+        self.assertNotEqual(response.status_code, 404, response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

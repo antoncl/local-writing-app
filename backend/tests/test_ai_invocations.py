@@ -62,6 +62,18 @@ class AIInvocationLogEndpointTests(unittest.TestCase):
         log_path = self.root / "ai_invocations.csv"
         self.assertTrue(log_path.exists())
 
+    def test_append_accepts_an_empty_scene_id_and_skips_the_scene_bucket(self) -> None:
+        # #2475: a run on a non-scene document (a lore entry) carries scene_id "".
+        response = self.client.post(
+            "/api/ai/invocations",
+            json={"prompt_entry_id": "prompt_1", "scene_id": "", "model": "m", "cost_usd": 0.5},
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        summary = self.client.get("/api/ai/invocations/summary").json()
+        self.assertEqual(summary["count"], 1)
+        self.assertAlmostEqual(summary["total_cost_usd"], 0.5, places=6)
+        self.assertEqual(summary["by_scene"], [])
+
     def test_list_filters_by_scene_id(self) -> None:
         for scene_id in ("scene_a", "scene_a", "scene_b"):
             self.client.post(

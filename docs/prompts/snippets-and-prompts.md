@@ -30,7 +30,9 @@ A prompt node pairs:
 - **Inputs** (`inputs` front matter) — typed declarations the dispatch UI
   renders as a form
 - An optional **offer allow-list** (`offer_on`) — the subject entry types this
-  prompt is offered on as a "＋New" conversation
+  prompt is offered on: as a "＋New" conversation, or — for an inline
+  (revise/continue) prompt — in the editor's revise menu while a document of
+  that type is open. Empty means offered nowhere, inline prompts included.
 
 All of these live in the node's own front matter. The entry-type definition
 carries none of them: a new prompt starts with no `context_strategy` and behaves

@@ -2,6 +2,8 @@
 id: prompt_7836e868f4
 title: Shorten
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline_edits

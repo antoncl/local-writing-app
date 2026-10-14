@@ -614,7 +614,9 @@ class LineEdit(BaseModel):
 
 class AIGenerateRequest(BaseModel):
     template_source: str = Field(min_length=1)
-    target_scene_id: str = Field(min_length=1)
+    # Empty when the open document is not a manuscript scene (e.g. a lore entry,
+    # #2475): the template then renders with `scene` = None.
+    target_scene_id: str = ""
     session_id: str | None = None
     inputs: dict[str, Any] = Field(default_factory=dict)
     text_before: str = ""

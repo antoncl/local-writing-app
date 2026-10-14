@@ -29,12 +29,18 @@
     readOnly?: boolean;
     // Outbound: the output config changed → parent emits its change/save.
     onChange?: () => void;
+    // Outbound (#2475): the author just switched INTO an inline mode (Inline
+    // suggestion / Line edits) from a non-inline one. The parent owns `offer_on`
+    // and uses this to pre-tick a default target, so a new inline prompt isn't
+    // silently offered nowhere.
+    onEnterInline?: () => void;
   }
 
   let {
     contextStrategy = $bindable(null),
     readOnly = false,
     onChange,
+    onEnterInline,
   }: Props = $props();
 
   type Handler = "" | "inline" | "inline_edits" | "extract_to_node";
@@ -101,7 +107,9 @@
     }
     // Line edits always target the selection and never commit — nothing to configure.
     if (next !== "extract_to_node") delete patch.commit;
+    const wasInline = handler === "inline" || handler === "inline_edits";
     emit(patch);
+    if (!readOnly && !wasInline && (next === "inline" || next === "inline_edits")) onEnterInline?.();
   }
 
   function toggleHeadless(): void {

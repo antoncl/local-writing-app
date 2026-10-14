@@ -58,8 +58,8 @@
     // it's subordinate to.
     hostPaneId?: string | null;
     // The prompt's `offer_on` allow-list (ADR-0054 §4 / S4b), authored via the
-    // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
-    // a conversation prompt (the surface ＋New lists).
+    // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; rendered for every
+    // non-snippet prompt.
     offerOn?: string[];
     // The prompt's instance `context_strategy` (ADR-0065 S3 / ADR-0062 D3),
     // authored via the PromptOutputEditor below. Bound to NodeEditor's
@@ -123,21 +123,31 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
-  // The offer_on picker is gated to CONVERSATION prompts (ADR-0065 S3) — those
-  // ＋New launches a conversation for: a handler-less `general` chat OR an
-  // `extract_to_node` brainstorm. Reads the OPEN prompt node's own `context_strategy`
-  // (never the entry-type's — invocability moved to the instance), gated by
-  // `isSnippetType` first (a snippet is always import-only, whatever its config)
-  // exactly like `promptSurfaceFor` — so an author never sees a targeting control
-  // that provably does nothing on an inline prompt or a snippet.
+  // The offer_on picker shows for every non-snippet prompt: a conversation
+  // prompt's ＋New subjects (ADR-0065 S3) and, since #2475, the documents an
+  // inline prompt is offered on (empty = nowhere). Reads the OPEN prompt node's
+  // own `context_strategy` (never the entry-type's — invocability moved to the
+  // instance), gated by `isSnippetType` first (a snippet is always import-only,
+  // whatever its config) exactly like `promptSurfaceFor` — so an author never
+  // sees a targeting control that provably does nothing on a snippet.
   const promptStrategy = $derived(
     isPrompt() && scene ? ((scene as unknown as PromptEntry).context_strategy ?? null) : null,
   );
   const showOfferOnPicker = $derived(
-    isPrompt() &&
-      !!scene &&
-      !isSnippetType(scene.entry_type, metadataSchema) &&
-      (!promptStrategy?.output?.handler || surfaceForStrategy(promptStrategy) === "conversation"),
+    isPrompt() && !!scene && !isSnippetType(scene.entry_type, metadataSchema),
+  );
+  // #2475: switching a prompt into an inline mode while it is offered nowhere
+  // pre-ticks manuscript scenes — where inline prompts have always run — as an
+  // explicit, editable value. Empty still means nowhere; this only fills an empty
+  // list at the moment of the switch, never a list the author chose.
+  const SCENE_ENTRY_TYPE = "manuscript:scene";
+  function preTickSceneTarget(): void {
+    if (offerOn.length > 0) return;
+    offerOn = [SCENE_ENTRY_TYPE];
+    onOfferOnChange?.();
+  }
+  const offerOnIsInline = $derived(
+    !!promptStrategy && ["cursor", "selection"].includes(surfaceForStrategy(promptStrategy) ?? ""),
   );
 
   // The output editor (ADR-0062 D3) is gated like offerOn's picker — non-snippet
@@ -613,6 +623,7 @@
         bind:contextStrategy
         {readOnly}
         onChange={onContextStrategyChange}
+        onEnterInline={preTickSceneTarget}
       />
     </div>
   {/if}
@@ -625,6 +636,7 @@
         bind:offerOn
         {metadataSchema}
         {readOnly}
+        inline={offerOnIsInline}
         onChange={onOfferOnChange}
       />
     </div>

@@ -2,6 +2,8 @@
 id: prompt_0670474a78
 title: Continue
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 inputs:
 - name: length
   type: number

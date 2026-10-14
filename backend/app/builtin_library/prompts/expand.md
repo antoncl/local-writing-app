@@ -2,6 +2,8 @@
 id: prompt_55f5c77e1b
 title: Expand
 entry_type: prompt:general
+offer_on:
+- manuscript:scene
 context_strategy:
   output:
     handler: inline

@@ -260,7 +260,9 @@
     // dir + error sink and routes its chosen path into projectSession.
     projectChooser.onError = (message) => { error = message; };
     projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
-    projectChooser.getStartPath = () => projectPath;
+    // No project open yet (first run, #2467): start at the machine projects
+    // folder — the only place the open picker accepts a project from (#441).
+    projectChooser.getStartPath = () => projectPath || createWizard.defaultProjectsFolder;
     // The create-project wizard (#318) owns new-project creation now. It writes
     // the machine root itself (step 1, first run) and hands projectSession the
     // resolved path/title/declaration on Create.

@@ -38,6 +38,9 @@ const CARD_MAX_PX = 232;
 const CARD_OVERLAP_PX = 32;
 const CARD_GAP_PX = 12;
 const CARD_WIDTH_VAR = "--line-edit-card-w";
+// The CSS reads the overlap from here too, so the offset and the width maths
+// can't drift apart.
+const CARD_OVERLAP_VAR = "--line-edit-card-overlap";
 
 /** The margin card's width for `room` px right of the prose column, or null
  *  when even the minimum card doesn't fit (narrow layout). */
@@ -99,7 +102,10 @@ function observeCardRoom(view: EditorView): () => void {
     }
     const room = frame.getBoundingClientRect().left + frame.clientWidth - view.dom.getBoundingClientRect().right;
     const width = marginCardWidth(room);
-    if (width !== null) view.dom.style.setProperty(CARD_WIDTH_VAR, `${width}px`);
+    if (width !== null) {
+      view.dom.style.setProperty(CARD_WIDTH_VAR, `${width}px`);
+      view.dom.style.setProperty(CARD_OVERLAP_VAR, `${CARD_OVERLAP_PX}px`);
+    }
     setLineEditCardWide(view, width !== null);
   });
   observer.observe(view.dom);

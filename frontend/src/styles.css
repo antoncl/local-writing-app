@@ -1004,9 +1004,11 @@ button.row-action-add.active {
   display: inline-block;
   vertical-align: top;
   position: absolute;
-  left: calc(100% - 32px);
-  /* Adapts to the gutter (#2478): the plugin's ResizeObserver sets it, 180–232px. */
-  width: var(--line-edit-card-w, 232px);
+  /* Both set by the plugin's ResizeObserver (#2478), which only switches to this
+     margin layout once it has measured them: the overlap into the column's
+     right padding, and a width adapted to the gutter (180–232px). */
+  left: calc(100% - var(--line-edit-card-overlap));
+  width: var(--line-edit-card-w);
   max-width: none;
   margin: 0;
   z-index: 1;

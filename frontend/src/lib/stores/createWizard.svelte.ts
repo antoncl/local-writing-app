@@ -126,6 +126,15 @@ class CreateWizard {
   openBusy = $state(false);
   // Choosing Open swaps the step list for start + open_root (wizardSteps.ts).
   #opening = $state(false);
+  // Whether the Welcome step is still reachable: true for a first-run session
+  // until the Create path moves past the root step (then Welcome drops out, as the
+  // root step always did). Open keeps it true, so Back from open_root always lands
+  // on a Welcome step offering both choices - even after the root was saved and
+  // the open then failed (needsRootFolder is false by then).
+  #welcome = $state(false);
+  // Bumped whenever the Welcome step is left, the wizard closes or resets, or a
+  // new pick starts - a slow #pickExisting that finds it changed bails silently.
+  #pickToken = 0;
 
   // ---- Navigation ----
   #stepIndex = $state(0);
@@ -179,7 +188,9 @@ class CreateWizard {
   // beside it — the new book inherits it. Awaited before create so the freshly
   // created project resolves against it. Unused on subsequent runs (the policy
   // is per-project then).
-  onSaveAppPolicy: (policy: AIPolicy) => Promise<void> = async () => {};
+  // Resolves false when the write failed (the host has already surfaced it) - the
+  // first-run Open path (#2467) keeps the wizard open on that.
+  onSaveAppPolicy: (policy: AIPolicy) => Promise<boolean | void> = async () => {};
   onHireAssistant: (
     title: string,
     provider: string,
@@ -194,7 +205,7 @@ class CreateWizard {
 
   // ---- Derived ----
   needsRootFolder = $derived(!this.defaultProjectsFolder.trim());
-  steps = $derived(activeSteps(this.needsRootFolder, this.#opening));
+  steps = $derived(activeSteps(this.needsRootFolder, this.#opening, this.#welcome));
   currentStep = $derived(this.steps[this.#stepIndex] ?? this.steps[this.steps.length - 1]);
   currentIndex = $derived(this.steps.indexOf(this.currentStep));
   isFinalStep = $derived(this.currentIndex === this.steps.length - 1);
@@ -322,6 +333,7 @@ class CreateWizard {
     this.reset();
     // Snapshot first-run before the root step can flip it (#746 — see submit()).
     this.#firstRun = this.needsRootFolder;
+    this.#welcome = this.#firstRun;
     // Returning user (a machine root is already set): seed the Location field
     // with it so the shown default actually counts (#1410). First run seeds
     // after the root step instead (next()).
@@ -367,11 +379,14 @@ class CreateWizard {
     this.#stepIndex = 0;
     this.pickerOpen = false;
     this.pickerMode = "location";
+    this.#welcome = false;
+    this.#pickToken += 1;
     this.#leaveOpen();
     this.openBusy = false;
   }
 
   close() {
+    this.#pickToken += 1;
     this.open = false;
   }
 
@@ -395,12 +410,22 @@ class CreateWizard {
   // ---- First-run Welcome step (#2467) ----
   chooseCreate() {
     if (this.currentStep.id !== "start") return;
+    this.#pickToken += 1;
     this.openError = "";
-    this.#stepIndex = indexOfStep(this.steps, "root");
+    if (this.needsRootFolder) {
+      this.#stepIndex = indexOfStep(this.steps, "root");
+      return;
+    }
+    // The root is already saved (a failed open got that far): skip the root step
+    // and land on Location, exactly where a successful root save would.
+    this.#welcome = false;
+    this.#stepIndex = 0;
+    this.#seedLocationFromDefault();
   }
 
   chooseOpen() {
     if (this.currentStep.id !== "start") return;
+    this.#pickToken += 1;
     this.openError = "";
     this.pickerMode = "open";
     this.pickerOpen = true;
@@ -409,20 +434,31 @@ class CreateWizard {
   // The picked folder must itself be a project; the suggested projects folder is
   // the parent of the topmost ancestor project (see openExistingProject.ts).
   async #pickExisting(path: string) {
+    const token = ++this.#pickToken;
+    // Superseded (Create chosen, closed, reset, newer pick) or no longer on Welcome.
+    const stale = () => token !== this.#pickToken || !this.open || this.currentStep.id !== "start";
     this.openError = "";
     try {
       const listing = await api.listDirectories(path);
+      if (stale()) return;
       if (!listing.is_project) {
         this.openError = "That folder isn't a project — pick the folder that holds project.yaml.";
         return;
       }
-      this.rootFolderDraft = await suggestProjectsFolder(listing, (next) =>
-        api.listDirectories(next),
-      );
+      if (!listing.parent_path) {
+        // Nothing above it to be the projects folder, so containment can never hold.
+        this.openError =
+          "A project at the top of a drive can't be opened — move it into a folder first.";
+        return;
+      }
+      const suggestion = await suggestProjectsFolder(listing, (next) => api.listDirectories(next));
+      if (stale()) return;
+      this.rootFolderDraft = suggestion;
       this.openProjectPath = listing.path;
       this.#opening = true;
       this.#stepIndex = indexOfStep(this.steps, "open_root");
     } catch (error) {
+      if (stale()) return;
       this.openError = error instanceof Error ? error.message : "Could not read that folder.";
     }
   }
@@ -433,11 +469,13 @@ class CreateWizard {
     this.openProjectPath = "";
     this.rootFolderDraft = "";
     this.openError = "";
+    this.aiPolicy = "inherit";
     this.#stepIndex = 0;
   }
 
-  // Save the chosen projects folder, then open the project under it. Either
-  // failing keeps the wizard open on this step with the reason shown inline.
+  // Save the chosen projects folder, persist the first-run app-wide AI policy
+  // (#746 - the same write submit() does), then open the project under it. Any of
+  // them failing keeps the wizard open on this step with the reason shown inline.
   async confirmOpen() {
     if (this.currentStep.id !== "open_root" || !this.canAdvance || this.openBusy) return;
     this.openBusy = true;
@@ -448,6 +486,10 @@ class CreateWizard {
         this.openError = "Couldn't use that folder — check that the path exists.";
         return;
       }
+      if (this.#aiPolicyToPersist && !(await this.#saveAppPolicy(this.#aiPolicyToPersist))) {
+        this.openError = "Couldn't save the AI policy.";
+        return;
+      }
       if (!(await this.onOpenProject(this.openProjectPath))) {
         this.openError = "Couldn't open that project.";
         return;
@@ -455,6 +497,14 @@ class CreateWizard {
       this.close();
     } finally {
       this.openBusy = false;
+    }
+  }
+
+  async #saveAppPolicy(policy: AIPolicy): Promise<boolean> {
+    try {
+      return (await this.onSaveAppPolicy(policy)) !== false;
+    } catch {
+      return false;
     }
   }
 
@@ -482,6 +532,7 @@ class CreateWizard {
       //
       // First run only reaches a machine root now, so seed the Location with it
       // here (start() handled the returning-user case) — #1410.
+      this.#welcome = false;
       this.#stepIndex = 0;
       this.#seedLocationFromDefault();
       return;

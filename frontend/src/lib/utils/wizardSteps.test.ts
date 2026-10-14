@@ -29,6 +29,16 @@ describe("activeSteps", () => {
     expect(activeSteps(false, true).map((s) => s.id)).toEqual(["start", "open_root"]);
   });
 
+  it("keeps start (but not root) when a first-run session's root is already saved", () => {
+    expect(activeSteps(false, false, true).map((s) => s.id)).toEqual([
+      "start",
+      "location",
+      "ai",
+      "review",
+      "describe",
+    ]);
+  });
+
   it("never offers start or open_root on a plain returning-user run", () => {
     expect(activeSteps(false).map((s) => s.id)).toEqual(["location", "ai", "review", "describe"]);
   });

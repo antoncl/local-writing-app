@@ -129,6 +129,16 @@
               That folder doesn't contain the project you're opening.
             </div>
           {/if}
+          <!-- First run: this choice becomes the app-wide AI default (#746). -->
+          <section class="wizard-inherits">
+            <h3>AI policy</h3>
+            <AiPolicySlider
+              value={wizard.aiSliderValue}
+              canInherit={wizard.canInheritPolicy}
+              inherited={wizard.inheritedPolicy}
+              onChange={(next) => wizard.setAiPolicy(next)}
+            />
+          </section>
           {#if wizard.openError}
             <div class="wizard-error" role="alert">{wizard.openError}</div>
           {/if}

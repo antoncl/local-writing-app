@@ -37,13 +37,24 @@ const ALL_STEPS: StepDef[] = [
 // The same first-run condition adds a "start" (Welcome) step ahead of it (#2467):
 // create a project or open an existing one. Choosing Open swaps the rest of the
 // flow for the single "open_root" step (pick the projects folder, then open).
-export function activeSteps(needsRootFolder: boolean, openingExisting = false): StepDef[] {
+//
+// `welcome` says whether the Welcome step is still reachable; it defaults to
+// first run, but a first-run session whose root is already saved (a failed open)
+// keeps it so Back from open_root still has both choices to offer.
+export function activeSteps(
+  needsRootFolder: boolean,
+  openingExisting = false,
+  welcome = needsRootFolder,
+): StepDef[] {
   if (openingExisting) {
     return ALL_STEPS.filter((step) => step.id === "start" || step.id === "open_root");
   }
-  return ALL_STEPS.filter(
-    (step) => step.id !== "open_root" && ((step.id !== "root" && step.id !== "start") || needsRootFolder),
-  );
+  return ALL_STEPS.filter((step) => {
+    if (step.id === "open_root") return false;
+    if (step.id === "start") return welcome;
+    if (step.id === "root") return needsRootFolder;
+    return true;
+  });
 }
 
 export function indexOfStep(steps: StepDef[], id: WizardStepId): number {

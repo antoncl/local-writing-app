@@ -281,9 +281,7 @@
       projectSession.saveProviderCredential(field, value);
     // First-run AI policy is the app-wide default (#746) — machine-global like
     // the credentials/assistants above; the new book inherits it.
-    createWizard.onSaveAppPolicy = async (policy) => {
-      await projectSession.saveAiPolicy(policy);
-    };
+    createWizard.onSaveAppPolicy = (policy) => projectSession.saveAiPolicy(policy);
     // Machine-layer writes live in one module shared with Settings (#2444).
     createWizard.onReorderAssistants = async (orderedIds) => {
       await run(() => reorderMachineAssistants(orderedIds));

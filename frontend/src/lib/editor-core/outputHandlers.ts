@@ -14,7 +14,13 @@
 //   source      what it reads: scan tokens (inline) | the transcript (extract)
 //   review      how the result is reviewed: inline_mark | patch_diff
 //   activation  what fires it: inline (slash / selection toolbar) | conversation (＋New)
-// Behavioural — the two phases the core drives polymorphically:
+// Behavioural — the surface the handler is offered on, and the two phases the core
+// drives polymorphically:
+//   surface(output)        the editor surface it resolves to for a prompt's declared
+//                          output: cursor | selection | conversation. inline reads the
+//                          declared destination; inline_edits is always the selection;
+//                          extract is the conversation. `surfaceForStrategy` asks the
+//                          handler, never the key.
 //   produce(host)          run the transform → the thing to review (null = the
 //                          produce can't proceed, having reported why via `host`).
 //                          inline → gather the scan source; extract → the 2nd-pass
@@ -23,12 +29,13 @@
 //                          stream at cursor/selection behind the aiSuggestion mark;
 //                          extract → publish the patch for the diff review.
 //
-// `produce`/`apply` live on the shared generic base `OutputHandler<Host, Produced>`
-// — the two handlers have different hosts, so the base is generic over them, and
-// each concrete handler binds its own (the ADR's minimality rule is met now that
-// two handlers share the exact shape). The host carries the state-bound primitives
-// (the streaming controller, the extraction + review publish); the handler is the
-// registered dispatch seam.
+// `surface`/`produce`/`apply` live on the shared generic base
+// `OutputHandler<Host, Produced>` — the editor handlers share ONE host
+// (`InlineHost`, offering every primitive any of them drives) and the extract
+// handler binds its own. The host carries the state-bound primitives (the streaming
+// controller, the line-edits run, the extraction + review publish); the handler is
+// the registered dispatch seam, so the next editor handler is a registry entry, not
+// a new branch in the controller.
 //
 // Slice: S2a registered `inline`; S2b added `extract_to_node` (the brainstorm
 // commit) and lifted produce/apply onto the generic base; S3 retired the
@@ -80,6 +87,7 @@ export interface OutputHandler<Host = unknown, Produced = unknown> {
   readonly source: OutputSource;
   readonly review: OutputReview;
   readonly activation: OutputActivation;
+  surface(output: PromptOutput | null | undefined): InlineDestination | "conversation";
   produce(host: Host): Produced | null | Promise<Produced | null>;
   apply(produced: Produced, host: Host): void | Promise<void>;
 }
@@ -105,15 +113,17 @@ export interface InlineGathered {
   selectionText?: string;
 }
 
-// What the inline handler needs from its activation surface (the
-// AiSuggestionController). `streamInline` is the controller's streaming
-// primitive — the stream stays bound to the controller's reactive state (the
-// pending mark, accept/revert/retry, telemetry), so `apply` delegates to it.
+// What the editor handlers (`inline`, `inline_edits`) need from their activation
+// surface (the AiSuggestionController) — one host offering every primitive any of
+// them drives. `streamInline` / `runLineEdits` are the controller's run primitives:
+// the run stays bound to the controller's reactive state (the pending mark or edit
+// list, accept/revert/retry, telemetry), so `apply` delegates to one of them.
 export interface InlineHost {
   destination: InlineDestination;
   getEditor(): Editor | null;
   setError(message: string, anchor?: number): void;
   streamInline(gathered: InlineGathered): Promise<void>;
+  runLineEdits(gathered: InlineGathered): Promise<void>;
 }
 
 // The revise gather shared by `inline` (selection destination) and `inline_edits`:
@@ -149,6 +159,7 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   source: "scan",
   review: "inline_mark",
   activation: "inline",
+  surface: inlineDestinationFor,
 
   produce(host) {
     const editor = host.getEditor();
@@ -169,22 +180,14 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
 
 // ── inline_edits ────────────────────────────────────────────────────────────
 
-// What the line-edits handler needs from its activation surface. Like inline's
-// stream, the run is bound to the controller's reactive state (the pending edit
-// list, telemetry), so `apply` delegates to its `runLineEdits` primitive.
-export interface InlineEditsHost {
-  getEditor(): Editor | null;
-  setError(message: string, anchor?: number): void;
-  runLineEdits(gathered: InlineGathered): Promise<void>;
-}
-
 // A revise that answers with a list of reasoned edits (#2460) instead of a
 // replacement passage. Always targets the selection; reviewed edit-by-edit.
-export const inlineEditsHandler: OutputHandler<InlineEditsHost, InlineGathered> = {
+export const inlineEditsHandler: OutputHandler<InlineHost, InlineGathered> = {
   key: "inline_edits",
   source: "scan",
   review: "edit_list",
   activation: "inline",
+  surface: () => "selection",
   produce: (host) => gatherSelection(host),
   apply: (gathered, host) => host.runLineEdits(gathered),
 };
@@ -207,6 +210,7 @@ export const extractHandler: OutputHandler<ExtractHost, AIEntryPatch> = {
   source: "transcript",
   review: "patch_diff",
   activation: "conversation",
+  surface: () => "conversation",
   produce: (host) => host.extract(),
   apply: (patch, host) => host.publish(patch),
 };

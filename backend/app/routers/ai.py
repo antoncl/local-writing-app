@@ -57,7 +57,11 @@ from app.services.ai.chat import (
 )
 from app.services.ai.extraction import run_entry_patch_extraction
 from app.services.ai.history_budget import apply_history_window
-from app.services.ai.line_edits import LINE_EDITS_RESPONSE_SCHEMA, read_line_edits_reply
+from app.services.ai.line_edits import (
+    LINE_EDITS_RESPONSE_SCHEMA,
+    LineEditsStreamCollector,
+    read_line_edits_reply,
+)
 from app.services.ai.preview import (
     PreviewError,
     PreviewRequest,
@@ -570,6 +574,30 @@ async def stream_ndjson_until_disconnect(
         await run_in_threadpool(sync_lines.close)
 
 
+class ClosingStreamingResponse(StreamingResponse):
+    """A StreamingResponse that closes its body iterator the moment the response
+    ends, however it ends (#2482).
+
+    On a client disconnect Starlette stops pulling from `body_iterator` — the
+    failed send (or its disconnect listener) ends the response — but it never
+    closes the iterator. The suspended async generator is then only finalized
+    when it is garbage-collected, possibly much later, so the `finally` in
+    `stream_ndjson_until_disconnect` (the one that closes the provider stream)
+    ran late and a local model kept generating an abandoned reply: measured
+    ~35s of a queued follow-up vs 0.4s idle. Closing it here runs that teardown
+    at once. `aclose()` on a finished generator is a no-op, so the normal-end
+    path is unchanged.
+    """
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[override]
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+
 @router.post("/api/ai/chat/stream")
 async def ai_chat_stream(
     project: CurrentProject, request: AIChatRequest, http_request: Request
@@ -631,7 +659,7 @@ async def ai_chat_stream(
         settings=settings,
         policy=policy,
     )
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         stream_ndjson_until_disconnect(
             transform_provider_events_to_ndjson(
                 events, policy=policy,
@@ -655,11 +683,7 @@ async def ai_chat_stream(
 async def ai_generate_stream(
     project: CurrentProject, request: AIGenerateRequest, http_request: Request
 ) -> StreamingResponse:
-    if request.response_format != "text":
-        # #2460: an edit list is read whole, so only the non-streaming route serves it.
-        raise HTTPException(
-            status_code=422, detail="response_format is not supported on the streaming route."
-        )
+    line_edits = request.response_format == "line_edits"  # #2460
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():
@@ -729,12 +753,18 @@ async def ai_generate_stream(
             messages=chat_messages,
             system_blocks=system_blocks,
             session_id=session_id,
+            response_schema=LINE_EDITS_RESPONSE_SCHEMA if line_edits else None,
         ),
         provider_name=resolved.provider,
         settings=settings,
         policy=policy,
     )
-    return StreamingResponse(
+    # An edit list is read whole, but riding the stream lets a disconnect cancel
+    # the provider call (#2464): the collector reads it onto the `done` line.
+    collector = LineEditsStreamCollector() if line_edits else None
+    if collector is not None:
+        events = collector.tap(events)
+    return ClosingStreamingResponse(
         stream_ndjson_until_disconnect(
             transform_provider_events_to_ndjson(
                 events,
@@ -742,6 +772,7 @@ async def ai_generate_stream(
                 extra_done={"session_id": session_id, "char_count": char_count},
                 descriptor=descriptor,
                 on_error=lambda ev: _record_stream_error(project, ev),
+                on_done=collector.on_done if collector is not None else None,
             ),
             http_request,
         ),

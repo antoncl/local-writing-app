@@ -3,6 +3,7 @@ the `response_format="line_edits"` mode of `POST /api/ai/generate`."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from pathlib import Path
@@ -15,14 +16,18 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateStructureNodeRequest, UpdateProjectSettingsRequest
+from app.routers.ai import stream_ndjson_until_disconnect
 from app.services.ai.line_edits import (
     LINE_EDITS_RESPONSE_SCHEMA,
     LINE_EDITS_TRUNCATED_ERROR,
     LINE_EDITS_UNREADABLE_ERROR,
+    LineEditsStreamCollector,
     parse_line_edits,
 )
 from app.services.ai.profiles.base import ChatOutcome
+from app.services.ai.providers import StreamDelta, StreamDone
 from app.services.ai.sessions import default_registry
+from app.services.ai.streaming import transform_provider_events_to_ndjson
 
 _GOOD = {"edits": [{"find": "was cold", "replace": "chilled", "reason": "stronger verb"}]}
 
@@ -160,16 +165,101 @@ class GenerateLineEditsRouteTests(unittest.TestCase):
         self.assertIsNone(body["edits"])
         self.assertIsNone(mock_chat.call_args.args[0].response_schema)
 
-    def test_stream_route_rejects_line_edits(self) -> None:
-        response = self.client.post(
-            "/api/ai/generate/stream",
-            json={
-                "template_source": '{% role "user" %}x{% endrole %}',
-                "target_scene_id": self.scene_id,
-                "response_format": "line_edits",
-            },
+    def _post_stream(self, chunks: list[str], *, truncated: bool = False, **extra: object):
+        """POST the streaming route with a faked provider stream; returns
+        (the ndjson lines, the ChatCall the provider was given)."""
+        from app.services import machine_settings as ms
+
+        settings = ms.MachineSettings(
+            providers=ms.ProviderCredentials(anthropic_api_key="sk-ant-test"),
+            default_provider="anthropic",
         )
-        self.assertEqual(response.status_code, 422)
+        seen: dict[str, object] = {}
+
+        def _fake_stream(call, **_kwargs):
+            seen["call"] = call
+            for chunk in chunks:
+                yield StreamDelta(text=chunk)
+            yield StreamDone(
+                provider="anthropic",
+                model="m",
+                latency_ms=1,
+                stop_reason="max_tokens" if truncated else "end_turn",
+                truncated=truncated,
+            )
+
+        with patch("app.services.machine_settings.load_settings", return_value=settings), patch(
+            "app.routers.ai.ai_providers.chat_stream", side_effect=_fake_stream
+        ):
+            response = self.client.post(
+                "/api/ai/generate/stream",
+                json={
+                    "template_source": '{% role "user" %}{{ selection }}{% endrole %}',
+                    "target_scene_id": self.scene_id,
+                    "selection": "The room was cold.",
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    **extra,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        return [json.loads(line) for line in response.text.splitlines() if line], seen["call"]
+
+    def test_stream_route_line_edits_done_carries_the_parsed_edits(self) -> None:
+        raw = json.dumps(_GOOD)
+        lines, call = self._post_stream([raw[:20], raw[20:]], response_format="line_edits")
+        done = lines[-1]
+        self.assertEqual(done["type"], "done")
+        self.assertEqual(done["edits"], _GOOD["edits"])
+        self.assertNotIn("error", done)
+        self.assertNotIn("ok", done)
+        self.assertEqual(call.response_schema, LINE_EDITS_RESPONSE_SCHEMA)
+
+    def test_stream_route_line_edits_truncated_and_unreadable_carry_the_error(self) -> None:
+        lines, _ = self._post_stream([json.dumps(_GOOD)], truncated=True, response_format="line_edits")
+        self.assertFalse(lines[-1]["ok"])
+        self.assertEqual(lines[-1]["error"], LINE_EDITS_TRUNCATED_ERROR)
+        self.assertIsNone(lines[-1]["edits"])
+        lines, _ = self._post_stream(["Sorry, no JSON."], response_format="line_edits")
+        self.assertFalse(lines[-1]["ok"])
+        self.assertEqual(lines[-1]["error"], LINE_EDITS_UNREADABLE_ERROR)
+
+    def test_stream_route_text_format_is_unchanged(self) -> None:
+        lines, call = self._post_stream(["Plain ", "prose."])
+        self.assertEqual(lines[-1]["type"], "done")
+        self.assertNotIn("edits", lines[-1])
+        self.assertIsNone(call.response_schema)
+
+    def test_a_disconnect_closes_the_provider_stream_for_a_line_edits_run(self) -> None:
+        # #2464: the point of riding the stream - a client abort reaches the provider.
+        closed: list[bool] = []
+
+        def provider():
+            try:
+                yield StreamDelta(text="{")
+                yield StreamDelta(text='"edits": [')
+                yield StreamDelta(text="]}")
+            finally:
+                closed.append(True)
+
+        class _Request:
+            polls = 0
+
+            async def is_disconnected(self) -> bool:
+                self.polls += 1
+                return self.polls > 1
+
+        collector = LineEditsStreamCollector()
+        lines = transform_provider_events_to_ndjson(
+            collector.tap(provider()), policy="cloud-allowed", on_done=collector.on_done
+        )
+
+        async def drain() -> list[str]:
+            return [line async for line in stream_ndjson_until_disconnect(lines, _Request())]  # type: ignore[arg-type]
+
+        out = asyncio.run(drain())
+        self.assertEqual(len(out), 1)
+        self.assertEqual(closed, [True])
 
     def test_empty_target_scene_renders_without_a_scene(self) -> None:
         # #2475: a non-scene document (a lore entry) sends no scene id.

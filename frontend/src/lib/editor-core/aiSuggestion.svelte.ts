@@ -14,6 +14,7 @@
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { api } from "@/lib/api";
+import type { AIStreamEvent } from "@/lib/api/core";
 import { countWords } from "@/lib/utils/wordCount";
 import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
 import {
@@ -28,12 +29,10 @@ import {
 } from "@/lib/editor-core/promptResolution";
 import { seedConversationInputs } from "@/components/editor/body/chat/chatInputs";
 import {
-  inlineHandler,
-  inlineEditsHandler,
   outputHandlerFor,
   type InlineDestination,
-  type InlineEditsHost,
   type InlineGathered,
+  type OutputHandler,
   type InlineHost,
   type OutputRun,
 } from "@/lib/editor-core/outputHandlers";
@@ -134,6 +133,8 @@ export class AiSuggestionController {
   // Bumped by reset(): a line-edits reply that arrives after it belongs to a
   // document the writer has left, and is discarded.
   #runEpoch = 0;
+  // The running generation's abort handle (#2464): Cancel and Esc abort it.
+  #abort: AbortController | null = null;
 
   #deps: AiSuggestionDeps;
 
@@ -149,6 +150,10 @@ export class AiSuggestionController {
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
     this.#pendingInternal = null;
+    // Leaving the document also stops its generation (#2464): the reply would be
+    // discarded anyway (the epoch below), and an abort is what frees the provider
+    // instead of letting it finish a run nobody will see.
+    this.#abort?.abort();
     this.#runEpoch += 1;
     const editor = this.#deps.getEditor();
     // Leave no orphaned edit decorations behind on the editor we're leaving. The
@@ -162,6 +167,12 @@ export class AiSuggestionController {
     this.#closeLineEdits();
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
+  }
+
+  // Cancel the running generation (#2464). The run itself unwinds: a line-edit
+  // run installs nothing, a stream restores the text it displaced.
+  cancelGeneration(): void {
+    this.#abort?.abort();
   }
 
   #cancelRenderTimer(): void {
@@ -473,10 +484,10 @@ export class AiSuggestionController {
     const surface = promptSurfaceFor(ctx, entry);
     if (surface === "cursor" || surface === "selection") {
       const run: OutputRun = { entry, inputs, assistantId, scene };
-      const lineEdits = outputHandlerFor(entry.context_strategy?.output)?.key === "inline_edits";
+      // Both editor handlers share one host; the registry decides which drives it.
+      const handler = outputHandlerFor(entry.context_strategy?.output) as OutputHandler<InlineHost, InlineGathered>;
       const host = this.#inlineHost(run, surface);
-      const editsHost = this.#lineEditsHost(run);
-      const gathered = await (lineEdits ? inlineEditsHandler.produce(editsHost) : inlineHandler.produce(host));
+      const gathered = await handler.produce(host);
       if (!gathered) return;
       this.error = null;
       this.#anchorPos = gathered.from;
@@ -485,7 +496,7 @@ export class AiSuggestionController {
       this.#lastInvokedInputs = inputs;
       this.#lastInvokedAssistantId = assistantId;
       this.updateToolbarPosition();
-      await (lineEdits ? inlineEditsHandler.apply(gathered, editsHost) : inlineHandler.apply(gathered, host));
+      await handler.apply(gathered, host);
       return;
     }
     // A `conversation` surface (ADR-0065) — an `extract_to_node` brainstorm or a
@@ -502,8 +513,8 @@ export class AiSuggestionController {
     this.updateToolbarPosition();
   }
 
-  // Build the inline handler's host for one run — the seam between the registered
-  // handler and this controller's streaming primitive + error surface.
+  // Build the editor handlers' host for one run — the seam between the registered
+  // handler and this controller's run primitives (stream, line edits) + error surface.
   #inlineHost(run: OutputRun, destination: InlineDestination): InlineHost {
     return {
       destination,
@@ -514,16 +525,6 @@ export class AiSuggestionController {
         this.updateToolbarPosition();
       },
       streamInline: (gathered) => this.#streamInline(gathered, run),
-    };
-  }
-
-  // The line-edits handler's host (#2460): inline's error surface, with the
-  // controller's non-streaming run as its `apply` primitive.
-  #lineEditsHost(run: OutputRun): InlineEditsHost {
-    const inline = this.#inlineHost(run, "selection");
-    return {
-      getEditor: inline.getEditor,
-      setError: inline.setError,
       runLineEdits: (gathered) => this.#runLineEdits(gathered, run),
     };
   }
@@ -537,8 +538,16 @@ export class AiSuggestionController {
     const { from, to, selectionText, textBefore, textAfter } = gathered;
     const { entry, inputs, assistantId, scene } = run;
     const epoch = this.#runEpoch;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const { signal } = abort;
     try {
-      const res = await api.aiGenerate({
+      // The edit list is read whole, so the deltas are ignored - but the call rides
+      // the streaming route because only a stream's disconnect reaches the provider
+      // and stops it (#2464). The terminal `done` carries the parsed edits.
+      let res: Extract<AIStreamEvent, { type: "done" }> | null = null;
+      let streamError: string | null = null;
+      for await (const ev of api.aiGenerateStream({
         template_source: entry.body,
         target_scene_id: this.#sceneIdForWire(scene),
         session_id: scene.id,
@@ -550,10 +559,23 @@ export class AiSuggestionController {
         ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
         response_format: "line_edits",
-      });
+      }, signal)) {
+        if (signal.aborted) break;
+        if (ev.type === "done") res = ev;
+        else if (ev.type === "error") streamError = ev.error || "Unknown error";
+      }
+      // Cancelled (#2464): drop the reply, even one that raced the abort.
+      if (signal.aborted) {
+        this.#noteLineEditCancelled(epoch);
+        return;
+      }
       // The writer switched documents mid-call: this reply isn't theirs to see.
       if (epoch !== this.#runEpoch || this.#deps.getScene()?.id !== scene.id) return;
-      if (!res.ok) {
+      if (streamError !== null || !res) {
+        this.error = streamError ?? "The model's reply ended before it finished.";
+        return;
+      }
+      if (res.ok === false) {
         this.error = res.error || "Unknown error";
         return;
       }
@@ -589,11 +611,17 @@ export class AiSuggestionController {
         );
       }
     } catch (e) {
-      this.error = (e as Error).message;
+      if (signal.aborted) this.#noteLineEditCancelled(epoch);
+      else this.error = (e as Error).message;
     } finally {
+      if (this.#abort === abort) this.#abort = null;
       this.generating = false;
       this.updateToolbarPosition();
     }
+  }
+
+  #noteLineEditCancelled(epoch: number): void {
+    if (epoch === this.#runEpoch) this.#deps.onNotice?.("Line edit cancelled.");
   }
 
   // Follow the open edit list: keep the remaining count and the revised range
@@ -730,6 +758,9 @@ export class AiSuggestionController {
       cost_usd?: number | null;
     } | null = null;
     let streamErrored = false;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const { signal } = abort;
 
     // Throttled render (#2428). The render replaces the whole suggestion with the
     // latest text, so dropping intermediate states is safe. The first delta renders
@@ -783,6 +814,34 @@ export class AiSuggestionController {
       streamingActive = true;
     };
 
+    // Take the streamed text back out: the displaced selection returns, or a
+    // cursor insert is removed. Shared by the stream's error and a cancel (#2464).
+    const revertStreamed = () => {
+      this.#cancelRenderTimer();
+      pendingVisible = null;
+      if (streamingActive && editor) {
+        const range = this.#findSuggestionRange(suggestionId);
+        if (range) {
+          if (destination === "selection" && this.#suggestionOriginal) {
+            editor
+              .chain()
+              .setTextSelection({ from: range.from, to: range.to })
+              .deleteSelection()
+              .insertContent(this.#suggestionOriginal)
+              .run();
+          } else {
+            editor
+              .chain()
+              .setTextSelection({ from: range.from, to: range.to })
+              .deleteSelection()
+              .run();
+          }
+        }
+        this.suggestionId = null;
+        this.#suggestionOriginal = null;
+      }
+    };
+
     try {
       for await (const ev of api.aiGenerateStream({
         template_source: entry.body,
@@ -795,7 +854,8 @@ export class AiSuggestionController {
         ...(selectionText !== undefined ? { selection: selectionText } : {}),
         ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
-      })) {
+      }, signal)) {
+        if (signal.aborted) break;
         if (ev.type === "delta") {
           accumulated += ev.text;
           ensureStreamingStarted();
@@ -817,30 +877,12 @@ export class AiSuggestionController {
         } else if (ev.type === "error") {
           this.error = ev.error || "Unknown error";
           streamErrored = true;
-          this.#cancelRenderTimer();
-          pendingVisible = null;
-          if (streamingActive && editor) {
-            const range = this.#findSuggestionRange(suggestionId);
-            if (range) {
-              if (destination === "selection" && this.#suggestionOriginal) {
-                editor
-                  .chain()
-                  .setTextSelection({ from: range.from, to: range.to })
-                  .deleteSelection()
-                  .insertContent(this.#suggestionOriginal)
-                  .run();
-              } else {
-                editor
-                  .chain()
-                  .setTextSelection({ from: range.from, to: range.to })
-                  .deleteSelection()
-                  .run();
-              }
-            }
-            this.suggestionId = null;
-            this.#suggestionOriginal = null;
-          }
+          revertStreamed();
         }
+      }
+      if (signal.aborted) {
+        streamErrored = true;
+        revertStreamed();
       }
       if (!streamErrored) flushRender();
       if (!streamErrored) {
@@ -870,9 +912,14 @@ export class AiSuggestionController {
         }
       }
     } catch (e) {
-      flushRender(); // keep what streamed so far on screen, as per-delta rendering did
-      this.error = (e as Error).message;
+      if (signal.aborted) {
+        revertStreamed();
+      } else {
+        flushRender(); // keep what streamed so far on screen, as per-delta rendering did
+        this.error = (e as Error).message;
+      }
     } finally {
+      if (this.#abort === abort) this.#abort = null;
       this.#cancelRenderTimer();
       this.generating = false;
       this.updateToolbarPosition();

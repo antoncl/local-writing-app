@@ -22,9 +22,11 @@ import {
   isSnippetType,
   promptSurfaceFor,
   resolvePromptPositionalArgs,
+  surfaceForStrategy,
   visiblePromptFor,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
+import { outputHandlerFor } from "@/lib/editor-core/outputHandlers";
 import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
 import type {
   LoreEntrySummary,
@@ -762,6 +764,17 @@ describe("inline_edits surface (#2460)", () => {
     expect(
       promptSurfaceFor(ctx(), prompt("p", "prompt:general", { output: { handler: "inline_edits", destination: "cursor" } })),
     ).toBe("selection");
+  });
+});
+
+describe("surfaceForStrategy asks the registered handler (#2465)", () => {
+  it("every registered handler's surface is what the strategy resolves to", () => {
+    for (const key of ["inline", "inline_edits", "extract_to_node"] as const) {
+      for (const destination of [undefined, "cursor", "selection"] as const) {
+        const output = { handler: key, ...(destination ? { destination } : {}) };
+        expect(surfaceForStrategy({ output } as never)).toBe(outputHandlerFor(output)!.surface(output));
+      }
+    }
   });
 });
 

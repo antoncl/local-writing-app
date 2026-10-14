@@ -43,6 +43,7 @@ function makeInlineHost(
     getEditor: () => editor,
     setError: (message, anchor) => errors.push({ message, anchor }),
     streamInline: async () => {},
+    runLineEdits: async () => {},
   };
 }
 
@@ -172,6 +173,9 @@ describe("inlineHandler.apply", () => {
       streamInline: async (g) => {
         seen.push(g);
       },
+      runLineEdits: async () => {
+        throw new Error("inline must stream, not run line edits");
+      },
     };
     const gathered: InlineGathered = {
       destination: "cursor",
@@ -181,6 +185,35 @@ describe("inlineHandler.apply", () => {
       textAfter: "b",
     };
     await inlineHandler.apply(gathered, host);
+    expect(seen).toEqual([gathered]);
+  });
+});
+
+describe("surface — each handler names its own editor surface (#2465)", () => {
+  it("inline reads the declared destination; inline_edits is the selection; extract is the conversation", () => {
+    expect(inlineHandler.surface({ handler: "inline" })).toBe("cursor");
+    expect(inlineHandler.surface({ handler: "inline", destination: "selection" })).toBe("selection");
+    expect(inlineEditsHandler.surface({ handler: "inline_edits", destination: "cursor" })).toBe("selection");
+    expect(extractHandler.surface({ handler: "extract_to_node" })).toBe("conversation");
+  });
+});
+
+describe("inlineEditsHandler.apply (#2465)", () => {
+  it("delegates to the host's runLineEdits, never the stream", async () => {
+    const seen: InlineGathered[] = [];
+    const host: InlineHost = {
+      destination: "selection",
+      getEditor: () => null,
+      setError: () => {},
+      streamInline: async () => {
+        throw new Error("line edits must not stream");
+      },
+      runLineEdits: async (g) => {
+        seen.push(g);
+      },
+    };
+    const gathered: InlineGathered = { destination: "selection", from: 1, to: 4, textBefore: "", textAfter: "", selectionText: "abc" };
+    await inlineEditsHandler.apply(gathered, host);
     expect(seen).toEqual([gathered]);
   });
 });

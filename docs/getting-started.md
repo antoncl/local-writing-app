@@ -21,6 +21,11 @@ When the app opens with nothing loaded, you'll see a short line pointing you at 
 **project switcher** — the button in the top-right corner. Click it and choose
 **New project…** to open the **New Project** wizard.
 
+The very first time, the wizard opens on a **Welcome** step with two choices:
+**Create a new project** (continue below) or **Open an existing project**, which
+lets you pick a project folder you already have; you then confirm the projects
+folder that contains it (a sensible one is suggested) and it opens.
+
 The wizard has a few steps; you can go **Back** at any point:
 
 1. **Projects folder** — the first time only, pick the one folder that will be
@@ -37,9 +42,7 @@ The wizard has a few steps; you can go **Back** at any point:
    Under **Inherit from**, a brand-new project will usually say *"Nothing to
    inherit from here — this project stands alone."* That's exactly right for your
    first book; inheritance is for later, when you build a series or a shared
-   universe. If you already have a project on disk, the first-time wizard also
-   offers **Open an existing project…** here, which closes it and lets you pick
-   that folder instead.
+   universe.
 3. **AI** — leave this **Off** for now (you can turn it on any time). We'll come
    back to it below.
 4. **Review** and **Describe** — glance over the defaults, add an optional

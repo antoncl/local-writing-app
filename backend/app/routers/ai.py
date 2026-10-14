@@ -574,6 +574,30 @@ async def stream_ndjson_until_disconnect(
         await run_in_threadpool(sync_lines.close)
 
 
+class ClosingStreamingResponse(StreamingResponse):
+    """A StreamingResponse that closes its body iterator the moment the response
+    ends, however it ends (#2482).
+
+    On a client disconnect Starlette stops pulling from `body_iterator` — the
+    failed send (or its disconnect listener) ends the response — but it never
+    closes the iterator. The suspended async generator is then only finalized
+    when it is garbage-collected, possibly much later, so the `finally` in
+    `stream_ndjson_until_disconnect` (the one that closes the provider stream)
+    ran late and a local model kept generating an abandoned reply: measured
+    ~35s of a queued follow-up vs 0.4s idle. Closing it here runs that teardown
+    at once. `aclose()` on a finished generator is a no-op, so the normal-end
+    path is unchanged.
+    """
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[override]
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if aclose is not None:
+                await aclose()
+
+
 @router.post("/api/ai/chat/stream")
 async def ai_chat_stream(
     project: CurrentProject, request: AIChatRequest, http_request: Request
@@ -635,7 +659,7 @@ async def ai_chat_stream(
         settings=settings,
         policy=policy,
     )
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         stream_ndjson_until_disconnect(
             transform_provider_events_to_ndjson(
                 events, policy=policy,
@@ -740,7 +764,7 @@ async def ai_generate_stream(
     collector = LineEditsStreamCollector() if line_edits else None
     if collector is not None:
         events = collector.tap(events)
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         stream_ndjson_until_disconnect(
             transform_provider_events_to_ndjson(
                 events,

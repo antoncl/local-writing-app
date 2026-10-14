@@ -384,6 +384,16 @@ export type AIGenerateRequest = {
   model?: string | null;
   assistant_id?: string | null;
   max_tokens?: number;
+  // "line_edits" asks the non-streaming route for a list of reasoned edits
+  // (`edits` on the response) instead of a replacement passage. Default "text".
+  response_format?: "text" | "line_edits";
+};
+
+// One reasoned edit within a revised selection (#2460).
+export type LineEdit = {
+  find: string;
+  replace: string;
+  reason: string;
 };
 
 export type AIContextPresetResponse = {
@@ -407,6 +417,8 @@ export type AIGenerateResponse = {
   session_id?: string | null;
   usage?: ChatUsage | null;
   cost_usd?: number | null;
+  // Set when the request asked for `response_format: "line_edits"` and the reply was readable.
+  edits?: LineEdit[] | null;
 };
 
 export type AIInvocation = {

@@ -43,7 +43,7 @@ import type {
   PromptOutput,
 } from "@/lib/types";
 
-export type OutputHandlerKey = "inline" | "extract_to_node" | "finalize_scene";
+export type OutputHandlerKey = "inline" | "inline_edits" | "extract_to_node" | "finalize_scene";
 
 // The closed handler vocabulary as a value — the mirror of the backend's
 // PROMPT_OUTPUT_HANDLER_KEYS (services/project/prompt_disposition.py, which
@@ -51,7 +51,7 @@ export type OutputHandlerKey = "inline" | "extract_to_node" | "finalize_scene";
 // spec/prompt-disposition-labels.json; promptNodes.test.ts asserts this list
 // against it, so adding a handler without updating the backend mapping fails
 // a test instead of silently shelving the new prompts under Snippets.
-export const OUTPUT_HANDLER_KEYS = ["inline", "extract_to_node", "finalize_scene"] as const satisfies readonly OutputHandlerKey[];
+export const OUTPUT_HANDLER_KEYS = ["inline", "inline_edits", "extract_to_node", "finalize_scene"] as const satisfies readonly OutputHandlerKey[];
 
 // The roleplay finalize/cleanup projection (ADR-0070 S3). A recognized output
 // behaviour (mirrors the backend's PROMPT_OUTPUT_HANDLER_KEYS) but a SCENE
@@ -60,7 +60,7 @@ export const OUTPUT_HANDLER_KEYS = ["inline", "extract_to_node", "finalize_scene
 // `surfaceForStrategy`).
 export const FINALIZE_OUTPUT_HANDLER = "finalize_scene";
 export type OutputSource = "scan" | "transcript";
-export type OutputReview = "inline_mark" | "patch_diff";
+export type OutputReview = "inline_mark" | "patch_diff" | "edit_list";
 export type OutputActivation = "inline" | "conversation";
 // Where an inline handler writes. cursor vs selection is a DESTINATION sub-choice
 // (was append_to_body vs replace_selection), not two separate handlers (ADR-0065 §3).
@@ -116,6 +116,34 @@ export interface InlineHost {
   streamInline(gathered: InlineGathered): Promise<void>;
 }
 
+// The revise gather shared by `inline` (selection destination) and `inline_edits`:
+// the selected text plus REVISE_CONTEXT_CHARS of prose either side. Null (with the
+// reason surfaced via the host) when nothing usable is selected.
+export function gatherSelection(
+  host: Pick<InlineHost, "getEditor" | "setError">,
+): InlineGathered | null {
+  const editor = host.getEditor();
+  if (!editor) return null;
+  const sel = editor.state.selection;
+  const from = sel.from;
+  const to = sel.to;
+  if (from === to) {
+    host.setError("Select text to revise.", from);
+    return null;
+  }
+  const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+  if (!selectionText.trim()) {
+    host.setError("Select non-empty text to revise.", from);
+    return null;
+  }
+  const docSize = editor.state.doc.content.size;
+  const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
+  const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
+  const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
+  const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
+  return { destination: "selection", from, to, textBefore, textAfter, selectionText };
+}
+
 export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   key: "inline",
   source: "scan",
@@ -125,26 +153,7 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   produce(host) {
     const editor = host.getEditor();
     if (!editor) return null;
-    if (host.destination === "selection") {
-      const sel = editor.state.selection;
-      const from = sel.from;
-      const to = sel.to;
-      if (from === to) {
-        host.setError("Select text to revise.", from);
-        return null;
-      }
-      const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-      if (!selectionText.trim()) {
-        host.setError("Select non-empty text to revise.", from);
-        return null;
-      }
-      const docSize = editor.state.doc.content.size;
-      const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
-      const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
-      const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
-      const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
-      return { destination: "selection", from, to, textBefore, textAfter, selectionText };
-    }
+    if (host.destination === "selection") return gatherSelection(host);
     const from = editor.state.selection.from;
     const to = from;
     const docSize = editor.state.doc.content.size;
@@ -156,6 +165,28 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   apply(gathered, host) {
     return host.streamInline(gathered);
   },
+};
+
+// ── inline_edits ────────────────────────────────────────────────────────────
+
+// What the line-edits handler needs from its activation surface. Like inline's
+// stream, the run is bound to the controller's reactive state (the pending edit
+// list, telemetry), so `apply` delegates to its `runLineEdits` primitive.
+export interface InlineEditsHost {
+  getEditor(): Editor | null;
+  setError(message: string, anchor?: number): void;
+  runLineEdits(gathered: InlineGathered): Promise<void>;
+}
+
+// A revise that answers with a list of reasoned edits (#2460) instead of a
+// replacement passage. Always targets the selection; reviewed edit-by-edit.
+export const inlineEditsHandler: OutputHandler<InlineEditsHost, InlineGathered> = {
+  key: "inline_edits",
+  source: "scan",
+  review: "edit_list",
+  activation: "inline",
+  produce: (host) => gatherSelection(host),
+  apply: (gathered, host) => host.runLineEdits(gathered),
 };
 
 // ── extract_to_node ─────────────────────────────────────────────────────────
@@ -189,6 +220,7 @@ export const extractHandler: OutputHandler<ExtractHost, AIEntryPatch> = {
 // so it is deliberately absent and `outputHandlerFor` resolves it to null.
 const _REGISTRY: Partial<Record<OutputHandlerKey, OutputHandler>> = {
   inline: inlineHandler as OutputHandler,
+  inline_edits: inlineEditsHandler as OutputHandler,
   extract_to_node: extractHandler as OutputHandler,
 };
 

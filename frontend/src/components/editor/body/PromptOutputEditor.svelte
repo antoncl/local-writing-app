@@ -37,11 +37,12 @@
     onChange,
   }: Props = $props();
 
-  type Handler = "" | "inline" | "extract_to_node";
+  type Handler = "" | "inline" | "inline_edits" | "extract_to_node";
 
   const MODES: { id: Handler; label: string; hint: string }[] = [
     { id: "", label: "Conversation", hint: "a plain chat about this subject; the reply stays in the conversation" },
     { id: "inline", label: "Inline suggestion", hint: "streams a draft into the prose editor to accept or reject" },
+    { id: "inline_edits", label: "Line edits", hint: "suggests separate reasoned edits within the selection to accept or reject one by one" },
     { id: "extract_to_node", label: "Brainstorm / commit", hint: "a chat whose result you commit to a node as a reviewable patch" },
   ];
   const DESTINATIONS: { id: "cursor" | "selection"; label: string; hint: string }[] = [
@@ -58,6 +59,7 @@
   const MODE_HINTS: Record<Handler, string> = {
     "": "Pick Conversation for a back-and-forth that doesn't write anywhere on its own.",
     inline: "Pick Inline suggestion to draft prose directly into the editor.",
+    inline_edits: "Suggests separate edits within the selection, each with a reason; you accept or reject each one.",
     extract_to_node: "Pick Brainstorm / commit to workshop a node, then commit the result as a reviewable change.",
   };
 
@@ -97,6 +99,7 @@
       delete patch.destination;
       delete patch.on_accept;
     }
+    // Line edits always target the selection and never commit — nothing to configure.
     if (next !== "extract_to_node") delete patch.commit;
     emit(patch);
   }

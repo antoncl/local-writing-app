@@ -48,10 +48,12 @@ PROMPT_RUNNABLE_VALUE = "runnable"
 # shared vocabulary file. Only the `disposition` computation reads it
 # backend-side; invocation itself stays a frontend registry lookup.
 PROMPT_OUTPUT_HANDLER_INLINE = "inline"
+PROMPT_OUTPUT_HANDLER_INLINE_EDITS = "inline_edits"  # #2460: reasoned edits to the selection
 PROMPT_OUTPUT_HANDLER_EXTRACT = "extract_to_node"
 PROMPT_OUTPUT_HANDLER_FINALIZE = "finalize_scene"
 PROMPT_OUTPUT_HANDLER_KEYS: tuple[str, ...] = (
     PROMPT_OUTPUT_HANDLER_INLINE,
+    PROMPT_OUTPUT_HANDLER_INLINE_EDITS,
     PROMPT_OUTPUT_HANDLER_EXTRACT,
     PROMPT_OUTPUT_HANDLER_FINALIZE,
 )
@@ -74,6 +76,9 @@ def prompt_disposition(strategy: PromptContextStrategy | None, *, is_snippet: bo
     handler = (output.handler if output else "") or ""
     if handler == PROMPT_OUTPUT_HANDLER_FINALIZE:
         return PROMPT_DISPOSITION_SNIPPETS
+    if handler == PROMPT_OUTPUT_HANDLER_INLINE_EDITS:
+        # Always targets the selection — no destination needed.
+        return PROMPT_DISPOSITION_REVISE_PROSE
     if handler == PROMPT_OUTPUT_HANDLER_INLINE:
         if output is not None and output.destination == "selection":
             return PROMPT_DISPOSITION_REVISE_PROSE

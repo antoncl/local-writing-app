@@ -40,6 +40,7 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import { LineEditSuggestions } from "@/lib/editor-core/lineEditSuggestions";
   import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
@@ -144,6 +145,9 @@
     sceneSessionCostUsd?: number;
     // per-character mini-chips next to the session chip.
     characterCostUsd?: Record<string, number>;
+    // The suggestion controller, bound out so the pane shell can mount the Line
+    // edit review bar as a footer row (outside this scroll frame, #2460).
+    lineEditReview?: AiSuggestionController | null;
     // Outbound events as callback props (#14: runes — replaces the dispatcher).
     // NodeEditor (the funnel) passes these.
     onBodyChange?: () => void;
@@ -196,6 +200,7 @@
     lastInvocationCostUsd = $bindable(null),
     sceneSessionCostUsd = $bindable(0),
     characterCostUsd = $bindable({}),
+    lineEditReview = $bindable(null),
     onBodyChange,
     onFocus,
     onOpenChat,
@@ -329,6 +334,11 @@
     onRequestInputsDialog: (payload) => onRequestInputsDialog?.(payload),
     onNotice: (message) => editorPanes.setStatus(message),
     onOpenChat: (payload) => onOpenChat?.(payload),
+  });
+
+  $effect(() => {
+    lineEditReview = aiSuggestion;
+    return () => { lineEditReview = null; };
   });
 
   let slashFilterText = $state("");
@@ -1068,6 +1078,7 @@
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher, describe: describeEntry }),
         SearchMatchHighlight,
+        LineEditSuggestions,
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

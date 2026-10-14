@@ -66,6 +66,7 @@
      so the body always extends to at least the wrap's height. The column
      itself (measure, gutter, font) is `.prose-column`, above. */
   flex: 1 0 auto;
+  position: relative; /* the line-edit decision card's margin anchor (#2460) */
   padding-block: 10px 46px;
   outline: none;
   line-height: 1.65;

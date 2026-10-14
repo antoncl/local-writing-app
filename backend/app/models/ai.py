@@ -603,6 +603,15 @@ class AIChatResponse(BaseModel):
     history_fit: HistoryFit | None = None
 
 
+class LineEdit(BaseModel):
+    """One reasoned edit of a passage (#2460): the exact text to find, what to
+    put there instead ("" cuts it), and a few words on why."""
+
+    find: str
+    replace: str
+    reason: str = ""
+
+
 class AIGenerateRequest(BaseModel):
     template_source: str = Field(min_length=1)
     target_scene_id: str = Field(min_length=1)
@@ -619,6 +628,9 @@ class AIGenerateRequest(BaseModel):
     model: str | None = None
     assistant_id: str | None = None
     max_tokens: int | None = None
+    # #2460: "line_edits" asks for a list of `{find, replace, reason}` edits
+    # instead of replacement prose. Only the non-streaming route serves it.
+    response_format: Literal["text", "line_edits"] = "text"
 
 
 class AIGenerateResponse(BaseModel):
@@ -638,6 +650,9 @@ class AIGenerateResponse(BaseModel):
     # V2 telemetry — see AIChatResponse for the rules.
     usage: ChatUsage | None = None
     cost_usd: float | None = None
+    # #2460: the parsed edit list for `response_format="line_edits"` (may be
+    # empty); None for text replies or when the reply was unusable.
+    edits: list[LineEdit] | None = None
 
 
 class AIContextPresetResponse(BaseModel):

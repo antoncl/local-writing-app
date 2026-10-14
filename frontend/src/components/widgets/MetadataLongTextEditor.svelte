@@ -16,6 +16,7 @@
   import { formattingToolbarActions } from "@/lib/editor-core/formattingToolbarActions";
   import { countWords } from "@/lib/utils/wordCount";
   import { handleSectionArrow, type SectionNeighbours } from "@/lib/editor-core/sectionKeyboardBridge";
+  import { editorCallback } from "@/lib/editor-core/editorCallback";
   import ProseSelectionToolbar from "@/components/editor/body/ProseSelectionToolbar.svelte";
 
   let {
@@ -184,17 +185,18 @@
         transformPastedHTML: (html) => sanitizePastedHtml(html),
         handleKeyDown: handleEditorKeydown,
       },
-      onUpdate: () => {
+      // Every state-writing callback goes through editorCallback (#2461).
+      onUpdate: editorCallback(() => {
         if (!editor || applyingExternalValue) return;
         loadedValue = editorHtmlToSceneMarkdown(editor.getHTML());
         pendingLocalValue = loadedValue;
         isEmpty = isBlankDocument(editor);
         updateMenu();
         onChange(loadedValue);
-      },
-      onSelectionUpdate: updateMenu,
-      onFocus: updateMenu,
-      onBlur: hideMenu,
+      }),
+      onSelectionUpdate: editorCallback(updateMenu),
+      onFocus: editorCallback(updateMenu),
+      onBlur: editorCallback(hideMenu),
     });
     const mounted = editor;
     onEditorReady(mounted, "ready");

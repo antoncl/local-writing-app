@@ -44,6 +44,7 @@
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
+  import { editorCallback } from "@/lib/editor-core/editorCallback";
   import {
     InteriorityReveal,
     interiorityHasBeats,
@@ -1108,12 +1109,15 @@
         // round-trip through our Markdown serializer. Strip at paste time.
         transformPastedHTML: (html) => sanitizePastedHtml(html),
       },
-      onUpdate: ({ transaction }) => handleEditorUpdate(transaction),
-      onSelectionUpdate: handleEditorSelectionUpdate,
-      onBlur: handleEditorBlur,
+      // Every state-writing callback goes through editorCallback (#2461): an
+      // interiority textarea's blur write-back dispatches a doc change, so
+      // onUpdate/onTransaction can fire inside a teardown block effect too.
+      onUpdate: editorCallback(({ transaction }) => handleEditorUpdate(transaction)),
+      onSelectionUpdate: editorCallback(handleEditorSelectionUpdate),
+      onBlur: editorCallback(handleEditorBlur),
       // Reveal toggles are meta-only transactions (no doc change), so onUpdate
       // wouldn't catch them — sync interiority state on every transaction.
-      onTransaction: () => updateInteriorityState(),
+      onTransaction: editorCallback(() => updateInteriorityState()),
     });
 
     if (scene) {

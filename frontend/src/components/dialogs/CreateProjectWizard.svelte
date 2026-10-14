@@ -110,8 +110,7 @@
           {/if}
         {:else if wizard.currentStep.id === "open_root"}
           <p class="muted">
-            Opening <code>{wizard.openProjectPath}</code>. Your projects folder must contain this
-            project. Pick a higher folder if you keep several projects together.
+            Opening <code>{wizard.openProjectPath}</code>. Your projects folder must contain this project. Pick a higher folder if you keep several projects together.
           </p>
           <label>
             Projects folder

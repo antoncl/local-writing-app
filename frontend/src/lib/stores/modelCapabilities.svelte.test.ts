@@ -30,12 +30,62 @@ describe("modelCapabilities (#2485)", () => {
     expect(listAIProviderModels.mock.calls.map((c) => c[0]).sort()).toEqual(["anthropic", "openai"]);
   });
 
-  it("treats a failed fetch as unknown, without throwing or retrying", async () => {
-    listAIProviderModels.mockRejectedValue(new Error("offline"));
-    await expect(modelCapabilities.ensure(["ollama"])).resolves.toBeUndefined();
-    expect(modelCapabilities.supportsTools("ollama", "x")).toBeNull();
-    await modelCapabilities.ensure(["ollama"]);
-    expect(listAIProviderModels).toHaveBeenCalledTimes(1);
+  it("treats a failed fetch as unknown without throwing, and doesn't hammer it from ensure()", async () => {
+    vi.useFakeTimers();
+    try {
+      listAIProviderModels.mockRejectedValue(new Error("offline"));
+      await expect(modelCapabilities.ensure(["ollama"])).resolves.toBeUndefined();
+      expect(modelCapabilities.supportsTools("ollama", "x")).toBeNull();
+      // A re-render's ensure() during the retry run doesn't add a request.
+      await modelCapabilities.ensure(["ollama"]);
+      expect(listAIProviderModels).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a provider that wasn't up yet, then gives up after the backoff run", async () => {
+    vi.useFakeTimers();
+    try {
+      listAIProviderModels.mockRejectedValue(new Error("not up yet"));
+      await modelCapabilities.ensure(["ollama"]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(listAIProviderModels).toHaveBeenCalledTimes(2);
+      // Ollama comes up: the next scheduled retry loads it.
+      listAIProviderModels.mockResolvedValue({ models: [model("qwen", ["tools"])] });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(listAIProviderModels).toHaveBeenCalledTimes(3);
+      expect(modelCapabilities.supportsTools("ollama", "qwen")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops retrying after the backoff run", async () => {
+    vi.useFakeTimers();
+    try {
+      listAIProviderModels.mockRejectedValue(new Error("absent"));
+      await modelCapabilities.ensure(["ollama"]);
+      await vi.advanceTimersByTimeAsync(30_000 + 60_000 + 120_000 + 600_000);
+      expect(listAIProviderModels).toHaveBeenCalledTimes(4); // first try + 3 retries
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prime() fills the catalogue the picker already fetched, ending a retry run", async () => {
+    vi.useFakeTimers();
+    try {
+      listAIProviderModels.mockRejectedValue(new Error("not up yet"));
+      await modelCapabilities.ensure(["ollama"]);
+      modelCapabilities.prime("ollama", [model("qwen", ["tools"]), model("llama", [])]);
+      expect(modelCapabilities.supportsTools("ollama", "qwen")).toBe(true);
+      expect(modelCapabilities.supportsTools("ollama", "llama")).toBe(false);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(listAIProviderModels).toHaveBeenCalledTimes(1); // the pending retry was cancelled
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores an empty provider", async () => {

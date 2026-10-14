@@ -13,6 +13,7 @@
 
   import { onMount } from "svelte";
   import { api } from "@/lib/api";
+  import { modelCapabilities } from "@/lib/stores/modelCapabilities.svelte";
   import { eligibleProviders, PROVIDER_DISPLAY_NAMES } from "@/lib/utils/aiProviders";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
@@ -125,6 +126,9 @@
     try {
       const list = await api.listAIProviderModels(provider, forceRefresh);
       models = list.models;
+      // One source for "does this model claim tools?" (#2485): the assistant
+      // lists read the same catalogue, so a refresh here reaches them too.
+      modelCapabilities.prime(provider, list.models);
     } catch (e) {
       modelsError = (e as Error).message || "Couldn't load models.";
       models = [];

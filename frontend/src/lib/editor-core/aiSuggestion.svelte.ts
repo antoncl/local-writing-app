@@ -36,6 +36,7 @@ import {
   markerNotice,
   placeMutationMarkers,
 } from "@/lib/editor-core/mutationMarkers";
+import { joinAtCursor } from "@/lib/editor-core/cursorJoin";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
 import type {
   ChatUsage,
@@ -449,6 +450,9 @@ export class AiSuggestionController {
 
     const suggestionId = `ai-${this.#nextSuggestionId++}`;
     let startPos = from;
+    // The prose either side of the caret, for a cursor insert (#2459).
+    let caretBefore = "";
+    let caretAfter = "";
     let streamingActive = false;
     let accumulated = "";
     let lastMeta: {
@@ -502,6 +506,12 @@ export class AiSuggestionController {
         this.#suggestionOriginal = selectionText!;
       } else {
         startPos = editor.state.selection.from;
+        // The caret's own block around it (#2459); a leaf (a pill, a line
+        // break) reads as U+FFFC, which never asks for a space.
+        const caret = editor.state.doc.resolve(startPos);
+        const block = caret.parent;
+        caretBefore = block.textBetween(0, caret.parentOffset, undefined, "\ufffc");
+        caretAfter = block.textBetween(caret.parentOffset, block.content.size, undefined, "\ufffc");
       }
       this.suggestionId = suggestionId;
       streamingActive = true;
@@ -526,7 +536,9 @@ export class AiSuggestionController {
           if (streamErrored) break;
           if (!editor) break;
           const visible = carriesInteriority ? visibleExternal(accumulated) : accumulated;
-          scheduleRender(visible);
+          scheduleRender(
+            destination === "cursor" ? joinAtCursor(caretBefore, visible, caretAfter) : visible,
+          );
         } else if (ev.type === "done") {
           lastMeta = {
             provider: ev.provider,

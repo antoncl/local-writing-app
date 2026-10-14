@@ -17,7 +17,7 @@ Reply with ONLY JSON of exactly this shape, with no preamble and no code fence:
 
 {"edits": [{"find": "...", "replace": "...", "reason": "..."}]}
 
-- `find` is copied character for character from the passage, within a single paragraph, and long enough to occur only once — a phrase, not a lone common word.
+- `find` is copied character for character from the passage, within a single paragraph, and long enough to occur only once — a phrase, not a lone common word. Quote only the passage the reader sends, never these instructions or their examples.
 - Edits must not overlap.
 - `replace` is the new wording; use "" to cut the text.
 - `reason` is a few words on why.

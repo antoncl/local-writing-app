@@ -789,22 +789,25 @@ class AnthropicStreamTests(unittest.TestCase):
         # `{"type": "enabled", "budget_tokens": N}` and any temperature each 400.
         # Thinking must go out as adaptive with NO budget_tokens and NO temperature
         # (top-level or extra_body), or an assistant with ai_thinking enabled on
-        # one of these models fails on send (#1559).
-        call = ChatCall(
-            model="claude-opus-4-8",
-            system_prompt="",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=2048,
-            thinking_enabled=True,
-        )
-        _out, captured = self._run(call, [], usage=_a_usage())
-        create = captured["create"]
-        self.assertEqual(
-            create["thinking"], {"type": "adaptive", "display": "summarized"}
-        )
-        self.assertNotIn("budget_tokens", create["thinking"])
-        self.assertNotIn("temperature", create)
-        self.assertNotIn("temperature", create.get("extra_body", {}))
+        # one of these models fails on send (#1559; Haiku 5.5 = #2445).
+        for model in ("claude-opus-4-8", "claude-haiku-5-5"):
+            with self.subTest(model=model):
+                call = ChatCall(
+                    model=model,
+                    system_prompt="",
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=2048,
+                    thinking_enabled=True,
+                    temperature=0.7,
+                )
+                _out, captured = self._run(call, [], usage=_a_usage())
+                create = captured["create"]
+                self.assertEqual(
+                    create["thinking"], {"type": "adaptive", "display": "summarized"}
+                )
+                self.assertNotIn("budget_tokens", create["thinking"])
+                self.assertNotIn("temperature", create)
+                self.assertNotIn("temperature", create.get("extra_body", {}))
 
     def test_temperature_rides_in_extra_body_not_top_level(self):
         # Regression: a temp-ok model (Haiku 4.5) with an explicit temperature

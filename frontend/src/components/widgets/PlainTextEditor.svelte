@@ -13,6 +13,7 @@
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
   import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
+  import { editorCallback } from "@/lib/editor-core/editorCallback";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 
@@ -170,16 +171,17 @@
         },
       },
       autofocus: autofocus ? "end" : false,
-      onUpdate: () => {
+      // Every state-writing callback goes through editorCallback (#2461).
+      onUpdate: editorCallback(() => {
         if (!editor || applyingExternalValue) return;
         const text = editor.getText();
         isEmpty = editor.isEmpty;
         pendingLocalValue = text;
         onChange(text);
-      },
-      onCreate: () => {
+      }),
+      onCreate: editorCallback(() => {
         if (editor) isEmpty = editor.isEmpty;
-      },
+      }),
     });
 
     loadValue(value);

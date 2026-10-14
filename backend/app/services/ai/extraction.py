@@ -41,6 +41,7 @@ from app.services.ai.field_contract import FieldContract
 from app.services.ai.list_identity import reconcile_list_identity_report
 from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
+from app.services.project.finalize_placement import place_pills
 from app.services.project.metadata_refs import title_member
 
 if TYPE_CHECKING:
@@ -71,6 +72,37 @@ def _body_description(project_service: ProjectService, stored: list[dict[str, An
     schema = project_service.read_metadata_schema()
     body_field = schema.fields.get("body")
     return getattr(body_field, "description", None) if body_field else None
+
+
+def _body_clause(body_description: str | None, *, entry_type: str, creating: bool) -> str:
+    """The envelope's `"body"` line: what the body is, and when to include it."""
+    clause = f'- "body": {body_description + " " if body_description else ""}'
+    clause += (
+        "Write the body for the new entry on that basis, at the length its "
+        "description calls for."
+        if creating
+        else (
+            # #2456: "or wrote" — a draft of an empty body (Draft scene) is
+            # written in the conversation, not revised there.
+            'Include a "body" item ONLY if the conversation actually revised '
+            "or wrote the body; then give its complete text at about the length "
+            "the body has now — a revision changes the content, not the volume, "
+            "unless the author asked for more or less; a body that is empty now "
+            "takes the length the conversation wrote. OMIT the \"body\" item "
+            "entirely if the body was not discussed or changed — never "
+            "reconstruct it from nothing."
+        )
+    )
+    if entry_type.partition(":")[0] == "manuscript":
+        # #2456: a manuscript body's `⟦id⟧` change markers are where its
+        # mutation pills go (`_place_scene_pills`). A model transcribing
+        # "story text" drops them as noise — seen with a 9B model.
+        clause += (
+            " Keep every change marker in the prose — a `⟦…⟧` on its own — "
+            "exactly as and where the conversation wrote it; it is not story "
+            "text, but it marks where a change happens."
+        )
+    return clause
 
 
 def render_extraction_envelope(
@@ -170,21 +202,7 @@ def render_extraction_envelope(
         "conversation.",
     ]
     if body_allowed:
-        clause = f'- "body": {body_description + " " if body_description else ""}'
-        clause += (
-            "Write the body for the new entry on that basis, at the length its "
-            "description calls for."
-            if creating
-            else (
-                'Include a "body" item ONLY if the conversation actually revised '
-                "the body; then give its complete revised text at about the length "
-                "the body has now — a revision changes the content, not the volume, "
-                "unless the author asked for more or less. OMIT the \"body\" item "
-                "entirely if the body was not discussed or changed — never "
-                "reconstruct it from nothing."
-            )
-        )
-        lines.append(clause)
+        lines.append(_body_clause(body_description, entry_type=entry_type, creating=creating))
     fields_clause = "- Other fields: "
     if creating:
         if title_allowed:
@@ -380,6 +398,23 @@ def _id_bearing_list_field_ids(schema: MetadataSchema, entry_type: str) -> list[
         if field.item_identity:
             result.append(field_id)
     return result
+
+
+def _place_scene_pills(
+    project: ProjectService, *, entry_type: str, node_id: str, patch: AIEntryPatch
+) -> AIEntryPatch:
+    """A proposed manuscript body gets the scene's mutation pills back (#2456).
+
+    The chat sees each pill as a `⟦id⟧` marker (`scene_mutations`), and the
+    reply carries the markers through its prose; a saved body must hold the
+    ORIGINAL anchor/close comments instead, or every placed change is lost. The
+    same placement finalize uses (`place_pills`): known markers become their
+    comments, and any pill the draft didn't place is appended, never dropped —
+    so the review shows it, and the author decides where it goes."""
+    if patch.body is None or entry_type.partition(":")[0] != "manuscript":
+        return patch
+    body, _unplaced = place_pills(project.read_scene(node_id).body, patch.body)
+    return patch.model_copy(update={"body": body})
 
 
 def _reconcile_id_bearing_lists(
@@ -604,6 +639,7 @@ async def run_entry_patch_extraction(
         patch, reconciliation = _reconcile_id_bearing_lists(
             project, entry_type=entry_type, node_id=node_id, patch=patch
         )
+        patch = _place_scene_pills(project, entry_type=entry_type, node_id=node_id, patch=patch)
     _record_if_unusable(project, patch, patch_reply)
     project.record_ai_trace(
         {

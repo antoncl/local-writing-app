@@ -83,7 +83,66 @@
       </nav>
 
       <div class="wizard-body">
-        {#if wizard.currentStep.id === "root"}
+        {#if wizard.currentStep.id === "start"}
+          <p class="muted">Welcome. Start a new project, or open one you already have on disk.</p>
+          <div class="welcome-choices">
+            <button
+              type="button"
+              class="welcome-choice"
+              data-testid="wizard-create-new"
+              on:click={() => wizard.chooseCreate()}
+            >
+              <span class="welcome-choice-title">Create a new project</span>
+              <span class="welcome-choice-hint">Name it, choose where it lives, and set it up.</span>
+            </button>
+            <button
+              type="button"
+              class="welcome-choice"
+              data-testid="wizard-open-existing"
+              on:click={() => wizard.chooseOpen()}
+            >
+              <span class="welcome-choice-title">Open an existing project</span>
+              <span class="welcome-choice-hint">Pick the folder that holds its project.yaml.</span>
+            </button>
+          </div>
+          {#if wizard.openError}
+            <div class="wizard-error" role="alert">{wizard.openError}</div>
+          {/if}
+        {:else if wizard.currentStep.id === "open_root"}
+          <p class="muted">
+            Opening <code>{wizard.openProjectPath}</code>. Your projects folder must contain this project. Pick a higher folder if you keep several projects together.
+          </p>
+          <label>
+            Projects folder
+            <ProjectsFolderPicker
+              value={wizard.rootFolderDraft}
+              onChange={(next) => {
+                wizard.rootFolderDraft = next;
+                wizard.openError = "";
+              }}
+              startPath={wizard.rootFolderDraft}
+              pickerTitle="Choose Projects Folder"
+            />
+          </label>
+          {#if wizard.rootFolderDraft.trim() && !wizard.canAdvance}
+            <div class="wizard-error" role="alert">
+              That folder doesn't contain the project you're opening.
+            </div>
+          {/if}
+          <!-- First run: this choice becomes the app-wide AI default (#746). -->
+          <section class="wizard-inherits">
+            <h3>AI policy</h3>
+            <AiPolicySlider
+              value={wizard.aiSliderValue}
+              canInherit={wizard.canInheritPolicy}
+              inherited={wizard.inheritedPolicy}
+              onChange={(next) => wizard.setAiPolicy(next)}
+            />
+          </section>
+          {#if wizard.openError}
+            <div class="wizard-error" role="alert">{wizard.openError}</div>
+          {/if}
+        {:else if wizard.currentStep.id === "root"}
           <p class="muted">
             Choose the one folder this app works within. New projects are created here, and a
             project inherits from the projects above it up to this folder.
@@ -365,7 +424,16 @@
       {#if wizard.currentIndex > 0}
         <button type="button" on:click={() => wizard.back()}>Back</button>
       {/if}
-      {#if wizard.isFinalStep}
+      {#if wizard.currentStep.id === "start"}
+        <!-- The Welcome step advances through its two choices, not a Next. -->
+      {:else if wizard.currentStep.id === "open_root"}
+        <button
+          type="button"
+          class="primary"
+          disabled={!wizard.canAdvance || wizard.openBusy}
+          on:click={() => wizard.confirmOpen()}
+        >Open</button>
+      {:else if wizard.isFinalStep}
         <button
           type="button"
           class="primary"
@@ -588,6 +656,38 @@
 
   /* The inline hire draft + "+ Hire" launcher use the shared .inline-form* /
      .inline-add-btn primitives in styles.css (#619). */
+
+  /* ---- Welcome step (first run, #2467): two large choices ---- */
+  .welcome-choices {
+    display: grid;
+    gap: 10px;
+  }
+
+  .welcome-choice {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .welcome-choice:hover {
+    border-color: var(--accent);
+  }
+
+  .welcome-choice-title {
+    font-size: var(--fs-lg);
+    font-weight: 600;
+  }
+
+  .welcome-choice-hint {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
 
   .assistant-rows {
     list-style: none;

@@ -25,6 +25,7 @@ COMMIT_PROMPTS = (
     "revise-entry.md",
     "revise-plot-card.md",
     "follow-a-change.md",
+    "draft-scene.md",
 )
 ROSTER_PROMPTS = ("revise-plotline.md", "revise-character-arc.md")
 

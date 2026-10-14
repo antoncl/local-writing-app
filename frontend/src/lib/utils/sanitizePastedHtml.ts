@@ -60,25 +60,25 @@ function unwrap(el: Element): void {
   parent.removeChild(el);
 }
 
-// A whole document copied from a "view / copy markdown source" affordance (or an
-// AI chat's code panel) arrives as a SINGLE <pre><code class="language-markdown">
-// wrapping the entire paste. Turndown then serializes that <pre> to a ```markdown
-// fence and the body renders monospaced (#1622). When the whole paste is exactly
-// one such markdown-labelled code block, it is prose shown as source, not a code
-// sample — return its text re-parsed as the markdown it is. Returns null when the
-// paste is anything else (including a code block in another language, or with no
-// language, or code among other prose), so a genuine code sample is never touched.
-function wholeDocumentMarkdownSource(body: HTMLElement): string | null {
+// Text selected inside a code block — a "copy markdown source" view, or an AI
+// chat reply that fenced a note as ```xml / ```markdown — arrives as a SINGLE
+// <pre> wrapping the entire paste. Turndown then serializes that <pre> to a fence
+// and the whole body renders monospaced (#1622, #2450). These are prose bodies:
+// when the whole paste is exactly one code block, whatever its language, it is
+// prose shown as source, not a code sample — return its text re-parsed as
+// markdown. Returns null when the paste is anything else, so a code block that
+// arrives among other prose is kept as code.
+function wholePasteCodeBlockText(body: HTMLElement): string | null {
   const kids = Array.from(body.childNodes).filter(
-    (node) => !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()),
+    (node) =>
+      // Chromium wraps clipboard HTML in <!--StartFragment--> comments.
+      node.nodeType !== Node.COMMENT_NODE &&
+      !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()),
   );
   if (kids.length !== 1) return null;
   const pre = kids[0];
   if (!(pre instanceof HTMLElement) || pre.tagName !== "PRE") return null;
-  const code = pre.querySelector("code");
-  const languageClass = (code ?? pre).getAttribute("class") ?? "";
-  if (!/\blanguage-(?:markdown|md)\b/.test(languageClass)) return null;
-  return (code ?? pre).textContent ?? "";
+  return pre.textContent ?? "";
 }
 
 /** Strip presentational attributes + decorative wrappers from pasted
@@ -94,11 +94,10 @@ export function sanitizePastedHtml(html: string): string {
     for (const marker of Array.from(markers)) marker.remove();
     return doc.body.innerHTML;
   }
-  // Before any attribute stripping (which removes the `language-markdown` class
-  // the check keys on): a whole-document markdown code block is prose shown as
-  // source — re-parse it to HTML so it lands as prose, not a monospaced fence.
-  const markdownSource = wholeDocumentMarkdownSource(doc.body);
-  if (markdownSource !== null) return marked.parse(markdownSource) as string;
+  // A paste that is one whole code block is prose shown as source — re-parse it
+  // to HTML so it lands as prose, not a monospaced fence.
+  const codeBlockText = wholePasteCodeBlockText(doc.body);
+  if (codeBlockText !== null) return marked.parse(codeBlockText) as string;
   // First pass: strip attributes from every element.
   for (const el of Array.from(doc.body.querySelectorAll("*"))) {
     stripAttributes(el);

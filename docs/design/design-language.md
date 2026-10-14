@@ -251,6 +251,7 @@ affordances.
 | `ti-arrow-bar-to-right` | **mutation ends here** — the interval closes at this position |
 | `ti-versions` | **overridden** — this value comes from a layer override, not from inherited canon |
 | `ti-scale` | **not sent: over the lore budget** — detected lore that didn't fit the turn's budget; shown with the entry's size, the thing that made it miss (#2341) |
+| `ti-tools` | **tool calling: the model claims support** — shown trailing an assistant's model on its list row (project and machine roster); the model's own report (`tools` capability), never a verified fact, and absent when unknown (#2485) |
 | `ti-unlink` | **not sent: not followed** — lore noticed through a one-hop mention the assistant doesn't follow, its Lore reach being Named only (#2341) |
 
 Two rules keep annotations legible where several can land on one row:

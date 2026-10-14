@@ -13,6 +13,7 @@
 
   import { onMount } from "svelte";
   import { api } from "@/lib/api";
+  import { modelCapabilities } from "@/lib/stores/modelCapabilities.svelte";
   import { eligibleProviders, PROVIDER_DISPLAY_NAMES } from "@/lib/utils/aiProviders";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
@@ -125,6 +126,9 @@
     try {
       const list = await api.listAIProviderModels(provider, forceRefresh);
       models = list.models;
+      // One source for "does this model claim tools?" (#2485): the assistant
+      // lists read the same catalogue, so a refresh here reaches them too.
+      modelCapabilities.prime(provider, list.models);
     } catch (e) {
       modelsError = (e as Error).message || "Couldn't load models.";
       models = [];
@@ -371,6 +375,13 @@
       <span class="ptp-model-value">
         <span class="ptp-model-name">{resolvedModelName || model}</span>
         {#if resolvedModelName}<code class="ptp-model-id">{model}</code>{/if}
+        {#if selectedModelInfo}
+          <!-- The model's own claim (#2485), stated only once the catalogue
+               row is known — an orphan id says nothing rather than guessing. -->
+          <small class="ptp-model-tools" data-testid="ptp-tool-use">
+            {selectedModelInfo.capabilities.includes("tools") ? "Tool use" : "No tool use"}
+          </small>
+        {/if}
       </span>
     </div>
     {#if selectedModelUnpriced}
@@ -428,6 +439,7 @@
         {#if m.capabilities.includes("vision")} · vision{/if}
         {#if m.capabilities.includes("thinking")} · thinks{/if}
         {#if m.capabilities.includes("caching")} · caches{/if}
+        {#if m.capabilities.includes("tools")} · tools{/if}
       </small>
     {/snippet}
   </NodeRow>
@@ -484,6 +496,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--mono);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+
+  .ptp-model-tools {
+    flex: 0 0 auto;
     font-size: var(--fs-sm);
     color: var(--text-3);
   }

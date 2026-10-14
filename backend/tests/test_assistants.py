@@ -558,26 +558,43 @@ class AssistantReorderTests(unittest.TestCase):
         ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
         self.assertEqual(ids, [new_id, "alpha", "bravo", "charlie"])
 
-        # The FILE goes where asked — the machine layer, shared across projects.
+        # The FILE goes where asked — the machine layer, shared across projects —
+        # and so does the OPINION (#2449): a machine create is "add to the
+        # machine roster", listed topmost THERE.
         self.assertTrue((self.config_dir / "assistants" / "Zulu.md").exists())
-        # The OPINION goes to the local layer (#333). These are different
-        # questions, and conflating them is what used to make a new assistant
-        # stop being the default: the fold puts local ids ahead of the inherited
-        # remainder, so a machine-layer prepend sank below anything the project
-        # had listed. Nothing is moved or copied to make a shared assistant lead.
-        local_order = self.service._read_yaml(self.root / "assistants" / ".order.yaml")
-        self.assertEqual(local_order["ids"], [new_id])
         machine_order = self.service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
-        self.assertEqual(machine_order["ids"], ["alpha", "bravo"], "the machine layer's opinion is untouched")
+        self.assertEqual(machine_order["ids"], [new_id, "alpha", "bravo"])
+        # The open project held no opinion and still holds none.
+        self.assertFalse((self.root / "assistants" / ".order.yaml").exists())
 
-    def test_creating_an_assistant_leads_even_when_the_project_has_listed_others(self) -> None:
-        # The regression the split caused: once the local layer holds ANY ids,
-        # a machine-layer prepend lands the new assistant below every one of
-        # them, so `resolve_assistant(None)` stops returning it.
+    def test_a_machine_create_leaves_the_open_projects_order_alone(self) -> None:
+        # #2449: a Settings/wizard hire with a project open used to be prepended
+        # to the PROJECT's order (#333), silently making it that project's
+        # default. The project's own list must survive verbatim; the new
+        # machine assistant joins the inherited remainder below it.
         self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie", "alpha", "bravo"]})
+        local_file = self.root / "assistants" / ".order.yaml"
+        before = local_file.read_text(encoding="utf-8")
         response = self.client.post(
             "/api/assistants",
             json={"title": "Zulu", "entry_type": "assistant:assistant", "layer_id": ""},
+        )
+        new_id = response.json()["id"]
+        self.assertEqual(local_file.read_text(encoding="utf-8"), before)
+        ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(ids, ["charlie", "alpha", "bravo", new_id])
+        self.assertEqual(self.service.resolve_assistant(None).id, "charlie")
+        # ...while the machine roster lists it topmost.
+        machine = [e["id"] for e in self.client.get("/api/assistants/machine").json()["entries"]]
+        self.assertEqual(machine[0], new_id)
+
+    def test_a_local_create_still_leads_the_open_project(self) -> None:
+        # The other half of #2449: a project-layer create (the pane's +) is the
+        # project's own, so it still leads the project roster and is its default.
+        self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie", "alpha", "bravo"]})
+        response = self.client.post(
+            "/api/assistants",
+            json={"title": "Zulu", "entry_type": "assistant:assistant", "layer_id": None},
         )
         new_id = response.json()["id"]
         ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]

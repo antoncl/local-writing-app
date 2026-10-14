@@ -76,10 +76,11 @@ export const aiApi = {
     return streamNdjson("/ai/chat/stream", payload, signal);
   },
   // Non-streaming generate — the route that serves `response_format: "line_edits"`.
-  aiGenerate(payload: AIGenerateRequest) {
+  aiGenerate(payload: AIGenerateRequest, signal?: AbortSignal) {
     return request<AIGenerateResponse>("/ai/generate", {
       method: "POST",
       body: JSON.stringify(payload),
+      signal,
     });
   },
   aiGenerateStream(payload: AIGenerateRequest, signal?: AbortSignal) {

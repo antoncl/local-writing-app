@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // #2460: the controller's line-edits path. Real TipTap editor + the real
-// AiSuggestionController + the real review plugin; only `api.aiGenerate` is faked.
+// AiSuggestionController + the real review plugin; only `api.aiGenerateStream` is faked.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { api } from "@/lib/api";
@@ -69,10 +69,28 @@ const reply = (over: Record<string, unknown> = {}) =>
     ...over,
   }) as never;
 
+// A line-edit run rides the streaming route (#2464): a delta, then the `done` line
+// that carries the parsed edits.
+const fakeStream = (done: unknown) =>
+  vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+    yield { type: "delta", text: "{}" } as never;
+    yield { type: "done", ...(done as object) } as never;
+  });
+
+// A stream that never answers: `release(reply)` ends it with a `done` line.
+function pendingStream() {
+  let release!: (done: unknown) => void;
+  const gate = new Promise<unknown>((r) => (release = r));
+  const spy = vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+    yield { type: "done", ...((await gate) as object) } as never;
+  });
+  return { spy, release };
+}
+
 describe("line edits (#2460)", () => {
   it("sends response_format line_edits and installs the edits without touching the doc", async () => {
     const { editor, ctrl, costs } = setup();
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(spy.mock.calls[0][0]).toMatchObject({
       response_format: "line_edits",
@@ -90,16 +108,27 @@ describe("line edits (#2460)", () => {
 
   it("surfaces a backend error and installs nothing", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply({ ok: false, error: "cut off", edits: null }));
+    fakeStream(reply({ ok: false, error: "cut off", edits: null }));
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(ctrl.error).toBe("cut off");
     expect(ctrl.lineEdits).toBeNull();
     expect(lineEditState(editor.state).edits).toHaveLength(0);
   });
 
+  it("surfaces a stream error event and installs nothing", async () => {
+    const { ctrl } = setup();
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      yield { type: "error", error: "provider down" } as never;
+    });
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(ctrl.error).toBe("provider down");
+    expect(ctrl.lineEdits).toBeNull();
+    expect(ctrl.generating).toBe(false);
+  });
+
   it("tells the writer when edits were skipped, and when none could be placed", async () => {
     const a = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(
+    fakeStream(
       reply({ edits: [{ find: "cat", replace: "dog", reason: "r" }, { find: "ghost", replace: "x", reason: "r" }] }),
     );
     await a.ctrl.runPromptEntryWithInputs(ENTRY, {});
@@ -107,22 +136,22 @@ describe("line edits (#2460)", () => {
     expect(a.notices).toEqual(["1 edit couldn't be matched to the text and was skipped."]);
 
     const b = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply({ edits: [{ find: "ghost", replace: "x", reason: "r" }] }));
+    fakeStream(reply({ edits: [{ find: "ghost", replace: "x", reason: "r" }] }));
     await b.ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(b.ctrl.lineEdits).toBeNull();
     expect(b.notices).toEqual(["None of the 1 suggested edits could be placed."]);
 
     const c = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply({ edits: [] }));
+    fakeStream(reply({ edits: [] }));
     await c.ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(c.notices).toEqual(["No edits suggested."]);
   });
 
   it("refuses to show edits when the selected text changed during the call", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockImplementation(async () => {
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
       editor.view.dispatch(editor.state.tr.insertText("Oh. ", 1));
-      return reply();
+      yield { type: "done", ...(reply() as object) } as never;
     });
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(ctrl.error).toMatch(/Document changed during the AI call/);
@@ -131,7 +160,7 @@ describe("line edits (#2460)", () => {
 
   it("refuses another run while edits are pending, with a visible notice (not a hidden error)", async () => {
     const { ctrl, notices } = setup();
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntry(ENTRY, {});
     expect(notices).toEqual([]);
     await ctrl.runPromptEntry(ENTRY, {});
@@ -142,7 +171,7 @@ describe("line edits (#2460)", () => {
 
   it("records one invocation when the last edit is resolved after an accept", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     const [first, second] = lineEditState(editor.state).edits;
     acceptLineEdit(editor.view, first.id);
@@ -157,7 +186,7 @@ describe("line edits (#2460)", () => {
 
   it("records nothing when every edit is rejected", async () => {
     const { ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     ctrl.rejectAllLineEdits();
     expect(ctrl.lineEdits).toBeNull();
@@ -166,7 +195,7 @@ describe("line edits (#2460)", () => {
 
   it("accept all applies everything and records the invocation", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     ctrl.acceptAllLineEdits();
     expect(editor.state.doc.textContent).toBe("The dog sat on the rug.");
@@ -175,12 +204,11 @@ describe("line edits (#2460)", () => {
 
   it("discards a reply that lands after reset() (document switch)", async () => {
     const { editor, ctrl, costs } = setup();
-    let resolveReply!: (r: never) => void;
-    const spy = vi.spyOn(api, "aiGenerate").mockReturnValue(new Promise((r) => (resolveReply = r)) as never);
+    const { spy, release } = pendingStream();
     const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
     await vi.waitFor(() => expect(spy).toHaveBeenCalled());
     ctrl.reset();
-    resolveReply(reply());
+    release(reply());
     await run;
     expect(lineEditState(editor.state).edits).toHaveLength(0);
     expect(ctrl.lineEdits).toBeNull();
@@ -191,9 +219,9 @@ describe("line edits (#2460)", () => {
 
   it("discards a reply that lands after the scene changed", async () => {
     const { editor, ctrl, costs, sceneId } = setup();
-    vi.spyOn(api, "aiGenerate").mockImplementation(async () => {
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
       sceneId.current = "scene_2";
-      return reply();
+      yield { type: "done", ...(reply() as object) } as never;
     });
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(lineEditState(editor.state).edits).toHaveLength(0);
@@ -203,9 +231,58 @@ describe("line edits (#2460)", () => {
     expect(ctrl.generating).toBe(false);
   });
 
+  // A fetch that never answers and rejects the way the real one does on abort.
+  const hangingFetch = () =>
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* (_payload, signal) {
+      await new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+      yield* [] as never[];
+    });
+
+  it("cancelGeneration aborts the request: nothing installed, no error, no cost (#2464)", async () => {
+    const { editor, ctrl, costs, notices } = setup();
+    const spy = hangingFetch();
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(ctrl.generating).toBe(true);
+    expect(spy.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+    ctrl.cancelGeneration();
+    await run;
+    expect(ctrl.generating).toBe(false);
+    expect(ctrl.error).toBeNull();
+    expect(ctrl.lineEdits).toBeNull();
+    expect(lineEditState(editor.state).edits).toHaveLength(0);
+    expect(costs).toEqual([]);
+    expect(notices).toEqual(["Line edit cancelled."]);
+    // and the controller is usable again
+    fakeStream(reply());
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(ctrl.lineEdits).toMatchObject({ remaining: 2 });
+  });
+
+  it("a reply that races the abort installs nothing (#2464)", async () => {
+    const { editor, ctrl, costs } = setup();
+    const { spy, release } = pendingStream();
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    ctrl.cancelGeneration();
+    release(reply());
+    await run;
+    expect(lineEditState(editor.state).edits).toHaveLength(0);
+    expect(costs).toEqual([]);
+    expect(ctrl.error).toBeNull();
+    expect(ctrl.generating).toBe(false);
+  });
+
+  it("cancelGeneration with nothing running is a no-op (#2464)", () => {
+    const { ctrl } = setup();
+    expect(() => ctrl.cancelGeneration()).not.toThrow();
+  });
+
   it("reset() removes the pending edits from the editor", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(lineEditState(editor.state).edits).toHaveLength(2);
     ctrl.reset();
@@ -217,7 +294,7 @@ describe("line edits (#2460)", () => {
 
   it("reset() with a destroyed editor does not throw", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     editor.destroy();
     expect(() => ctrl.reset()).not.toThrow();
@@ -226,7 +303,7 @@ describe("line edits (#2460)", () => {
 
   it("retry rejects what is left and asks again on the same text", async () => {
     const { editor, ctrl } = setup();
-    const spy = vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    const spy = fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     await ctrl.retry();
     expect(spy).toHaveBeenCalledTimes(2);
@@ -237,7 +314,7 @@ describe("line edits (#2460)", () => {
 
   it("collapses the selection when the edits are installed", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     expect(editor.state.selection.empty).toBe(false);
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     expect(editor.state.selection.empty).toBe(true);
@@ -246,7 +323,7 @@ describe("line edits (#2460)", () => {
 
   it("next / prev move the current edit and its reason; accept/reject current advance it", async () => {
     const { editor, ctrl } = setup();
-    vi.spyOn(api, "aiGenerate").mockResolvedValue(reply());
+    fakeStream(reply());
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     ctrl.nextLineEdit();
     expect(ctrl.lineEdits).toEqual({ remaining: 2, index: 2, currentReason: "fresher" });

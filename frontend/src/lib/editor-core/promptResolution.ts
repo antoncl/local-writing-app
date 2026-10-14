@@ -9,7 +9,6 @@
 import { coerceInputValue, decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { expandSelectorsInEncodedValue, type SelectorRoster } from "@/lib/views/pickerSelectors";
 import {
-  inlineDestinationFor,
   outputHandlerFor,
   FINALIZE_OUTPUT_HANDLER,
   type InlineDestination,
@@ -50,8 +49,9 @@ export interface PromptResolutionContext {
 // The discovery surface a `context_strategy` implies (ADR-0065). The presence of a
 // `context_strategy` IS the invocation contract: a `snippet` (imported by name, never
 // run) has none → null; every runnable prompt has one. Within that, the `inline`
-// handler resolves to its destination (cursor/selection); any other REGISTERED handler
-// (`extract_to_node`) or a handler-less `general` chat is a `conversation`. A non-empty
+// handler resolves its own surface (`inline` its declared destination, `inline_edits` the
+// selection, `extract_to_node` the conversation); a handler-less `general` chat is a
+// `conversation`. A non-empty
 // but unregistered handler is misconfigured → null (invocable on no surface). Factored
 // out of `promptSurfaceFor` so a caller holding a raw strategy — the prompt editor
 // reading the open node's own type — shares the exact rule.
@@ -66,11 +66,7 @@ export function surfaceForStrategy(
   // before the registry so it is honestly "no editor surface", not "misconfigured".
   if (output?.handler === FINALIZE_OUTPUT_HANDLER) return null;
   const handler = outputHandlerFor(output);
-  if (handler) {
-    // `inline_edits` always revises the selection (it has no destination to declare).
-    if (handler.key === "inline_edits") return "selection";
-    return handler.key === "inline" ? inlineDestinationFor(output) : "conversation";
-  }
+  if (handler) return handler.surface(output);
   return output?.handler ? null : "conversation";
 }
 

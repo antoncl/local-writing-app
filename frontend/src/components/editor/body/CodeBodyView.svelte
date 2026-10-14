@@ -136,6 +136,16 @@
   const showOfferOnPicker = $derived(
     isPrompt() && !!scene && !isSnippetType(scene.entry_type, metadataSchema),
   );
+  // #2475: switching a prompt into an inline mode while it is offered nowhere
+  // pre-ticks manuscript scenes — where inline prompts have always run — as an
+  // explicit, editable value. Empty still means nowhere; this only fills an empty
+  // list at the moment of the switch, never a list the author chose.
+  const SCENE_ENTRY_TYPE = "manuscript:scene";
+  function preTickSceneTarget(): void {
+    if (offerOn.length > 0) return;
+    offerOn = [SCENE_ENTRY_TYPE];
+    onOfferOnChange?.();
+  }
   const offerOnIsInline = $derived(
     !!promptStrategy && ["cursor", "selection"].includes(surfaceForStrategy(promptStrategy) ?? ""),
   );
@@ -613,6 +623,7 @@
         bind:contextStrategy
         {readOnly}
         onChange={onContextStrategyChange}
+        onEnterInline={preTickSceneTarget}
       />
     </div>
   {/if}

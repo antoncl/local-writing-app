@@ -93,6 +93,27 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     expect(btn("Continue at cursor")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("reports entering an inline mode only on the switch in, never between inline modes (#2475)", async () => {
+    const onEnterInline = vi.fn();
+    render(PromptOutputEditor, { props: { contextStrategy: null, onEnterInline } });
+    await fireEvent.click(btn("Inline suggestion"));
+    expect(onEnterInline).toHaveBeenCalledTimes(1);
+    // Inline → Line edits stays inline: no second pre-tick.
+    await fireEvent.click(btn("Line edits"));
+    expect(onEnterInline).toHaveBeenCalledTimes(1);
+    // Out to a conversation and back in: a fresh switch in.
+    await fireEvent.click(btn("Conversation"));
+    await fireEvent.click(btn("Line edits"));
+    expect(onEnterInline).toHaveBeenCalledTimes(2);
+  });
+
+  it("a read-only editor never reports entering an inline mode", async () => {
+    const onEnterInline = vi.fn();
+    render(PromptOutputEditor, { props: { contextStrategy: null, readOnly: true, onEnterInline } });
+    await fireEvent.click(btn("Inline suggestion"));
+    expect(onEnterInline).not.toHaveBeenCalled();
+  });
+
   it("headless is orthogonal to the mode — toggling it alone doesn't change the mode", async () => {
     const onChange = vi.fn();
     render(PromptOutputEditor, { props: { contextStrategy: null, onChange } });

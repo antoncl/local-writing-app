@@ -3,7 +3,6 @@ import type {
   AIChatResponse,
   AIContextPresetResponse,
   AIGenerateRequest,
-  AIGenerateResponse,
   AIHealthResponse,
   OllamaHostHealth,
   AIProviderList,
@@ -75,13 +74,8 @@ export const aiApi = {
   aiChatStream(payload: AIChatRequest, signal?: AbortSignal) {
     return streamNdjson("/ai/chat/stream", payload, signal);
   },
-  // Non-streaming generate — the route that serves `response_format: "line_edits"`.
-  aiGenerate(payload: AIGenerateRequest) {
-    return request<AIGenerateResponse>("/ai/generate", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
+  // Every generate rides the stream — line edits too (#2464): only a stream's
+  // disconnect reaches the provider, so only it can be cancelled.
   aiGenerateStream(payload: AIGenerateRequest, signal?: AbortSignal) {
     return streamNdjson("/ai/generate/stream", payload, signal);
   },

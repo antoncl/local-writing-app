@@ -55,6 +55,10 @@ REVISE_TITLES = [
     "Show, don't tell",
 ]
 
+# The revise prompts that refine existing text and so answer with an edit list
+# (#2474); the rest of REVISE_TITLES generate and replace the selection.
+EDIT_LIST_REVISE_TITLES = ("Shorten", "Show, don't tell", "Tighten grammar")
+
 
 class BuiltinLibraryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -350,9 +354,11 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertNotIn("Tense", text)
 
     def test_builtin_revise_prompts_target_the_selection_surface(self) -> None:
-        """The six shipped revise prompts are inline selection prompts that pull
-        in the shared author-directions snippet — so the ✨ Revise menu is
-        non-empty out of the box and every one replaces the selection."""
+        """The six shipped revise prompts act on the selection and pull in the
+        shared author-directions snippet — so the ✨ Revise menu is non-empty out
+        of the box. The generative ones replace the selection with a rewrite; the
+        refining ones answer with an edit list reviewed one edit at a time
+        (#2474)."""
         entries = self._summaries()
         for pid in self.revise_ids:
             self.assertIn(pid, entries, f"{pid} should resolve out of the box")
@@ -360,26 +366,35 @@ class BuiltinLibraryTests(unittest.TestCase):
             self.assertTrue(entry.is_library)
             self.assertIsNotNone(entry.context_strategy)
             output = entry.context_strategy.output
-            self.assertEqual(output.handler, "inline")
-            self.assertEqual(output.destination, "selection")
+            if entry.title in EDIT_LIST_REVISE_TITLES:
+                self.assertEqual(output.handler, "inline_edits", entry.title)
+            else:
+                self.assertEqual(output.handler, "inline", entry.title)
+                self.assertEqual(output.destination, "selection", entry.title)
+            self.assertEqual(entry.computed_metadata["disposition"], "Revise prose", entry.title)
             self.assertIn('{% include "Author directions in brackets" %}', entry.body)
             self.assertIn("{{ selection }}", entry.body)
 
-    def test_line_edit_prompt_is_an_inline_edits_prompt(self) -> None:
-        """#2460: Line edit answers with a JSON edit list against the selection."""
+    def test_edit_list_prompts_render_the_shared_reply_format(self) -> None:
+        """#2460/#2474: every edit-list revise prompt (Line edit and the converted
+        refining prompts) answers with a JSON edit list against the selection, its
+        reply contract coming from the one shared "Edit list reply format" snippet."""
         from app.services.ai.helpers import create_environment_for_project
         from app.services.ai.templates import render_template
 
-        entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Line edit"))
-        self.assertTrue(entry.is_library)
-        self.assertEqual(entry.context_strategy.output.handler, "inline_edits")
-        self.assertEqual(entry.computed_metadata["disposition"], "Revise prose")
         env = create_environment_for_project(self.service)
-        out = render_template(entry.body, context={"selection": "The room was cold.", "inputs": {}}, env=env)
-        joined = "\n".join(m.text for m in out.messages)
-        self.assertIn('{"edits": [{"find"', joined)
-        self.assertIn("Square brackets", joined)  # the shared directions snippet
-        self.assertEqual(out.messages[-1].text.strip(), "The room was cold.")
+        for title in ("Line edit", *EDIT_LIST_REVISE_TITLES):
+            entry = self.service.read_prompt_entry(builtin_prompt_id(self.service, title))
+            self.assertTrue(entry.is_library)
+            self.assertEqual(entry.context_strategy.output.handler, "inline_edits", title)
+            self.assertEqual(entry.computed_metadata["disposition"], "Revise prose", title)
+            self.assertIn('{% include "Edit list reply format" %}', entry.body, title)
+            out = render_template(entry.body, context={"selection": "The room was cold.", "inputs": {}}, env=env)
+            joined = "\n".join(m.text for m in out.messages)
+            self.assertIn('{"edits": [{"find"', joined, title)
+            self.assertIn("Square brackets", joined, title)  # the shared directions snippet
+            self.assertNotIn("{#", joined, title)  # the snippet's usage comment never leaks
+            self.assertEqual(out.messages[-1].text.strip(), "The room was cold.", title)
 
     def test_describe_prompt_renders_selection_senses_and_snippet(self) -> None:
         """The Describe prompt exercises the whole lane end to end: the new

@@ -37,7 +37,7 @@ describe("sanitizePastedHtml — the app's own clipboard (#2235)", () => {
   });
 });
 
-describe("sanitizePastedHtml — whole-document markdown source (#1622)", () => {
+describe("sanitizePastedHtml — a whole paste that is one code block (#1622, #2450)", () => {
   it("re-parses a whole-document markdown code block as prose", () => {
     const html = '<pre><code class="language-markdown"># Title\n\n- one\n- two</code></pre>';
     const out = sanitizePastedHtml(html);
@@ -46,16 +46,21 @@ describe("sanitizePastedHtml — whole-document markdown source (#1622)", () => 
     expect(out).not.toContain("<pre>"); // …and it is no longer a code block
   });
 
-  it("leaves a real code sample (a non-markdown language) as a code block", () => {
-    const html = '<pre><code class="language-python">def f():\n    return 1</code></pre>';
+  it("unwraps prose copied out of a chat's ```xml block, Chromium clipboard wrapper and all", () => {
+    const html =
+      "<html><body>\n<!--StartFragment--><pre><code class=\"language-xml\">" +
+      "Cycles are the hub currency.\n\n**What the draw buys.** Resolution.</code></pre><!--EndFragment-->\n</body></html>";
     const out = sanitizePastedHtml(html);
-    expect(out).toContain("<pre>"); // still code
-    expect(out).toContain("def f()");
+    expect(out).not.toContain("<pre>");
+    expect(out).not.toContain("<code>");
+    expect(out).toContain("<p>Cycles are the hub currency.</p>");
+    expect(out).toContain("<strong>What the draw buys.</strong>"); // markdown inside is read
   });
 
-  it("leaves a code block with no language untouched", () => {
-    const out = sanitizePastedHtml("<pre><code>plain code\nline two</code></pre>");
-    expect(out).toContain("<pre>");
+  it("unwraps a whole-paste code block with no language", () => {
+    const out = sanitizePastedHtml("<pre><code>first paragraph\n\nsecond paragraph</code></pre>");
+    expect(out).not.toContain("<pre>");
+    expect(out).toContain("<p>second paragraph</p>");
   });
 
   it("does not unwrap a markdown block that sits among other prose", () => {
@@ -63,6 +68,13 @@ describe("sanitizePastedHtml — whole-document markdown source (#1622)", () => 
     const out = sanitizePastedHtml(html);
     expect(out).toContain("<pre>"); // not the whole document → left as code
     expect(out).toContain("Intro.");
+  });
+
+  it("keeps a code sample that arrives with surrounding prose as code", () => {
+    const html = '<p>Run this:</p><pre><code class="language-python">def f():\n    return 1</code></pre>';
+    const out = sanitizePastedHtml(html);
+    expect(out).toContain("<pre>"); // still code
+    expect(out).toContain("def f()");
   });
 
   it("still strips presentational cruft from ordinary pasted prose", () => {

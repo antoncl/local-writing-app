@@ -191,14 +191,26 @@ class AssistantEntriesMixin:
         machine `.order.yaml` alone, so `listed` reflects the machine layer's
         opinion and no project's curation leaks in.
         """
+        return self._assistant_roster(self._machine_assistant_index(), self._machine_assistant_order())
+
+    def _machine_assistant_index(self) -> NodeIndex:
+        """The machine layer's assistant (and tag) index on its own — the whole
+        chain when no project is open, and Machine Settings' view either way."""
         index = NodeIndex()
         self._collect_machine_layer_assistants(index, duplicate_relative_to=Path("/"))
+        # Collection only fills `candidates`; `by_id` is derived (#334). This
+        # path builds its index by hand, so it resolves by hand — without this
+        # the roster is empty rather than machine-only.
         index.resolve()
+        return index
+
+    def _machine_assistant_order(self) -> MergedAssistantOrder:
+        """The machine layer's `.order.yaml` folded on its own (see above)."""
         merger = _AssistantOrderMerger(self._read_assistants_order)
         machine_layer = self.machine_layer()
         if machine_layer is not None:
             merger.visit_layer(machine_layer)
-        return self._assistant_roster(index, merger.merged)
+        return merger.merged
 
     def _assistant_roster(self, index: NodeIndex, merged: MergedAssistantOrder) -> AssistantEntryList:
         entries: list[AssistantEntrySummary] = []
@@ -266,15 +278,12 @@ class AssistantEntriesMixin:
         longer inherited) stay in the list and are simply never matched by a
         caller — ignored, not an error.
         """
-        merger = _AssistantOrderMerger(self._read_assistants_order)
-        if self.root_path is not None:
-            self.visit_layers(merger, self.root_path, include_machine=True)
-        else:
+        if self.root_path is None:
             # No project open: the machine layer is the whole chain — the same
             # degenerate case `_build_assistant_index` handles.
-            machine_layer = self.machine_layer()
-            if machine_layer is not None:
-                merger.visit_layer(machine_layer)
+            return self._machine_assistant_order()
+        merger = _AssistantOrderMerger(self._read_assistants_order)
+        self.visit_layers(merger, self.root_path, include_machine=True)
         return merger.merged
 
     def reorder_assistant_entries(
@@ -607,15 +616,7 @@ class AssistantEntriesMixin:
         """
         if self.root_path is not None:
             return self._build_node_index(self.root_path)
-        index = NodeIndex()
-        self._collect_machine_layer_assistants(
-            index, duplicate_relative_to=Path("/")
-        )
-        # Collection only fills `candidates`; `by_id` is derived (#334). The
-        # no-project path builds its index by hand, so it resolves by hand —
-        # without this the roster is empty rather than machine-only.
-        index.resolve()
-        return index
+        return self._machine_assistant_index()
 
     def resolve_assistant(self, assistant_id: str | None) -> AssistantEntry | None:
         """Look up an assistant by id; with no id, falls back to the **topmost**

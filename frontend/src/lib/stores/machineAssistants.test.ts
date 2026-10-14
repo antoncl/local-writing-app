@@ -12,8 +12,18 @@ vi.mock("@/lib/api", () => ({
     deleteAssistantEntry: vi.fn(async () => ({ entries: [] })),
   },
 }));
+const panesMock = vi.hoisted(() => ({
+  panes: [] as { id: string; document?: { type: string; id: string } }[],
+  close: vi.fn(async (_id: string) => {}),
+  closeRemovedNodes: vi.fn(),
+}));
+vi.mock("@/lib/stores/editorPanes.svelte", () => ({ editorPanes: panesMock }));
 import { api } from "@/lib/api";
-import { hireMachineAssistant, updateMachineAssistant } from "@/lib/stores/machineAssistants";
+import {
+  deleteMachineAssistant,
+  hireMachineAssistant,
+  updateMachineAssistant,
+} from "@/lib/stores/machineAssistants";
 
 const S = (id: string, listed: string): AssistantEntrySummary =>
   ({ id, title: id, entry_type: "assistant:assistant", metadata: {}, computed_metadata: { listed } }) as AssistantEntrySummary;
@@ -51,5 +61,32 @@ describe("updateMachineAssistant", () => {
     expect(api.saveAssistantEntry).toHaveBeenCalledWith(
       expect.objectContaining({ title: "New", revision: "r2", metadata: { ai_model: "m", prompt: "p" } }),
     );
+  });
+});
+
+// An open editor pane on the assistant must not outlive a Settings write to its
+// file: assistant panes are not re-baselined, so it would 409 / 404 next save.
+describe("open editor panes", () => {
+  beforeEach(() => {
+    panesMock.panes = [
+      { id: "p1", document: { type: "assistant", id: "x" } },
+      { id: "p2", document: { type: "assistant", id: "other" } },
+    ];
+  });
+
+  it("closes (flushes) only the edited assistant's pane before reading it", async () => {
+    const order: string[] = [];
+    panesMock.close.mockImplementation(async (id: string) => void order.push(`close:${id}`));
+    vi.mocked(api.getAssistantEntry).mockImplementation(async () => {
+      order.push("read");
+      return { id: "x", title: "X", revision: "r2", entry_type: "assistant:assistant", metadata: {} } as unknown as AssistantEntry;
+    });
+    await updateMachineAssistant("x", { title: "X2" });
+    expect(order).toEqual(["close:p1", "read"]);
+  });
+
+  it("tears down the deleted assistant's pane", async () => {
+    await deleteMachineAssistant("x");
+    expect(panesMock.closeRemovedNodes).toHaveBeenCalledWith(["x"]);
   });
 });

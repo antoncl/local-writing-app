@@ -20,7 +20,7 @@
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { isInherited } from "@/lib/utils/provenance";
+  import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewSpec } from "@/lib/types";
@@ -202,9 +202,8 @@
     else if (provider) detail = String(provider);
     // Provenance for an inherited assistant — any ancestor layer, not just the
     // machine's (#2444). Meaningless in the machine scope (everything is its own).
-    if (scope === "project" && isInherited({ source_layer_id: entry.source_layer_id }, $projectLayerIdStore)) {
-      return `from ${entry.source_layer_label || "an ancestor layer"} · ${detail}`.replace(/ · $/, "");
-    }
+    const from = scope === "project" ? inheritedLayerLabel(entry, $projectLayerIdStore) : null;
+    if (from) return detail ? `from ${from} · ${detail}` : `from ${from}`;
     return detail;
   }
 </script>
@@ -281,7 +280,10 @@
       {:else}
         {@const health = healthByAssistant[entry.id]}
         <!-- Test THIS assistant's provider (#336) — the exact one a send would
-             use, unlike the Machine Settings ping which only tests the topmost. -->
+             use, unlike the Machine Settings ping which only tests the topmost.
+             Project scope only (#2444): the ping resolves the OPEN project's
+             policy, so from Settings it fails "policy: off" with none open. -->
+        {#if scope === "project"}
         <button
           class="assistant-test"
           type="button"
@@ -305,6 +307,7 @@
             title={healthDetail(health.result)}
             aria-label={healthDetail(health.result)}
           >{health.result.ok ? "✓" : "✗"}</span>
+        {/if}
         {/if}
         <!-- A WORD, not a glyph, deliberately. The closed lexicon
              (design-language §"Glyph-first affordances") offers `×` for remove —

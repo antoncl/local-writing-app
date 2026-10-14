@@ -372,7 +372,7 @@
           {#if health}
             <section class="health-check">
               <h3>Connection</h3>
-              <p class="muted">Pings the default assistant (the topmost) to confirm its provider answers. To test a specific assistant, use its Test button in the Assistants tab.</p>
+              <p class="muted">Pings the default assistant (the topmost) to confirm its provider answers. To test a specific assistant, use its Test button in the Assistants pane.</p>
               <div class="button-row">
                 <button
                   type="button"

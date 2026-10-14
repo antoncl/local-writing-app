@@ -33,7 +33,7 @@ import { refreshTodos } from "@/lib/stores/todos";
 import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-import { isInherited } from "@/lib/utils/provenance";
+import { inheritedLayerLabel } from "@/lib/utils/provenance";
 import type { EditorPaneState } from "@/lib/editor-core/editorPaneModel";
 import type { Backlink } from "@/lib/types";
 
@@ -103,10 +103,9 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // An inherited assistant's file lives in an ancestor layer, so deleting it
   // there reaches every project that inherits it (#2444) — say so.
   const owner = pane.scene as { source_layer_id?: string; source_layer_label?: string };
-  const inheritedAssistant =
-    documentKind === "assistant" && isInherited({ source_layer_id: owner.source_layer_id }, get(projectLayerIdStore));
-  const baseMessage = inheritedAssistant
-    ? `Delete "${sceneTitle}"? This removes the assistant file from ${owner.source_layer_label || "an ancestor layer"} — every project that inherits from it loses it.`
+  const inheritedFrom = documentKind === "assistant" ? inheritedLayerLabel(owner, get(projectLayerIdStore)) : null;
+  const baseMessage = inheritedFrom
+    ? `Delete "${sceneTitle}"? This removes the assistant file from ${inheritedFrom} — every project that inherits from it loses it.`
     : `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
   let message =
     backlinks.length > 0

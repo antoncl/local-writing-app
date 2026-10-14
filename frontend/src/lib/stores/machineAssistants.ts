@@ -5,6 +5,7 @@
 
 import { api } from "@/lib/api";
 import { isAssistantListed, refreshAssistantEntries } from "@/lib/stores/assistants";
+import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import type { AssistantEntrySummary, EntryMetadata } from "@/lib/types";
 
 const MACHINE = "";
@@ -54,6 +55,12 @@ export async function updateMachineAssistant(
   id: string,
   changes: { title: string; provider?: string; tier?: string; model?: string },
 ): Promise<void> {
+  // Settings edits the file under any open editor pane on it, and assistant
+  // panes are not re-baselined from disk — so close (and flush) such a pane
+  // first, or its next autosave 409s against the revision written here.
+  for (const pane of editorPanes.panes.filter((p) => p.document?.type === "assistant" && p.document.id === id)) {
+    await editorPanes.close(pane.id);
+  }
   const entry = await api.getAssistantEntry(id);
   const picked = changes.provider
     ? modelMetadata({ provider: changes.provider, tier: changes.tier ?? "", model: changes.model ?? "" })
@@ -68,5 +75,8 @@ export async function updateMachineAssistant(
 
 export async function deleteMachineAssistant(id: string): Promise<void> {
   await api.deleteAssistantEntry(id);
+  // Same tearDown an in-app delete ends with; an open pane must not autosave
+  // into a file that is gone.
+  editorPanes.closeRemovedNodes([id]);
   await refreshAssistantEntries();
 }

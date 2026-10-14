@@ -27,6 +27,7 @@ import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
 import { projectReviewRows } from "@/lib/utils/projectReview";
 import { localeProjectDefaults } from "@/lib/utils/localeDefaults";
 import { providersForPolicy } from "@/lib/utils/aiProviders";
+import { suggestProjectsFolder } from "@/lib/utils/openExistingProject";
 import { activeSteps, indexOfStep, stepComplete, type WizardStepId } from "@/lib/utils/wizardSteps";
 
 // Zero-value credentials so `machineProviders` is always a concrete
@@ -112,6 +113,28 @@ class CreateWizard {
   // layered over Modal). The root step has its own picker (ProjectsFolderPicker,
   // ADR-0047 slice 4), so this one only ever targets the project location. ----
   pickerOpen = $state(false);
+  // What the picker is choosing: the project location, or (first run, #2467) an
+  // existing project to open.
+  pickerMode = $state<"location" | "open">("location");
+
+  // ---- First-run "open an existing project" (#2467) ----
+  // The project picked on the Welcome step; "" outside the open flow.
+  openProjectPath = $state("");
+  // Inline feedback on the Welcome / open-root steps (the app's error toast sits
+  // behind this modal).
+  openError = $state("");
+  openBusy = $state(false);
+  // Choosing Open swaps the step list for start + open_root (wizardSteps.ts).
+  #opening = $state(false);
+  // Whether the Welcome step is still reachable: true for a first-run session
+  // until the Create path moves past the root step (then Welcome drops out, as the
+  // root step always did). Open keeps it true, so Back from open_root always lands
+  // on a Welcome step offering both choices - even after the root was saved and
+  // the open then failed (needsRootFolder is false by then).
+  #welcome = $state(false);
+  // Bumped whenever the Welcome step is left, the wizard closes or resets, or a
+  // new pick starts - a slow #pickExisting that finds it changed bails silently.
+  #pickToken = 0;
 
   // ---- Navigation ----
   #stepIndex = $state(0);
@@ -130,6 +153,9 @@ class CreateWizard {
   // ---- Injected host hooks (set in App.onMount) ----
   onError: (message: string) => void = () => {};
   onSaveRootFolder: (folder: string) => Promise<void> = async () => {};
+  // First-run "open an existing project" (#2467): resolves false when the open
+  // failed (the host has already surfaced the error).
+  onOpenProject: (path: string) => Promise<boolean> = async () => true;
   // aiPolicy is applied to the freshly-created (now open) project by the host,
   // right after create; undefined leaves no stated policy (inherit).
   // `nodeMetadata` is the review pane's overrides (only the fields the author
@@ -162,7 +188,9 @@ class CreateWizard {
   // beside it — the new book inherits it. Awaited before create so the freshly
   // created project resolves against it. Unused on subsequent runs (the policy
   // is per-project then).
-  onSaveAppPolicy: (policy: AIPolicy) => Promise<void> = async () => {};
+  // Resolves false when the write failed (the host has already surfaced it) - the
+  // first-run Open path (#2467) keeps the wizard open on that.
+  onSaveAppPolicy: (policy: AIPolicy) => Promise<boolean | void> = async () => {};
   onHireAssistant: (
     title: string,
     provider: string,
@@ -177,7 +205,7 @@ class CreateWizard {
 
   // ---- Derived ----
   needsRootFolder = $derived(!this.defaultProjectsFolder.trim());
-  steps = $derived(activeSteps(this.needsRootFolder));
+  steps = $derived(activeSteps(this.needsRootFolder, this.#opening, this.#welcome));
   currentStep = $derived(this.steps[this.#stepIndex] ?? this.steps[this.steps.length - 1]);
   currentIndex = $derived(this.steps.indexOf(this.currentStep));
   isFinalStep = $derived(this.currentIndex === this.steps.length - 1);
@@ -240,6 +268,7 @@ class CreateWizard {
       rootFolderDraft: this.rootFolderDraft,
       title: this.title,
       pickedFolder: this.pickedFolder,
+      openProjectPath: this.openProjectPath,
     }),
   );
 
@@ -255,6 +284,7 @@ class CreateWizard {
         rootFolderDraft: this.rootFolderDraft,
         title: this.title,
         pickedFolder: this.pickedFolder,
+        openProjectPath: this.openProjectPath,
       }),
   );
 
@@ -286,15 +316,16 @@ class CreateWizard {
 
   // ---- Location-picker labels, read by the mounted DirectoryPickerModal ----
   get pickerInitialPath(): string {
+    if (this.pickerMode === "open") return (this.defaultProjectsFolder || this.getStartPath()).trim();
     return (this.pickedFolder || this.defaultProjectsFolder || "").trim();
   }
 
   get pickerTitle(): string {
-    return "Choose Location";
+    return this.pickerMode === "open" ? "Open Your Project" : "Choose Location";
   }
 
   get pickerSelectLabel(): string {
-    return "Use This Folder";
+    return this.pickerMode === "open" ? "Open This Project" : "Use This Folder";
   }
 
   // ---- Lifecycle ----
@@ -302,6 +333,7 @@ class CreateWizard {
     this.reset();
     // Snapshot first-run before the root step can flip it (#746 — see submit()).
     this.#firstRun = this.needsRootFolder;
+    this.#welcome = this.#firstRun;
     // Returning user (a machine root is already set): seed the Location field
     // with it so the shown default actually counts (#1410). First run seeds
     // after the root step instead (next()).
@@ -346,9 +378,15 @@ class CreateWizard {
     this.description = "";
     this.#stepIndex = 0;
     this.pickerOpen = false;
+    this.pickerMode = "location";
+    this.#welcome = false;
+    this.#pickToken += 1;
+    this.#leaveOpen();
+    this.openBusy = false;
   }
 
   close() {
+    this.#pickToken += 1;
     this.open = false;
   }
 
@@ -358,11 +396,116 @@ class CreateWizard {
     // Breadcrumb navigation is backward-only: a completed step navigates back,
     // but a future step is unreachable by click (the consistency gate owns
     // forward motion through Next).
-    if (index >= 0 && index < this.currentIndex) this.#stepIndex = index;
+    if (index >= 0 && index < this.currentIndex) {
+      this.#stepIndex = index;
+      if (id === "start") this.#leaveOpen();
+    }
   }
 
   back() {
     if (this.#stepIndex > 0) this.#stepIndex -= 1;
+    if (this.currentStep.id === "start") this.#leaveOpen();
+  }
+
+  // ---- First-run Welcome step (#2467) ----
+  chooseCreate() {
+    if (this.currentStep.id !== "start") return;
+    this.#pickToken += 1;
+    this.openError = "";
+    if (this.needsRootFolder) {
+      this.#stepIndex = indexOfStep(this.steps, "root");
+      return;
+    }
+    // The root is already saved (a failed open got that far): skip the root step
+    // and land on Location, exactly where a successful root save would.
+    this.#welcome = false;
+    this.#stepIndex = 0;
+    this.#seedLocationFromDefault();
+  }
+
+  chooseOpen() {
+    if (this.currentStep.id !== "start") return;
+    this.#pickToken += 1;
+    this.openError = "";
+    this.pickerMode = "open";
+    this.pickerOpen = true;
+  }
+
+  // The picked folder must itself be a project; the suggested projects folder is
+  // the parent of the topmost ancestor project (see openExistingProject.ts).
+  async #pickExisting(path: string) {
+    const token = ++this.#pickToken;
+    // Superseded (Create chosen, closed, reset, newer pick) or no longer on Welcome.
+    const stale = () => token !== this.#pickToken || !this.open || this.currentStep.id !== "start";
+    this.openError = "";
+    try {
+      const listing = await api.listDirectories(path);
+      if (stale()) return;
+      if (!listing.is_project) {
+        this.openError = "That folder isn't a project — pick the folder that holds project.yaml.";
+        return;
+      }
+      if (!listing.parent_path) {
+        // Nothing above it to be the projects folder, so containment can never hold.
+        this.openError =
+          "A project at the top of a drive can't be opened — move it into a folder first.";
+        return;
+      }
+      const suggestion = await suggestProjectsFolder(listing, (next) => api.listDirectories(next));
+      if (stale()) return;
+      this.rootFolderDraft = suggestion;
+      this.openProjectPath = listing.path;
+      this.#opening = true;
+      this.#stepIndex = indexOfStep(this.steps, "open_root");
+    } catch (error) {
+      if (stale()) return;
+      this.openError = error instanceof Error ? error.message : "Could not read that folder.";
+    }
+  }
+
+  #leaveOpen() {
+    if (!this.#opening) return;
+    this.#opening = false;
+    this.openProjectPath = "";
+    this.rootFolderDraft = "";
+    this.openError = "";
+    this.aiPolicy = "inherit";
+    this.#stepIndex = 0;
+  }
+
+  // Save the chosen projects folder, persist the first-run app-wide AI policy
+  // (#746 - the same write submit() does), then open the project under it. Any of
+  // them failing keeps the wizard open on this step with the reason shown inline.
+  async confirmOpen() {
+    if (this.currentStep.id !== "open_root" || !this.canAdvance || this.openBusy) return;
+    this.openBusy = true;
+    this.openError = "";
+    try {
+      await this.onSaveRootFolder(this.rootFolderDraft.trim());
+      if (this.needsRootFolder) {
+        this.openError = "Couldn't use that folder — check that the path exists.";
+        return;
+      }
+      if (this.#aiPolicyToPersist && !(await this.#saveAppPolicy(this.#aiPolicyToPersist))) {
+        this.openError = "Couldn't save the AI policy.";
+        return;
+      }
+      if (!(await this.onOpenProject(this.openProjectPath))) {
+        this.openError = "Couldn't open that project.";
+        return;
+      }
+      this.close();
+    } finally {
+      this.openBusy = false;
+    }
+  }
+
+  async #saveAppPolicy(policy: AIPolicy): Promise<boolean> {
+    try {
+      return (await this.onSaveAppPolicy(policy)) !== false;
+    } catch {
+      return false;
+    }
   }
 
   async next() {
@@ -379,15 +522,18 @@ class CreateWizard {
         this.rootError = "Couldn't use that folder — check that the path exists.";
         return;
       }
-      // On SUCCESS the save flips needsRootFolder ⇒ the step list drops "root",
-      // shifting "location" into #stepIndex 0. We are therefore ALREADY on
-      // "location" — return WITHOUT incrementing (the collapse is the advance).
+      // On SUCCESS the save flips needsRootFolder ⇒ the step list drops "start"
+      // and "root", shifting "location" into #stepIndex 0. Land there explicitly
+      // (the collapse is the advance; the old index, past "start", would now
+      // point at "ai").
       // Falling through to the increment below skipped straight past "location"
       // to "ai", leaving the title uncollected → an empty-title 422 (#1404). This
       // used to be safe only because "location" was once the final step.
       //
       // First run only reaches a machine root now, so seed the Location with it
       // here (start() handled the returning-user case) — #1410.
+      this.#welcome = false;
+      this.#stepIndex = 0;
       this.#seedLocationFromDefault();
       return;
     }
@@ -463,10 +609,16 @@ class CreateWizard {
 
   closePicker() {
     this.pickerOpen = false;
+    this.pickerMode = "location";
   }
 
   onPickFolder(path: string) {
+    const mode = this.pickerMode;
     this.closePicker();
+    if (mode === "open") {
+      void this.#pickExisting(path);
+      return;
+    }
     this.pickedFolder = path;
     void this.#loadCandidates(path);
   }

@@ -36,6 +36,7 @@ describe("createWizard first-run navigation (#1404)", () => {
   it("saving the root folder lands on LOCATION, not skipping to AI", async () => {
     createWizard.defaultProjectsFolder = ""; // no root yet ⇒ first run
     createWizard.start();
+    createWizard.chooseCreate();
     expect(createWizard.currentStep.id).toBe("root");
     createWizard.rootFolderDraft = "C:/root";
 
@@ -90,6 +91,7 @@ describe("createWizard Location seeding (#1410)", () => {
   it("seeds the Location after the first-run root step", async () => {
     createWizard.defaultProjectsFolder = ""; // first run
     createWizard.start();
+    createWizard.chooseCreate();
     createWizard.rootFolderDraft = "C:/root";
     await createWizard.next(); // saves the root (beforeEach flips the default), lands on location
     expect(createWizard.currentStep.id).toBe("location");

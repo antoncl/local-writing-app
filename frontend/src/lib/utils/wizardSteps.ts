@@ -7,11 +7,22 @@
 // and the final Create action. Slice 4 (#552) appends "review" | "describe"
 // after it, moving Create onto the last step ("describe").
 
-export type WizardStepId = "root" | "location" | "ai" | "review" | "describe";
+import { rootContainsProject } from "@/lib/utils/openExistingProject";
+
+export type WizardStepId =
+  | "start"
+  | "open_root"
+  | "root"
+  | "location"
+  | "ai"
+  | "review"
+  | "describe";
 
 export type StepDef = { id: WizardStepId; label: string };
 
 const ALL_STEPS: StepDef[] = [
+  { id: "start", label: "Welcome" },
+  { id: "open_root", label: "Open project" },
   { id: "root", label: "Root folder" },
   { id: "location", label: "Location" },
   { id: "ai", label: "AI" },
@@ -22,8 +33,28 @@ const ALL_STEPS: StepDef[] = [
 // The root-folder step is machine substrate (#429): it exists only on first
 // run, when no default projects folder is configured yet. Once one is set every
 // creation starts at "Location".
-export function activeSteps(needsRootFolder: boolean): StepDef[] {
-  return ALL_STEPS.filter((step) => step.id !== "root" || needsRootFolder);
+//
+// The same first-run condition adds a "start" (Welcome) step ahead of it (#2467):
+// create a project or open an existing one. Choosing Open swaps the rest of the
+// flow for the single "open_root" step (pick the projects folder, then open).
+//
+// `welcome` says whether the Welcome step is still reachable; it defaults to
+// first run, but a first-run session whose root is already saved (a failed open)
+// keeps it so Back from open_root still has both choices to offer.
+export function activeSteps(
+  needsRootFolder: boolean,
+  openingExisting = false,
+  welcome = needsRootFolder,
+): StepDef[] {
+  if (openingExisting) {
+    return ALL_STEPS.filter((step) => step.id === "start" || step.id === "open_root");
+  }
+  return ALL_STEPS.filter((step) => {
+    if (step.id === "open_root") return false;
+    if (step.id === "start") return welcome;
+    if (step.id === "root") return needsRootFolder;
+    return true;
+  });
 }
 
 export function indexOfStep(steps: StepDef[], id: WizardStepId): number {
@@ -36,6 +67,8 @@ export type WizardSnapshot = {
   rootFolderDraft: string;
   title: string;
   pickedFolder: string;
+  // The existing project being opened (#2467), "" outside the open flow.
+  openProjectPath: string;
 };
 
 // The consistency gate (design-doc §4): a step cannot be advanced past until its
@@ -44,6 +77,14 @@ export type WizardSnapshot = {
 // so "location" is complete once it has a title and a folder to build under.
 export function stepComplete(id: WizardStepId, snapshot: WizardSnapshot): boolean {
   switch (id) {
+    case "start":
+      // Advances only through its two choices, never a generic Next.
+      return false;
+    case "open_root":
+      return (
+        snapshot.rootFolderDraft.trim().length > 0 &&
+        rootContainsProject(snapshot.rootFolderDraft, snapshot.openProjectPath)
+      );
     case "root":
       return snapshot.rootFolderDraft.trim().length > 0;
     case "location":

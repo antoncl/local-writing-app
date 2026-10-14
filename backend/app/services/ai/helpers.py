@@ -94,9 +94,9 @@ def _entry_context_policy(summary: Any) -> str:
         return policy
     return DEFAULT_CONTEXT_POLICY
 
-# Word splitter — same shape as project_service.WORD_PATTERN. Splitting on
-# whitespace is a fine approximation for `last_words`.
-_WS = re.compile(r"\s+")
+# A word for `last_words` — a whitespace-delimited run, the same approximation as
+# project_service.WORD_PATTERN.
+_WORD = re.compile(r"\S+")
 
 
 # ----- Pure helpers --------------------------------------------------------
@@ -107,8 +107,9 @@ def last_words(text: Any, n: Any) -> str:
 
     - Empty / None text → "".
     - `n <= 0` → "".
-    - If text has ≤ n words, the whole text is returned with its original
-      whitespace preserved.
+    - If text has ≤ n words, the whole text is returned.
+    - Otherwise the text from the n-th last word on — its original whitespace,
+      paragraph breaks included, preserved (a prose tail must keep its shape).
     """
     if text is None:
         return ""
@@ -119,10 +120,10 @@ def last_words(text: Any, n: Any) -> str:
         return ""
     if n_int <= 0 or not text_str.strip():
         return ""
-    words = _WS.split(text_str.strip())
-    if len(words) <= n_int:
+    starts = [m.start() for m in _WORD.finditer(text_str)]
+    if len(starts) <= n_int:
         return text_str
-    return " ".join(words[-n_int:])
+    return text_str[starts[-n_int]:]
 
 
 def prose(text: Any) -> str:

@@ -38,6 +38,9 @@ class LastWordsTests(unittest.TestCase):
     def test_basic(self) -> None:
         self.assertEqual(last_words("one two three four five", 2), "four five")
 
+    def test_keeps_the_tails_paragraph_breaks(self) -> None:
+        self.assertEqual(last_words("one two.\n\nThree  four", 3), "two.\n\nThree  four")
+
     def test_returns_all_when_n_exceeds_count(self) -> None:
         self.assertEqual(last_words("one two three", 10), "one two three")
 

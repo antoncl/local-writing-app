@@ -360,7 +360,8 @@ def main() -> int:
     backend = str(REPO / "backend")
     nonce = secrets.token_hex(16)
     cmd = [
-        str(python), "-m", "uvicorn", "dev_backend_app:app",
+        # uvicorn with --reload's Windows restart fixed (#2471): see the wrapper.
+        str(python), str(REPO / "scripts" / "dev_uvicorn.py"), "dev_backend_app:app",
         "--app-dir", backend,
         "--host", "127.0.0.1",
         "--port", str(port),

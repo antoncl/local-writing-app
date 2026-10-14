@@ -28,8 +28,26 @@ export type LineEditState = {
   wide: boolean;
 };
 
-// Margin the card needs between the prose column's right edge and the frame's.
-const CARD_ROOM_PX = 212;
+// The margin card's geometry (#2478): it starts CARD_OVERLAP_PX inside the prose
+// column's right padding (which holds no text) and keeps CARD_GAP_PX clear of the
+// frame's edge. Its width adapts to the room right of the column, between
+// CARD_MIN_PX and CARD_MAX_PX; below the minimum it falls back to the block card
+// under the paragraph.
+const CARD_MIN_PX = 180;
+const CARD_MAX_PX = 232;
+const CARD_OVERLAP_PX = 32;
+const CARD_GAP_PX = 12;
+const CARD_WIDTH_VAR = "--line-edit-card-w";
+// The CSS reads the overlap from here too, so the offset and the width maths
+// can't drift apart.
+const CARD_OVERLAP_VAR = "--line-edit-card-overlap";
+
+/** The margin card's width for `room` px right of the prose column, or null
+ *  when even the minimum card doesn't fit (narrow layout). */
+export function marginCardWidth(room: number): number | null {
+  const width = room + CARD_OVERLAP_PX - CARD_GAP_PX;
+  return width < CARD_MIN_PX ? null : Math.min(width, CARD_MAX_PX);
+}
 
 type LineEditMeta =
   | { type: "install"; edits: PlacedEdit[] }
@@ -83,20 +101,27 @@ function observeCardRoom(view: EditorView): () => void {
       observer.observe(frame);
     }
     const room = frame.getBoundingClientRect().left + frame.clientWidth - view.dom.getBoundingClientRect().right;
-    setLineEditCardWide(view, room >= CARD_ROOM_PX);
+    const width = marginCardWidth(room);
+    if (width !== null) {
+      view.dom.style.setProperty(CARD_WIDTH_VAR, `${width}px`);
+      view.dom.style.setProperty(CARD_OVERLAP_VAR, `${CARD_OVERLAP_PX}px`);
+    }
+    setLineEditCardWide(view, width !== null);
   });
   observer.observe(view.dom);
   return () => observer.disconnect();
 }
 
 /** `collapseTo`: put the caret there (the end of the revised range), so the
- *  selection highlight doesn't sit over the passage under review. No scroll. */
+ *  selection highlight doesn't sit over the passage under review. Then bring
+ *  the first edit and its card into view (#2478). */
 export function installLineEdits(view: EditorView, edits: PlacedEdit[], collapseTo?: number): void {
   const tr = view.state.tr.setMeta(pluginKey, { type: "install", edits } satisfies LineEditMeta);
   if (collapseTo !== undefined) {
     tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(collapseTo, tr.doc.content.size))));
   }
   view.dispatch(tr);
+  revealCurrent(view);
 }
 
 function resolve(view: EditorView, ids: number[], accepted: boolean): void {
@@ -121,27 +146,39 @@ function resolve(view: EditorView, ids: number[], accepted: boolean): void {
   view.dispatch(tr);
 }
 
-/** Bring the current edit itself into view (not its paragraph - a tall one could
- *  leave the edit off screen) without moving the caret or taking focus. */
+/** Bring the current edit AND its decision card into view (#2478) without moving
+ *  the caret or taking focus. The edit itself, not its paragraph (a tall one
+ *  could leave the edit off screen). When edit and card don't both fit — a
+ *  block card under a very tall paragraph — the edit wins. */
 function revealCurrent(view: EditorView): void {
   const edit = currentLineEdit(view.state);
   if (!edit) return;
   const span = view.dom.querySelector<HTMLElement>(`[data-line-edit-id="${edit.id}"]`);
-  if (span?.scrollIntoView) {
-    span.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const scroller = view.dom.closest<HTMLElement>(".editor-wrap");
+  if (!scroller) {
+    span?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     return;
   }
-  // No decorated span in the DOM: scroll the frame by the edit's coordinates.
-  try {
-    const scroller = view.dom.closest<HTMLElement>(".editor-wrap");
-    if (!scroller) return;
-    const box = scroller.getBoundingClientRect();
-    const at = view.coordsAtPos(edit.from);
-    if (at.top < box.top) scroller.scrollTop += at.top - box.top;
-    else if (at.bottom > box.bottom) scroller.scrollTop += at.bottom - box.bottom;
-  } catch {
-    /* a position outside the rendered doc: nothing to reveal */
+  let top: number;
+  let bottom: number;
+  if (span) {
+    ({ top, bottom } = span.getBoundingClientRect());
+  } else {
+    try {
+      ({ top, bottom } = view.coordsAtPos(edit.from));
+    } catch {
+      return; // a position outside the rendered doc: nothing to reveal
+    }
   }
+  const box = scroller.getBoundingClientRect();
+  const card = view.dom.querySelector<HTMLElement>(".line-edit-card");
+  if (card) {
+    const c = card.getBoundingClientRect();
+    const withCard = { top: Math.min(top, c.top), bottom: Math.max(bottom, c.bottom) };
+    if (withCard.bottom - withCard.top <= box.height) ({ top, bottom } = withCard);
+  }
+  if (top < box.top) scroller.scrollTop += top - box.top;
+  else if (bottom > box.bottom) scroller.scrollTop += bottom - box.bottom;
 }
 
 export function setCurrentLineEdit(view: EditorView, id: number): void {

@@ -12,7 +12,8 @@
   import {
     deleteMachineAssistant,
     hireMachineAssistant,
-    loadMachineAssistants,
+    machineAssistantEntriesStore,
+    refreshMachineAssistants,
     reorderMachineAssistants,
     unlistMachineAssistant,
     updateMachineAssistant,
@@ -31,7 +32,9 @@
       : { ...defaultView("assistant"), expr: { descendants_of: "assistant:assistant" } },
   );
 
-  let entries = $state<AssistantEntrySummary[]>([]);
+  // The shared machine roster (#2448) — the same one the New-project wizard
+  // shows; every machine-layer write refreshes it.
+  const entries = $derived($machineAssistantEntriesStore);
   let busy = $state(false);
   let error = $state("");
 
@@ -44,16 +47,11 @@
 
   const editing = $derived(formFor && formFor !== "new" ? entries.find((e) => e.id === formFor) : undefined);
 
-  async function reload(): Promise<void> {
-    entries = await loadMachineAssistants();
-  }
-
   async function act(fn: () => Promise<void>): Promise<void> {
     busy = true;
     error = "";
     try {
       await fn();
-      await reload();
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -62,7 +60,7 @@
   }
 
   onMount(() => {
-    void act(async () => {});
+    void act(refreshMachineAssistants);
   });
 
   function beginHire(): void {

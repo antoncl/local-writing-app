@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
+import { crc32 } from "node:zlib";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { createLogger, defineConfig } from "vite";
 
@@ -38,6 +39,23 @@ function claudeBackendBase() {
   return `http://127.0.0.1:${port}/api`;
 }
 
+/**
+ * This checkout's own frontend port, mirroring `default_port()` in
+ * `scripts/dev_backend.py`: derived from the checkout path, so sibling
+ * worktrees don't share one and restarting the same tree reuses it.
+ *
+ * Vite reads `port: 0` as "use the default" — it tried 5173, Anton's port,
+ * and drifted upward from there — so "any free port" was never what ran. A
+ * fixed hand-picked port (the old recipe's `PORT=5199`) was worse: every
+ * session shared it, and a second session opened the first one's UI and,
+ * since browser storage is per origin, its last-opened project. A stable
+ * per-checkout port also keeps each worktree's storage its own.
+ */
+function claudeFrontendPort() {
+  const checkout = fileURLToPath(new URL("..", import.meta.url));
+  return 5200 + (crc32(checkout) % 100);
+}
+
 export default defineConfig(({ command, mode }) => {
   // Anton's stack, unchanged: pinned and strict, so a stale server holding
   // 5173 surfaces as an error instead of silently drifting to another port.
@@ -46,11 +64,12 @@ export default defineConfig(({ command, mode }) => {
 
   if (mode === "claude") {
     // Claude Code picked this port (autoPort) and told the Browser pane about
-    // it, so bind exactly that one. Run by hand without PORT, take any free
-    // port rather than defaulting to 5173 and stealing Anton's.
+    // it, so bind exactly that one. Run by hand without PORT (the worktree
+    // recipe), bind this checkout's own port — never 5173, which is Anton's.
+    // Strict either way: a collision fails loudly instead of drifting.
     const assigned = Number(process.env.PORT);
-    server.port = Number.isInteger(assigned) && assigned > 0 ? assigned : 0;
-    server.strictPort = server.port !== 0;
+    server.port = Number.isInteger(assigned) && assigned > 0 ? assigned : claudeFrontendPort();
+    server.strictPort = true;
     define["import.meta.env.VITE_API_BASE"] = JSON.stringify(claudeBackendBase());
   } else if (command === "serve") {
     // Dev serve (Anton's stack): keep the pre-ADR-0072 behaviour EXACTLY — talk

@@ -78,6 +78,11 @@
     setAssistantEntries,
   } from "@/lib/stores/assistants";
   import {
+    hireMachineAssistant,
+    reorderMachineAssistants,
+    unlistMachineAssistant,
+  } from "@/lib/stores/machineAssistants";
+  import {
     metadataSchemaStore,
     projectLayerIdStore,
   } from "@/lib/stores/schema";
@@ -275,30 +280,15 @@
     createWizard.onSaveAppPolicy = async (policy) => {
       await projectSession.saveAiPolicy(policy);
     };
+    // Machine-layer writes live in one module shared with Settings (#2444).
     createWizard.onReorderAssistants = async (orderedIds) => {
-      await run(async () => {
-        setAssistantEntries((await api.reorderAssistants(orderedIds, "")).entries);
-      });
+      await run(() => reorderMachineAssistants(orderedIds));
     };
     createWizard.onUnlistAssistant = async (entryId) => {
-      await run(async () => {
-        setAssistantEntries((await api.unlistAssistant(entryId, "")).entries);
-      });
+      await run(() => unlistMachineAssistant(entryId));
     };
     createWizard.onHireAssistant = async (title, provider, tier, model) => {
-      await run(async () => {
-        const created = await api.createAssistantEntry(title, "");
-        await api.saveAssistantEntry({
-          ...created,
-          metadata: {
-            ...created.metadata,
-            ai_provider: provider,
-            ai_capability_tier: tier,
-            ai_model: model,
-          },
-        });
-        await storeRefreshAssistantEntries();
-      });
+      await run(() => hireMachineAssistant(title, provider, tier, model));
     };
     // The projectSession controller owns machine settings + the open/create/
     // rehydrate flow; App injects status/run and the cross-subsystem workspace
@@ -1272,13 +1262,6 @@
     onSelect={(path) => projectChooser.useDirectory(path)}
   />
 
-  <ConfirmModal
-    state={confirmService.active}
-    onCancel={() => confirmService.dismiss()}
-    onConfirm={(dontShowAgain, optionChecked) => confirmService.resolve(dontShowAgain, optionChecked)}
-    onSecondary={() => confirmService.resolveSecondary()}
-  />
-
   <ConflictDiffModal />
 
   <CreateProjectWizard />
@@ -1338,6 +1321,16 @@
       onCancel={closeMutationSetEditor}
     />
   {/if}
+
+  <!-- LAST of the modals: every modal shares one z-index, so DOM order decides
+       stacking, and a confirm raised from inside another dialog (Settings →
+       Assistants → Delete, #2444) must land on top of it, not under it. -->
+  <ConfirmModal
+    state={confirmService.active}
+    onCancel={() => confirmService.dismiss()}
+    onConfirm={(dontShowAgain, optionChecked) => confirmService.resolve(dontShowAgain, optionChecked)}
+    onSecondary={() => confirmService.resolveSecondary()}
+  />
 
   {#if error}
     <section class="error-toast" role="alert">

@@ -5,6 +5,10 @@ export const assistantsApi = {
   listAssistantEntries() {
     return request<AssistantEntryList>("/assistants");
   },
+  // The machine layer's own roster, independent of the open project (#2444).
+  listMachineAssistantEntries() {
+    return request<AssistantEntryList>("/assistants/machine");
+  },
   createAssistantEntry(title: string, layerId: string | null = null) {
     // `null` (the default the "+" button sends) = the local layer, i.e. the
     // open project — machine when no project is open. Assistants are a layered

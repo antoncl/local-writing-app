@@ -32,7 +32,8 @@ import { researchStructureStore, setResearchStructure, setStructure } from "@/li
 import { refreshTodos } from "@/lib/stores/todos";
 import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
-import { metadataSchemaStore } from "@/lib/stores/schema";
+import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+import { inheritedLayerLabel } from "@/lib/utils/provenance";
 import type { EditorPaneState } from "@/lib/editor-core/editorPaneModel";
 import type { Backlink } from "@/lib/types";
 
@@ -99,7 +100,13 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
     ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", plot_deck: "Delete Deck", chat: "Delete Chat", assistant: "Delete Assistant", tag: "Delete Tag" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
-  const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
+  // An inherited assistant's file lives in an ancestor layer, so deleting it
+  // there reaches every project that inherits it (#2444) — say so.
+  const owner = pane.scene as { source_layer_id?: string; source_layer_label?: string };
+  const inheritedFrom = documentKind === "assistant" ? inheritedLayerLabel(owner, get(projectLayerIdStore)) : null;
+  const baseMessage = inheritedFrom
+    ? `Delete "${sceneTitle}"? This removes the assistant file from ${inheritedFrom} — every project that inherits from it loses it.`
+    : `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
   let message =
     backlinks.length > 0
       ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`

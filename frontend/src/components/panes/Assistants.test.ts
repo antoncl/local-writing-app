@@ -13,9 +13,9 @@ import { tick } from "svelte";
 import { render, screen } from "@/lib/test/component";
 import Assistants from "./Assistants.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
-import { metadataSchemaStore } from "@/lib/stores/schema";
+import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
 import { tagNodesStore } from "@/lib/stores/tagNodes";
-import type { AssistantEntrySummary, MetadataSchema, TagEntry } from "@/lib/types";
+import type { AssistantEntrySummary, MetadataSchema, MetadataSchemaLayer, TagEntry } from "@/lib/types";
 
 // `assistant:assistant` is the kind root the default view descends from; the
 // listed/unlisted split comes from `computed_metadata.listed` (#332/#333).
@@ -96,5 +96,41 @@ describe("Assistants pane — tag chip title resolution (ADR-0082 §2)", () => {
       (el) => el.textContent?.trim() === "Hero",
     );
     expect(chipStyle?.getAttribute("style") || "").toBe("");
+  });
+});
+
+describe("Assistants pane — scope + provenance (#2444)", () => {
+  const inherited = {
+    ...assistant("a1", "Muse"),
+    source_layer_id: "machine",
+    source_layer_label: "Machine",
+    metadata: { ai_provider: "anthropic", ai_model: "claude-x" },
+  } as AssistantEntrySummary;
+
+  afterEach(() => metadataSchemaLayersStore.set([]));
+
+  it("project scope: an inherited assistant's subtitle names its source layer", () => {
+    metadataSchemaLayersStore.set([{ id: "proj" } as MetadataSchemaLayer]);
+    renderPane([inherited]);
+    expect(screen.getByText("from Machine · anthropic · claude-x")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Muse from this project's roster" })).toBeInTheDocument();
+  });
+
+  it("machine scope: no provenance prefix and machine-roster wording", () => {
+    metadataSchemaLayersStore.set([{ id: "proj" } as MetadataSchemaLayer]);
+    render(Assistants, {
+      props: {
+        entries: [inherited],
+        viewSpec: defaultView("assistant", SCHEMA),
+        scope: "machine",
+        onOpenEntry: noop,
+        onSetOrder: asyncNoop,
+        onUnlist: asyncNoop,
+      },
+    });
+    expect(screen.getByText("anthropic · claude-x")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove Muse from the machine roster (every project)" }),
+    ).toBeInTheDocument();
   });
 });

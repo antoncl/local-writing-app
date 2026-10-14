@@ -15,8 +15,9 @@ import { keyedReferrerIndexStore } from "@/lib/stores/references";
 import { setResearchStructure } from "@/lib/stores/structure";
 import { mutationSetEntriesStore } from "@/lib/stores/mutationSets";
 import { chatSessionsStore } from "@/lib/stores/chats";
+import { metadataSchemaLayersStore } from "@/lib/stores/schema";
 import { api } from "@/lib/api";
-import type { EditableDocument, StructureDocument, PlotBoardProjection, MutationSetEntrySummary } from "@/lib/types";
+import type { MetadataSchemaLayer, EditableDocument, StructureDocument, PlotBoardProjection, MutationSetEntrySummary } from "@/lib/types";
 
 const NODE_ID = "node_doomed";
 
@@ -113,6 +114,18 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     await deleteVia(paneFor("assistant", "assistant:base"));
     expect(deleteAssistantEntry).toHaveBeenCalledWith(NODE_ID);
     expect(deleteScene).not.toHaveBeenCalled();
+  });
+
+  it("an inherited assistant's confirm names the owning layer (#2444)", async () => {
+    metadataSchemaLayersStore.set([{ id: "proj" } as MetadataSchemaLayer]);
+    vi.spyOn(api, "deleteAssistantEntry").mockResolvedValue({ entries: [] });
+    const pane = paneFor("assistant", "assistant:base");
+    (pane.scene as unknown as Record<string, string>).source_layer_id = "machine";
+    (pane.scene as unknown as Record<string, string>).source_layer_label = "Machine";
+    editorPanes.panes = [pane];
+    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+    await editorPanes.requestDeleteScene("pane_1");
+    expect(request.mock.calls[0][0].message).toContain("from Machine");
   });
 
   it("chat → api.deleteChatSession and clears activeChatId, never api.deleteScene", async () => {

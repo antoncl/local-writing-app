@@ -8,9 +8,26 @@
 // at the row — and, until colour returns in slice 3 (the picker's
 // instance-colour helper), the chip carries none, replacing the old
 // `assistantTagsStore`-keyed `tagHexFor` reactivity test.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, within } from "@/lib/test/component";
+import { modelCapabilities } from "@/lib/stores/modelCapabilities.svelte";
+
+// Only the model catalogue is reached (the tool-calling mark, #2485): anthropic
+// has one tools model and one plain; ollama is unreachable.
+vi.mock("@/lib/api", () => ({
+  api: {
+    listAIProviderModels: vi.fn(async (provider: string) => {
+      if (provider !== "anthropic") throw new Error("unreachable");
+      return {
+        models: [
+          { id: "m-tools", capabilities: ["tools"] },
+          { id: "m-plain", capabilities: ["vision"] },
+        ],
+      };
+    }),
+  },
+}));
 import Assistants from "./Assistants.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
@@ -132,5 +149,28 @@ describe("Assistants pane — scope + provenance (#2444)", () => {
     expect(
       screen.getByRole("button", { name: "Remove Muse from the machine roster (every project)" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("Assistants pane — tool-calling mark (#2485)", () => {
+  const withModel = (id: string, title: string, provider: string, model: string) =>
+    ({ ...assistant(id, title), metadata: { ai_provider: provider, ai_model: model } }) as AssistantEntrySummary;
+  const MARK = "This model reports that it supports tool calling";
+
+  beforeEach(() => modelCapabilities.reset());
+
+  it("marks a row whose model claims tools, and not one that doesn't or can't be looked up", async () => {
+    renderPane([
+      withModel("a1", "Tooly", "anthropic", "m-tools"),
+      withModel("a2", "Plain", "anthropic", "m-plain"),
+      withModel("a3", "Offline", "ollama", "m-x"),
+    ]);
+    await vi.waitFor(() => expect(screen.getAllByLabelText(MARK)).toHaveLength(1));
+    const row = screen.getByText("Tooly").closest(".node-row") as HTMLElement;
+    expect(within(row).getByLabelText(MARK)).toBeInTheDocument();
+    const plain = screen.getByText("Plain").closest(".node-row") as HTMLElement;
+    expect(within(plain).queryByLabelText(MARK)).toBeNull();
+    const offline = screen.getByText("Offline").closest(".node-row") as HTMLElement;
+    expect(within(offline).queryByLabelText(MARK)).toBeNull();
   });
 });

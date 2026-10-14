@@ -9,6 +9,7 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { isAssistantListed } from "@/lib/stores/assistants";
+  import { modelCapabilities } from "@/lib/stores/modelCapabilities.svelte";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { liveTags, tagTitleById } from "@/lib/stores/tagNodes";
   import { makeNodeSearchFilter } from "@/lib/utils/nodeSearch";
@@ -53,6 +54,13 @@
     onUnlist: (entryId: string) => Promise<void>;
     scope?: "project" | "machine";
   } = $props();
+
+  // Fetch each listed provider's model catalogue once (shared, cached store);
+  // unreachable ones stay unknown and show no mark (#2485).
+  $effect(() => {
+    const providers = new Set(entries.map((e) => String(e.metadata?.ai_provider ?? "")));
+    void modelCapabilities.ensure(providers);
+  });
 
   const rosterName = $derived(scope === "machine" ? "the machine roster (every project)" : "this project's roster");
 
@@ -272,7 +280,18 @@
       {/if}
     {/snippet}
     {#snippet detailSlot()}
-      <small>{assistantSubtitle(entry)}</small>
+      <!-- Value annotation (design-language §4): the model's own claim, never
+           a verified fact — and nothing at all when unknown (#2485). Inside
+           the subtitle so it trails it on the same line (the detail slot
+           stacks its children, which made a marked row taller). -->
+      <small
+        >{assistantSubtitle(entry)}{#if modelCapabilities.supportsTools(String(entry.metadata?.ai_provider ?? ""), String(entry.metadata?.ai_model ?? ""))}<i
+            class="ti ti-tools assistant-tools-mark"
+            role="img"
+            title="This model reports that it supports tool calling"
+            aria-label="This model reports that it supports tool calling"
+          ></i>{/if}</small
+      >
     {/snippet}
     {#snippet trailing()}
       {#if ctx.collapsible}
@@ -352,6 +371,13 @@
 
   .assistant-drag-handle:active {
     cursor: grabbing;
+  }
+
+  .assistant-tools-mark {
+    margin-left: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    vertical-align: middle;
   }
 
   /* Recessive until the row is hovered or the control is focused — the roster is

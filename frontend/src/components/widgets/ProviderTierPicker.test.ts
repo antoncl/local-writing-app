@@ -50,7 +50,7 @@ vi.mock("@/lib/api", () => {
         context_window: 128000,
         tier: "balanced",
         // GPT accepts temperature — the capability is present (#1554).
-        capabilities: ["temperature"],
+        capabilities: ["temperature", "tools"],
         deprecated: false,
         cost_in_per_mtok: 2,
         family: "gpt",
@@ -195,7 +195,7 @@ describe("ProviderTierPicker — selected-model capabilities lift (#1554)", () =
     const subscription = await screen.findByLabelText("Subscription");
     await fireEvent.change(subscription, { target: { value: "openai" } });
     await vi.waitFor(() =>
-      expect(onCapabilities).toHaveBeenLastCalledWith(["temperature"]),
+      expect(onCapabilities).toHaveBeenLastCalledWith(["temperature", "tools"]),
     );
   });
 
@@ -251,5 +251,30 @@ describe("ProviderTierPicker — picked-model feedback (#1453)", () => {
     // The read-only readout shows the exact model id (unique to the readout — the
     // row shows the display name, not the id).
     await vi.waitFor(() => expect(screen.getByText("claude-unlisted")).toBeTruthy());
+  });
+});
+
+describe("ProviderTierPicker — tool-use claim (#2485)", () => {
+  it("says 'Tool use' for a model that reports tools, and lists 'tools' in the detail", async () => {
+    const { container } = render(ProviderTierPicker, {
+      props: { provider: "openai", model: "gpt-bal", policy: "cloud-allowed", onChange: vi.fn() },
+    });
+    await vi.waitFor(() => expect(screen.getByTestId("ptp-tool-use").textContent?.trim()).toBe("Tool use"));
+    await vi.waitFor(() => expect(container.querySelector(".ptp-model-detail")?.textContent).toContain("· tools"));
+  });
+
+  it("says 'No tool use' for a known model without the capability", async () => {
+    render(ProviderTierPicker, {
+      props: { provider: "anthropic", model: "claude-bal", policy: "cloud-allowed", onChange: vi.fn() },
+    });
+    await vi.waitFor(() => expect(screen.getByTestId("ptp-tool-use").textContent?.trim()).toBe("No tool use"));
+  });
+
+  it("says nothing when the model is not in the catalogue (unknown)", async () => {
+    render(ProviderTierPicker, {
+      props: { provider: "anthropic", model: "orphan", policy: "cloud-allowed", onChange: vi.fn() },
+    });
+    await screen.findByText("Claude Balanced");
+    expect(screen.queryByTestId("ptp-tool-use")).toBeNull();
   });
 });

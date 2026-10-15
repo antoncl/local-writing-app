@@ -445,6 +445,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     automatic_lore=False,
+                    markers_before_selection=request.markers_before_selection,
                 ),
             )
         except PreviewError as exc:
@@ -722,6 +723,7 @@ async def ai_generate_stream(
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     automatic_lore=False,
+                    markers_before_selection=request.markers_before_selection,
                 ),
             )
         except PreviewError as exc:

@@ -43,6 +43,7 @@
 // so `outputHandlerFor` is now a pure registry lookup.
 
 import type { Editor } from "@tiptap/core";
+import { markerIdsBefore } from "@/lib/editor-core/markersBefore";
 import type {
   AIEntryPatch,
   EditableDocument,
@@ -111,6 +112,9 @@ export interface InlineGathered {
   textBefore: string;
   textAfter: string;
   selectionText?: string;
+  /** The ids of the mutation pills before the selection, in document order, so
+   *  `lore_as_of("selection")` reads lore where the selection starts (#2491). */
+  markersBefore?: string[];
 }
 
 // What the editor handlers (`inline`, `inline_edits`) need from their activation
@@ -152,7 +156,20 @@ export function gatherSelection(
   const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
   const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
   const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
-  return { destination: "selection", from, to, textBefore, textAfter, selectionText };
+  const markersBefore = markerIdsBefore(editor.state.doc, from);
+  return { destination: "selection", from, to, textBefore, textAfter, selectionText, markersBefore };
+}
+
+// The request fields an inline run sends for what it gathered: the text around
+// the destination, the selection, and the markers before it - one place, so every
+// selection run (revise, line edits, notes) carries the same context.
+export function gatheredRequestFields(g: InlineGathered) {
+  return {
+    text_before: g.textBefore,
+    text_after: g.textAfter,
+    ...(g.selectionText !== undefined ? { selection: g.selectionText } : {}),
+    ...(g.markersBefore !== undefined ? { markers_before_selection: g.markersBefore } : {}),
+  };
 }
 
 export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {

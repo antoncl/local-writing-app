@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { api } from "@/lib/api";
 import { proseStarterKit } from "./proseStarterKit";
+import { createMutationCloseMark, createMutationMark } from "./proseMarks";
 import { AiSuggestionController } from "./aiSuggestion.svelte";
 import { LineEditSuggestions, lineEditState, lineNoteState } from "./lineEditSuggestions";
 import { noteNotice } from "./aiLineNotes";
@@ -31,7 +32,7 @@ const ENTRY = {
 function setup() {
   const editor = new Editor({
     element: document.createElement("div"),
-    extensions: [proseStarterKit(), LineEditSuggestions],
+    extensions: [proseStarterKit(), LineEditSuggestions, createMutationMark(), createMutationCloseMark()],
     content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: TEXT }] }] },
   });
   editors.push(editor);
@@ -83,6 +84,30 @@ const fakeStream = (done: unknown) =>
   });
 
 describe("lore check notes (ADR-0098)", () => {
+  it("sends the pill ids before the selection (#2491)", async () => {
+    const { editor, ctrl } = setup();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "mutation", attrs: { setId: "mset_1", anchorId: "a1" } },
+            { type: "mutationClose", attrs: { ref: "a1", row: "", closeId: "c1" } },
+            { type: "text", text: "The cat" },
+            { type: "mutation", attrs: { setId: "mset_1", anchorId: "inside" } },
+            { type: "text", text: " sat on the mat." },
+            { type: "mutation", attrs: { setId: "mset_1", anchorId: "a2" } },
+          ],
+        },
+      ],
+    });
+    editor.commands.setTextSelection({ from: 3, to: 3 + TEXT.length + 1 });
+    const spy = fakeStream(reply());
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(spy.mock.calls[0][0]).toMatchObject({ markers_before_selection: ["a1", "c1"] });
+  });
+
   it("sends response_format notes, installs the notes without touching the doc", async () => {
     const { editor, ctrl } = setup();
     const spy = fakeStream(reply());

@@ -41,7 +41,7 @@ from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.body_text import story_text
 from app.services.error_log import append_error_line
-from app.services.project.lore_mutations import START_OF_SCENE
+from app.services.project.lore_mutations import SELECTION_START, START_OF_SCENE
 from app.services.project.metadata_refs import iter_ref_occurrences, occurrence_targets
 from app.services.project.mutation_anchors import anchors_as_markers
 from app.services.project.narration import resolved_narration as _resolve_narration_gate
@@ -647,18 +647,20 @@ def _register_lore_gate(
 
 
 def _register_lore_as_of(env: SandboxedEnvironment) -> None:
-    """Register `lore_as_of("start")` (#2422): every lore entry the run places for
-    the target scene resolves at the START of that scene (earlier scenes'
-    mutations live, none of its own) — a draft must not see the outcome of the
-    changes it is about to write. Prints nothing; sets a per-render slot the
-    preview reads back (`RenderedTemplate.lore_position`); None = end of scene."""
-    lore_position_slot: list[int | None] = [None]
+    """Register `lore_as_of("start" | "selection")` (#2422, #2491): every lore
+    entry the run places for the target scene resolves at the START of that scene
+    (earlier scenes' mutations live, none of its own) or where the run's
+    selection starts (the preview resolves the request's marker ids; no list =
+    the start) — a draft must not see the outcome of the changes it is about to
+    write. Prints nothing; sets a per-render slot the preview reads back
+    (`RenderedTemplate.lore_position`); None = end of scene."""
+    lore_position_slot: list[int | str | None] = [None]
     env.lore_position = lore_position_slot  # type: ignore[attr-defined]
 
     def _lore_as_of(when: Any = None) -> str:
-        if when != "start":
-            raise TemplateError(f'lore_as_of() takes "start", not {when!r}')
-        lore_position_slot[0] = START_OF_SCENE
+        if when not in ("start", "selection"):
+            raise TemplateError(f'lore_as_of() takes "start" or "selection", not {when!r}')
+        lore_position_slot[0] = START_OF_SCENE if when == "start" else SELECTION_START
         return ""
 
     env.globals["lore_as_of"] = _lore_as_of

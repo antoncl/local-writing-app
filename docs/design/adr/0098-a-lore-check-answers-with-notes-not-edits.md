@@ -1,12 +1,13 @@
 # ADR-0098: A lore check answers with notes, not edits
 
 **Status:** Living draft (2026-10-14) — #2488
-**Verified against `ecea329d` (2026-10-14).**
+**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2).
 
 ### How this ADR is kept
 
 This ADR is a living draft while the feature is built. It is approved once the design and the feature set have settled, not before the first slice.
-- Each slice's PR rewrites the sections it changes in place, and re-pins the commit above. There are no amendment sections while the draft is live.
+- Each slice's PR rewrites the decisions it changes in place and adds itself to the slice list above. There are no amendment sections while the draft is live.
+- The Context stays pinned to the commit the design started from: it describes what the feature was built on, not the code after it.
 - On approval the status becomes Accepted, and from then on a change is an amendment, as for any ADR.
 
 **Settled:** a check answers with notes, never edits; nothing is written; a note names its entry by id; notes and edits share one review surface; the check is offered on scenes.
@@ -114,7 +115,11 @@ The measurement says nothing about lore that the passage doesn't name.
    **What the template does:**
    - If neither `lore_named_in(selection)` nor the picker gives an entry, it calls `stop("Nothing in the selection names a lore entry, and none was picked.")`, so a check with no lore to check against never reaches the model.
    - The helper's logic lives in `lore_selection.py`. `helpers.py`, which is near its size cap, only registers it, and its documentation lands in `docs/prompts/reference.md` with the vocabulary gate.
-7. **Lore is checked as of the selection.** Entries resolve at the selection's start: earlier scenes' mutations and the ones anchored in this scene before the selection count, while the ones after it don't. Without this, a change of state placed later in the scene reads as a contradiction of the text before it. `lore_as_of` already carries a position in the scene for its `"start"` value, and the check needs that position to be the selection's.
+7. **Lore is checked as of the selection.** Entries resolve at the selection's start: earlier scenes' mutations and the ones anchored in this scene before the selection count, while the ones after it don't. Without this, a change of state placed later in the scene reads as a contradiction of the text before it. The check calls `lore_as_of("selection")`.
+   - The request names the mutation markers (anchors and closes) that come before the selection, in document order, by id: `markers_before_selection`.
+   - The position is the saved offset of the last of those markers that exists in the saved scene. An id not saved yet is skipped. With no marker, the position is the start of the scene.
+   - Marker ids rather than a character offset, because the mutations index is built from the saved file: an offset taken from the editor would drift with any unsaved text before the selection, and a marker's identity does not.
+   - The resolver is unchanged. An anchor counts when its offset is at or before the position and a close when the position is at or past it, so the last marker and every earlier one count while every later one does not.
 8. **The review says what was checked.** The footer lists the entries the run sent: "Checked against: Kaela, The Meridian, …". The check sees only the lore it was given, so "No contradictions found." means none against *those* entries, and the list shows the writer what was left out.
 9. **No tool calling in the first version.** Tool lookups are deferred, not rejected (see Deferred).
 
@@ -147,7 +152,7 @@ The measurement says nothing about lore that the passage doesn't name.
 ## Consequences
 
 - One registered handler, one built-in prompt and one built-in snippet. The review plugin gains a per-handler definition of display, card, keys and resolution. Edits keep theirs unchanged.
-- One prompt-vocabulary helper (`lore_named_in`) and a selection position for `lore_as_of`. Both are documented in `docs/prompts/reference.md`, with the vocabulary gate.
+- One prompt-vocabulary helper (`lore_named_in`) and a `"selection"` value for `lore_as_of`, fed by the request's `markers_before_selection`. Both are documented in `docs/prompts/reference.md`, with the vocabulary gate.
 - `PROMPT_OUTPUT_HANDLER_KEYS`, `OUTPUT_HANDLER_KEYS` and `spec/prompt-disposition-labels.json` gain `inline_notes`. The stale comment on `AIGenerateRequest.response_format` (it still says only the non-streaming route serves line edits) is corrected.
 - A check's notes are lost when its document closes. The run is paid for and the result is temporary. Keeping notes (as TODOs, or anywhere) would be a later decision with its own ADR.
 - A selection that names many entries sends all of them, every picked entry and every *always* entry, unbudgeted.

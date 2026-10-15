@@ -8,7 +8,7 @@ import type { Editor } from "@tiptap/core";
 import { api } from "@/lib/api";
 import type { AIStreamEvent } from "@/lib/api/core";
 import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
-import type { InlineGathered, OutputRun } from "@/lib/editor-core/outputHandlers";
+import { gatheredRequestFields, type InlineGathered, type OutputRun } from "@/lib/editor-core/outputHandlers";
 import { placeLineNotes, type PlacedNote } from "@/lib/editor-core/lineEdits";
 import type { CheckedEntry } from "@/lib/types";
 
@@ -54,7 +54,7 @@ export function noteNotice(placedCount: number, dropped: number): string | null 
 
 export async function fetchLineNotes(args: NotesRunArgs): Promise<NotesOutcome> {
   const { editor, gathered, run, sceneIdForWire, signal, isStale } = args;
-  const { from, to, selectionText, textBefore, textAfter } = gathered;
+  const { from, to, selectionText } = gathered;
   const { entry, inputs, assistantId, scene } = run;
   try {
     // The notes are read whole, so the deltas are ignored - the call rides the
@@ -67,9 +67,7 @@ export async function fetchLineNotes(args: NotesRunArgs): Promise<NotesOutcome> 
       session_id: scene.id,
       inputs,
       resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-      text_before: textBefore,
-      text_after: textAfter,
-      ...(selectionText !== undefined ? { selection: selectionText } : {}),
+      ...gatheredRequestFields(gathered),
       ...(assistantId ? { assistant_id: assistantId } : {}),
       commit: false,
       response_format: "notes",

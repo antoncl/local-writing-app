@@ -7,6 +7,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from mutation_helpers import save_scenes_with_mutations
@@ -17,11 +18,14 @@ from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
+    UpdateProjectSettingsRequest,
     UpsertMetadataFieldRequest,
 )
+from app.services import machine_settings as ms
 from app.services.ai.chat import one_shot_system_blocks
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.preview import PreviewError, PreviewRequest, build_preview
+from app.services.ai.providers import StreamDelta, StreamDone
 from app.services.project.lore_mutations import START_OF_SCENE
 
 
@@ -243,7 +247,128 @@ class LoreAsOfTests(_Base):
     def test_a_bad_at_value_is_a_template_error(self) -> None:
         with self.assertRaises(PreviewError) as ctx:
             self._rendered('lore_as_of("end")')
-        self.assertIn('takes "start"', str(ctx.exception))
+        self.assertIn('takes "start" or "selection"', str(ctx.exception))
+
+
+
+class LoreAsOfSelectionTests(_Base):
+    """#2491: `lore_as_of("selection")` resolves the scene's lore where the
+    selection starts - the last of the request's marker ids found on disk."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.ids = save_scenes_with_mutations(
+            self.service,
+            {
+                self.s1: "Earlier. " + self._marker(self.honor, "rank", "Commander", "e1"),
+                self.s2: (
+                    "A " + self._marker(self.honor, "rank", "Captain", "m1")
+                    + " B " + self._marker(self.honor, "rank", "Major", "m2")
+                    + " C <!-- mutate:close;ref=m2;id=c1 --> D"
+                ),
+            },
+        )
+        self.m1, self.m2 = self.ids["m1"][1], self.ids["m2"][1]
+
+    def _sent(self, markers: list[str] | None) -> str:
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=(
+                    f'{{% do use("{self.honor}") %}}{{% do lore_as_of("selection") %}}'
+                    '{% role "system" %}Sys.{% endrole %}{% role "user" %}Go.{% endrole %}'
+                ),
+                target_scene_id=self.s2,
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
+                automatic_lore=False,
+                markers_before_selection=markers,
+            ),
+        )
+        return "\n".join(b["text"] for b in one_shot_system_blocks("Sys.", rendered) or [])
+
+    def test_an_anchor_as_the_last_marker_counts_and_a_later_one_does_not(self) -> None:
+        sent = self._sent([self.m1])
+        self.assertIn("<rank>Captain</rank>", sent)
+        self.assertNotIn("Major", sent)
+        self.assertIn("<rank>Major</rank>", self._sent([self.m1, self.m2]))
+
+    def test_an_earlier_scenes_change_counts_before_this_scenes_first_marker(self) -> None:
+        sent = self._sent([])
+        self.assertIn("<rank>Commander</rank>", sent)
+        self.assertNotIn("Captain", sent)
+
+    def test_a_close_as_the_last_marker_ends_the_change(self) -> None:
+        self.assertIn("<rank>Major</rank>", self._sent([self.m1, self.m2]))
+        sent = self._sent([self.m1, self.m2, "c1"])
+        self.assertIn("<rank>Captain</rank>", sent)
+        self.assertNotIn("Major", sent)
+
+    def test_an_unknown_trailing_id_falls_back_to_the_previous_marker(self) -> None:
+        sent = self._sent([self.m1, "anchor_not_saved_yet"])
+        self.assertIn("<rank>Captain</rank>", sent)
+        self.assertNotIn("Major", sent)
+
+    def test_no_known_marker_or_no_list_is_the_start_of_the_scene(self) -> None:
+        for markers in ([], None, ["anchor_not_saved_yet"]):
+            with self.subTest(markers=markers):
+                sent = self._sent(markers)
+                self.assertIn("<rank>Commander</rank>", sent)
+                self.assertNotIn("Captain", sent)
+
+    def test_the_position_is_the_markers_own_offset(self) -> None:
+        body = self.service.read_scene(self.s2).body
+        self.assertEqual(
+            self.service.position_before_selection(self.s2, [self.m1, "c1"]),
+            body.index("<!-- mutate:close;ref=" + self.m2),
+        )
+        self.assertEqual(self.service.position_before_selection(self.s2, None), START_OF_SCENE)
+
+    def test_the_stream_route_honours_it_end_to_end(self) -> None:
+        settings = ms.MachineSettings(
+            providers=ms.ProviderCredentials(anthropic_api_key="sk-ant-test"),
+            default_provider="anthropic",
+        )
+        self.service.update_project_settings(UpdateProjectSettingsRequest(ai_policy="cloud-allowed"))
+
+        def post(markers: list[str]) -> str:
+            seen: dict[str, object] = {}
+
+            def _fake_stream(call, **_kwargs):
+                seen["call"] = call
+                yield StreamDelta(text='{"notes": []}')
+                yield StreamDone(
+                    provider="anthropic", model="m", latency_ms=1, stop_reason="end_turn", truncated=False
+                )
+
+            with patch("app.services.machine_settings.load_settings", return_value=settings), patch(
+                "app.routers.ai.ai_providers.chat_stream", side_effect=_fake_stream
+            ):
+                response = self.client.post(
+                    "/api/ai/generate/stream",
+                    json={
+                        "template_source": (
+                            f'{{% do use("{self.honor}") %}}{{% do lore_as_of("selection") %}}'
+                            '{% role "user" %}Go{% endrole %}'
+                        ),
+                        "target_scene_id": self.s2,
+                        "selection": "B",
+                        "markers_before_selection": markers,
+                        "provider": "anthropic",
+                        "model": "claude-haiku-4-5-20251001",
+                    },
+                )
+            self.assertEqual(response.status_code, 200, response.text)
+            call = seen["call"]
+            return call.system_prompt + "\n".join(b["text"] for b in call.system_blocks or [])  # type: ignore[attr-defined]
+
+        sent = post([self.m1])
+        self.assertIn("<rank>Captain</rank>", sent)
+        self.assertNotIn("Major", sent)
+        self.assertIn("<rank>Major</rank>", post([self.m1, self.m2]))
 
 
 if __name__ == "__main__":

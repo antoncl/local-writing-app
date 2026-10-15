@@ -7,6 +7,7 @@ import {
   inlineEditsHandler,
   inlineNotesHandler,
   extractHandler,
+  gatheredRequestFields,
   inlineDestinationFor,
   outputHandlerFor,
   type ExtractHost,
@@ -29,7 +30,8 @@ function fakeEditor(
   textBetween: (from: number, to: number) => string = (from, to) => `T[${from},${to}]`,
 ): Editor {
   return {
-    state: { selection, doc: { content: { size }, textBetween } },
+    // No mutation pills in the fake doc: nodesBetween visits nothing.
+    state: { selection, doc: { content: { size }, textBetween, nodesBetween: () => {} } },
   } as unknown as Editor;
 }
 
@@ -162,6 +164,7 @@ describe("inlineHandler.produce — the gather", () => {
       // beforeStart = max(0, 20-600) = 0 ; afterEnd = min(200, 30+600) = 200
       textBefore: "T[0,20]",
       textAfter: "T[30,200]",
+      markersBefore: [],
     });
   });
 
@@ -263,5 +266,28 @@ describe("extractHandler — produce/apply delegate to the host", () => {
     const p = patch({ body: "a life" });
     await extractHandler.apply(p, host);
     expect(published).toEqual([p]);
+  });
+});
+
+describe("gatheredRequestFields (#2491)", () => {
+  const base = { from: 1, to: 5, textBefore: "before", textAfter: "after" };
+
+  it("a selection run sends its text, the selection and the markers before it", () => {
+    expect(
+      gatheredRequestFields({ ...base, destination: "selection", selectionText: "sel", markersBefore: ["a1", "c1"] }),
+    ).toEqual({ text_before: "before", text_after: "after", selection: "sel", markers_before_selection: ["a1", "c1"] });
+  });
+
+  it("an empty marker list is still sent: nothing precedes the selection", () => {
+    expect(
+      gatheredRequestFields({ ...base, destination: "selection", selectionText: "sel", markersBefore: [] }),
+    ).toMatchObject({ markers_before_selection: [] });
+  });
+
+  it("a cursor run names no selection and no markers", () => {
+    expect(gatheredRequestFields({ ...base, destination: "cursor" })).toEqual({
+      text_before: "before",
+      text_after: "after",
+    });
   });
 });

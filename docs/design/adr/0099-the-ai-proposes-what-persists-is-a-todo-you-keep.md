@@ -1,15 +1,9 @@
 # ADR-0099: The AI proposes; what persists is a TODO you keep
 
-**Status:** Living draft (2026-10-15) — #2502
-**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups), #2506 (S2: `todos(x)`), #2508 (S1: Keep).
+**Status:** Accepted — 2026-10-15, Anton Lauridsen, after the feature was built against it as a living draft (2026-10-15). Text by Claude from a conversation with Anton that started from a revise conversation's suggestions for other entries having nowhere to go. Issue #2502; slices #2508 (S1: Keep), #2506 (S2: `todos(x)`), #2504 (S3: follow-ups).
+**Context verified against `4da34dea` (2026-10-15), the code before the feature.**
 
-### How this ADR is kept
-
-As ADR-0098: a living draft while the feature is built, approved once it settles. Each slice's PR rewrites the decisions it changes in place and adds itself to the slice list above; the Context stays pinned to the commit the design started from.
-
-**Settled:** the rule (decision 1); flags are never persisted on their own; follow-ups never edit another entry; TODOs are the only persistence, in the stores that exist.
-
-**Open:** the card's key for Keep as TODO; the exact Revise entry wording that reads TODOs.
+While a living draft, each slice rewrote the decisions it changed in place; from this approval on, a change is an amendment, as for any ADR. Keep shipped as a card button with no key binding; Revise entry lists open TODOs as built in #2506 (each with "raised from …" when the app raised it).
 
 ## Context
 

@@ -102,6 +102,19 @@ describe("revealQuoteBeside", () => {
     expect(workspaceLayout.allGroups().length).toBe(groupsBefore);
   });
 
+  it("without a chat pane id the scene still opens and reveals, just not moved beside", async () => {
+    const g = workspaceLayout.groupById(G_EDITOR)!;
+    seat(g, "pane-chat");
+    fake.openScene.mockImplementation(async () => {
+      fake.panes = [scenePane];
+      seat(g, "pane-scene");
+    });
+    await revealQuoteBeside({ sceneId: "scene_1", quote: QUOTE, besidePanelId: null });
+    expect(fake.openScene).toHaveBeenCalledWith("scene_1");
+    expect(workspaceLayout.groupOf("pane-scene")!.id).toBe(g.id);
+    expect(fake.revealSearchMatchInOpenPane).toHaveBeenCalledTimes(1);
+  });
+
   it("activates a scene tab that is hidden in another group instead of moving it", async () => {
     const [a] = workspaceLayout.allGroups();
     seat(a, "pane-chat");

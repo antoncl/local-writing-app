@@ -135,11 +135,13 @@
   }: Props = $props();
 
   // #2498: the subject scene's text, so assistant quotes that occur in it link.
-  // Re-read when a turn completes (or the chat/structure changes).
+  // Re-read when a turn completes, the chat/structure changes, or the open
+  // scene is edited (debounced).
   const quoteSource = new QuoteSourceController();
   $effect(() => {
     void chatRunning; void chatHistory.length; void structure;
-    untrack(() => void quoteSource.refresh(chatSubject, structure));
+    void quoteSource.liveDraft(chatSubject);
+    untrack(() => quoteSource.schedule(chatSubject, structure));
   });
 
 
@@ -1199,7 +1201,7 @@
       showJumpToLatest={!pinnedToBottom}
       onJumpToLatest={() => scrollToBottom()}
       quoteSource={quoteSource.plain}
-      onQuoteClick={(quote) => quoteSource.sceneId && hostPaneId &&
+      onQuoteClick={(quote) => quoteSource.sceneId &&
         void revealQuoteBeside({ sceneId: quoteSource.sceneId, quote, besidePanelId: hostPaneId })}
     />
 

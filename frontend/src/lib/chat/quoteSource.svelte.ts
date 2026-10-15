@@ -14,6 +14,24 @@ export class QuoteSourceController {
   plain = $state<string | null>(null);
   sceneId = $state<string | null>(null);
   #seq = 0;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+
+  /** The open scene pane's live draft for `subject` (undefined when it isn't
+   *  open). Read inside an effect so editing the scene re-links the chat: a
+   *  quote edited away stops being a link instead of opening onto nothing. */
+  liveDraft(subject: string): string | undefined {
+    return editorPanes.panes.find((p) => p.document?.type === "manuscript" && p.document.id === subject)
+      ?.draftMarkdown;
+  }
+
+  /** `refresh`, debounced: typing in the scene re-parses it once it settles. */
+  schedule(subject: string, structure: StructureDocument | null, delayMs = 400): void {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      void this.refresh(subject, structure);
+    }, delayMs);
+  }
 
   /** Re-read the text for `subject` (a reset when it isn't a scene). */
   async refresh(subject: string, structure: StructureDocument | null): Promise<void> {

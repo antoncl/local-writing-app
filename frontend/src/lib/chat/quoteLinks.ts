@@ -99,7 +99,12 @@ export function linkQuotes(html: string, plain: string): string {
   for (const node of texts) {
     if (node.parentElement?.closest(SKIP_ANCESTORS)) continue;
     const text = node.data;
-    const runs = [...text.matchAll(/“[^”]{12,}”|"[^"]{12,}"/g)].filter((m) => findQuote(m[0], plain));
+    // A straight-quoted run must open after a non-letter and close before one,
+    // so a short quote's CLOSING mark never pairs with the next OPENING mark
+    // (`the "turn" never comes, as she said "…"`).
+    const runs = [...text.matchAll(/“[^”]{12,}”|(?<![\p{L}\p{N}])"[^"]{12,}"(?![\p{L}\p{N}])/gu)].filter((m) =>
+      findQuote(m[0], plain),
+    );
     if (runs.length === 0) continue;
     const frag = document.createDocumentFragment();
     let cursor = 0;

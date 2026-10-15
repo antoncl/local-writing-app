@@ -65,6 +65,12 @@ describe("linkQuotes", () => {
     expect(d.textContent).toBe('He wrote “the lantern was still burning” and "rain on slate" ok.');
   });
 
+  it("never pairs a short quote's closing mark with the next quote's opening mark", () => {
+    // Between the two quotes sits text that DOES occur in the scene.
+    const d = q('<p>The "turn" the lantern was still burning "late".</p>');
+    expect(d.querySelector("[data-quote]")).toBeNull();
+  });
+
   it("does not link a paraphrase", () => {
     expect(q("<p>The lamp kept <em>on glowing all night</em>.</p>").querySelector("[data-quote]")).toBeNull();
   });

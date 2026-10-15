@@ -66,7 +66,8 @@ async function waitUntilPlaced(sceneId: string): Promise<string | null> {
 export async function revealQuoteBeside(opts: {
   sceneId: string;
   quote: string;
-  besidePanelId: string;
+  /** The chat's pane; null = no beside-move (the scene just opens). */
+  besidePanelId: string | null;
 }): Promise<void> {
   const { sceneId, quote, besidePanelId } = opts;
   const reveal: SearchReveal = { query: quote, matchCase: true, wholeWord: false, excerpt: "", ordinal: 0 };
@@ -78,7 +79,7 @@ export async function revealQuoteBeside(opts: {
   await editorPanes.openScene(sceneId);
   const paneId = await waitUntilPlaced(sceneId);
   if (paneId) {
-    const chatGroup = workspaceLayout.groupOf(besidePanelId);
+    const chatGroup = besidePanelId ? workspaceLayout.groupOf(besidePanelId) : null;
     const sceneGroup = workspaceLayout.groupOf(paneId);
     if (chatGroup && sceneGroup && sceneGroup.id === chatGroup.id) {
       // Out of the chat's group: into another editor group when there is one,

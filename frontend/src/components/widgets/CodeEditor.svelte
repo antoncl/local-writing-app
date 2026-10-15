@@ -2,8 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { Compartment, EditorState } from "@codemirror/state";
-  import { StreamLanguage } from "@codemirror/language";
-  import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
+  import { jinjaTemplateLanguage } from "./jinjaTemplateLanguage";
   import { json as jsonLang } from "@codemirror/lang-json";
   import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
   import type { CompletionSource } from "@codemirror/autocomplete";
@@ -57,7 +56,8 @@
   onMount(() => {
     const extensions = [basicSetup, codeSyntaxHighlighting, lintGutter(), searchReveal];
     if (language === "jinja2") {
-      const jinjaLanguage = StreamLanguage.define(jinja2);
+      // Our engine's template syntax, not the stock jinja2 mode (#2496).
+      const jinjaLanguage = jinjaTemplateLanguage();
       extensions.push(jinjaLanguage);
       // basicSetup already enables the autocompletion UI; this registers our
       // source for the jinja language so it drives it (no second autocompletion).

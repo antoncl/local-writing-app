@@ -15,7 +15,9 @@ context_strategy:
 
   The lore it checks is what the passage names: `lore_named_in(selection)` is
   the entries whose name or alias occurs in the passage, what those link to,
-  and the scene's own links (its POV, location, ...). Anything picked in the
+  the scene's own links (its POV, location, ...) and what those link to — so a
+  passage that only says "she" or "the ship" is still checked against the POV
+  character's ship and home. Anything picked in the
   "Relevant lore" picker is checked too. With nothing named and nothing picked
   there is nothing to check against, so the run stops and says so.
 

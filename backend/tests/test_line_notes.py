@@ -274,7 +274,7 @@ class GenerateNotesRouteTests(unittest.TestCase):
 
 class LoreNamedInTests(_HelperFixtureBase):
     """`lore_named_in(text)`: the entries a passage names, what those link to,
-    and the scene's own references."""
+    the scene's own references, and what THOSE link to."""
 
     def _policy(self, entry: dict, policy: str, **metadata: object) -> None:
         self._update_lore(
@@ -313,15 +313,26 @@ class LoreNamedInTests(_HelperFixtureBase):
         self._policy(self.manticore, "never")
         self.assertEqual(self._named("The fleet left Manticore."), [])
 
-    def test_the_scenes_own_references_are_included(self) -> None:
-        # scene_two's pov is Honor; the text names nobody.
-        self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node), [self.honor["id"]])
+    def test_the_scenes_own_references_and_their_links_are_included(self) -> None:
+        # scene_two's pov is Honor; the text names nobody. Honor links to Nimitz
+        # (#2488: a passage that says "she" still gets the POV's ship / station).
+        self.assertEqual(
+            self._named("Nobody was mentioned.", self.scene_two_node), [self.honor["id"], self.nimitz["id"]]
+        )
 
     def test_a_manual_only_scene_reference_is_kept_but_a_never_one_is_not(self) -> None:
         self._policy(self.honor, "manual_only")
-        self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node), [self.honor["id"]])
+        # (`_policy` rewrites Honor from her creation snapshot, which predates her
+        # link to Nimitz — so only Honor herself is asserted here.)
+        self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node)[:1], [self.honor["id"]])
         self._policy(self.honor, "never")
         self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node), [])
+
+    def test_a_manual_only_or_never_link_of_a_scene_reference_is_left_out(self) -> None:
+        self._policy(self.nimitz, "manual_only")
+        self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node), [self.honor["id"]])
+        self._policy(self.nimitz, "never")
+        self.assertEqual(self._named("Nobody was mentioned.", self.scene_two_node), [self.honor["id"]])
 
     def test_no_id_appears_twice(self) -> None:
         # Honor is named by title AND alias, linked-to by nothing, and the scene's pov;
@@ -339,7 +350,7 @@ class LoreNamedInTests(_HelperFixtureBase):
             context={"scene": scene},
             env=env,
         )
-        self.assertEqual(env.used_nodes, [self.manticore["id"], self.honor["id"]])  # type: ignore[attr-defined]
+        self.assertEqual(env.used_nodes, [self.manticore["id"], self.honor["id"], self.nimitz["id"]])  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

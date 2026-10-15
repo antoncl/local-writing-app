@@ -93,6 +93,28 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     expect(btn("Continue at cursor")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("switching to Notes shows its hint (naming its reply snippet), no sub-form, and clears inline config (#2492)", async () => {
+    render(PromptOutputEditor, { props: { contextStrategy: { output: { handler: "inline", destination: "selection" } } } });
+    await fireEvent.click(btn("Notes"));
+    expect(btn("Notes")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Flags places in the selection as notes/)).toBeTruthy();
+    expect(screen.getByText(/Notes reply format/)).toBeTruthy();
+    expect(queryBtn("Replace selection")).toBeNull();
+    expect(queryBox("Commit button (extract to a node)")).toBeNull();
+    await fireEvent.click(btn("Inline suggestion"));
+    expect(btn("Continue at cursor")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("Notes is an inline mode: switching in pre-ticks, moving between inline modes does not (#2492)", async () => {
+    const onEnterInline = vi.fn();
+    render(PromptOutputEditor, { props: { contextStrategy: null, onEnterInline } });
+    await fireEvent.click(btn("Notes"));
+    expect(onEnterInline).toHaveBeenCalledTimes(1);
+    await fireEvent.click(btn("Line edits"));
+    await fireEvent.click(btn("Notes"));
+    expect(onEnterInline).toHaveBeenCalledTimes(1);
+  });
+
   it("reports entering an inline mode only on the switch in, never between inline modes (#2475)", async () => {
     const onEnterInline = vi.fn();
     render(PromptOutputEditor, { props: { contextStrategy: null, onEnterInline } });

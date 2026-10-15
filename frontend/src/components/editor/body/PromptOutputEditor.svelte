@@ -30,7 +30,7 @@
     // Outbound: the output config changed → parent emits its change/save.
     onChange?: () => void;
     // Outbound (#2475): the author just switched INTO an inline mode (Inline
-    // suggestion / Line edits) from a non-inline one. The parent owns `offer_on`
+    // suggestion / Line edits / Notes) from a non-inline one. The parent owns `offer_on`
     // and uses this to pre-tick a default target, so a new inline prompt isn't
     // silently offered nowhere.
     onEnterInline?: () => void;
@@ -43,12 +43,15 @@
     onEnterInline,
   }: Props = $props();
 
-  type Handler = "" | "inline" | "inline_edits" | "extract_to_node";
+  type Handler = "" | "inline" | "inline_edits" | "inline_notes" | "extract_to_node";
+  // The modes that run in the prose editor on a selection or the caret (#2475).
+  const INLINE_HANDLERS: ReadonlySet<Handler> = new Set(["inline", "inline_edits", "inline_notes"]);
 
   const MODES: { id: Handler; label: string; hint: string }[] = [
     { id: "", label: "Conversation", hint: "a plain chat about this subject; the reply stays in the conversation" },
     { id: "inline", label: "Inline suggestion", hint: "streams a draft into the prose editor to accept or reject" },
     { id: "inline_edits", label: "Line edits", hint: "suggests separate reasoned edits within the selection to accept or reject one by one" },
+    { id: "inline_notes", label: "Notes", hint: "flags places in the selection as notes to read and dismiss; never changes the text" },
     { id: "extract_to_node", label: "Brainstorm / commit", hint: "a chat whose result you commit to a node as a reviewable patch" },
   ];
   const DESTINATIONS: { id: "cursor" | "selection"; label: string; hint: string }[] = [
@@ -66,6 +69,8 @@
     "": "Pick Conversation for a back-and-forth that doesn't write anywhere on its own.",
     inline: "Pick Inline suggestion to draft prose directly into the editor.",
     inline_edits: "Suggests separate edits within the selection, each with a reason; you accept or reject each one.",
+    inline_notes:
+      "Flags places in the selection as notes, each naming the lore entry it contradicts; you open or dismiss each one, and the text is never changed. Include the \"Notes reply format\" snippet in the prompt.",
     extract_to_node: "Pick Brainstorm / commit to workshop a node, then commit the result as a reviewable change.",
   };
 
@@ -105,11 +110,11 @@
       delete patch.destination;
       delete patch.on_accept;
     }
-    // Line edits always target the selection and never commit — nothing to configure.
+    // Line edits and notes always target the selection and never commit — nothing to configure.
     if (next !== "extract_to_node") delete patch.commit;
-    const wasInline = handler === "inline" || handler === "inline_edits";
+    const wasInline = INLINE_HANDLERS.has(handler);
     emit(patch);
-    if (!readOnly && !wasInline && (next === "inline" || next === "inline_edits")) onEnterInline?.();
+    if (!readOnly && !wasInline && INLINE_HANDLERS.has(next)) onEnterInline?.();
   }
 
   function toggleHeadless(): void {

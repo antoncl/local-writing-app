@@ -18,7 +18,8 @@ entry_type: prompt:snippet
   `body` (the prose — the prompt decides whether to show it), `status` and
   `tags` (bookkeeping), and the narration fields `pov_mode` / `pov` / `tense`,
   which "Prose generation settings" and the prompt's point-of-view line carry.
-  A list field keeps its order, one numbered item per line.
+  A list field keeps its order, one numbered item per line (a grouped item as
+  `member: value` pairs).
 #}
 {% set s = brief_scene %}
 ## This scene: {{ s.title }}
@@ -39,7 +40,12 @@ _{{ f.description }}_
 {{ v | map(attribute="title") | join(", ") }}
 {% elif v is sequence and v is not string %}
 {% for item in v %}
-{{ loop.index }}. {{ (item.values() | map("string") | join(" — ")) if item is mapping else item }}
+{% if item is mapping %}
+{{ loop.index }}. {% for k, iv in item.items() if iv %}{{ k }}: {{ iv }}{{ "; " if not loop.last }}{% endfor %}
+
+{% else %}
+{{ loop.index }}. {{ item }}
+{% endif %}
 {% endfor %}
 {% else %}
 {{ v }}

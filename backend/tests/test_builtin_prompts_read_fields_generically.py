@@ -21,9 +21,11 @@ from pathlib import Path
 
 PROMPTS = Path(__file__).resolve().parents[1] / "app" / "builtin_library" / "prompts"
 
-# `x.metadata.field`, `x.metadata["field"]`, `'field' in x.metadata`.
+# `x.metadata.field`, `x.metadata["field"]`, `x.metadata.get("field")`,
+# `'field' in x.metadata`.
 _READS = (
     re.compile(r"\b\w+\.metadata\.(?!get\b|items\b|keys\b|values\b)(\w+)"),
+    re.compile(r"\b\w+\.metadata\.get\(\s*[\"'](\w+)[\"']"),
     re.compile(r"\b\w+\.metadata\[\s*[\"'](\w+)[\"']\s*\]"),
     re.compile(r"[\"'](\w+)[\"']\s+in\s+\w+\.metadata\b"),
 )
@@ -65,9 +67,10 @@ class BuiltinPromptsReadFieldsGenericallyTests(unittest.TestCase):
 
     def test_the_guard_sees_a_hard_coded_read(self) -> None:
         # Mutation check: the patterns match the shape Draft scene used to have.
-        text = "{% if e.metadata.dynamics %}{{ e.metadata['beats'] }}{% if 'x' in e.metadata %}"
+        text = ("{% if e.metadata.dynamics %}{{ e.metadata['beats'] }}{% if 'x' in e.metadata %}"
+                '{{ e.metadata.get("y") }}{{ e.metadata.get(f.id) }}')
         hits = {m.group(1) for p in _READS for m in p.finditer(text)}
-        self.assertEqual(hits, {"dynamics", "beats", "x"})
+        self.assertEqual(hits, {"dynamics", "beats", "x", "y"})
 
 
 if __name__ == "__main__":

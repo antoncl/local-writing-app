@@ -52,6 +52,17 @@ The entry's current content — every field and its body — is provided to you 
    caches: one delivery, every field at its current value, correctly typed.
    Never re-format the fields by hand here. #}
 {{ use(e) }}
+{# The writer's open TODOs on this entry (saved ones, read when this renders —
+   including follow-ups the app raised from another entry's change). Listed so
+   the model can raise them; it never ticks one — the writer does. #}
+{% set open_todos = todos(e) %}
+{% if open_todos %}
+The writer has open TODOs on this entry — things they mean to address. Take them up in the conversation when they bear on it; never claim one is done (the writer ticks them).
+{% for t in open_todos %}- {{ t.text }}{% if t.from %} (follow-up from {{ t.from }}){% endif %}
+
+{% endfor %}
+
+{% endif %}
 {% else %}
 {# Create mode: no entry exists yet, so register the target type's writable
    fields directly and describe them for the model to draft from scratch. #}

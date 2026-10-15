@@ -40,15 +40,19 @@ export type KeepRequest = {
   docId: string;
 };
 
-/** True when the range lies inside one textblock and no TODO mark touches it. */
+/** True when the range lies inside one textblock, holds only text (an inline
+ *  node — a hard break, a mutation pill — would split the mark into runs that
+ *  aren't adjacent, and `enforceUnique` would keep only the first), and no TODO
+ *  mark touches it. */
 function canEmbed(doc: PMNode, from: number, to: number): boolean {
   if (!doc.resolve(from).sameParent(doc.resolve(to)) || !doc.resolve(from).parent.isTextblock) return false;
-  let touched = false;
+  let ok = true;
   doc.nodesBetween(from, to, (node) => {
-    if (node.marks.some((m) => m.type.name === "todoAnchor")) touched = true;
-    return !touched;
+    if (node.isTextblock) return true;
+    if (!node.isText || node.marks.some((m) => m.type.name === "todoAnchor")) ok = false;
+    return ok;
   });
-  return !touched;
+  return ok;
 }
 
 /** Make the TODO. Throws when the write failed, so the flag can stay. */

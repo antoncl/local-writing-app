@@ -241,6 +241,19 @@ describe("keepFlag", () => {
     expect(filed).toEqual([[{ scope: "scene", scene_id: "scene_1", text: "n — “one. Second”" }]]);
   });
 
+  it("files a scene TODO when the range crosses a hard break (an inline node would split the mark)", async () => {
+    const { editor } = setup({ content: [para(text("Line one"), { type: "hardBreak" }, text("line two"))] });
+    const filed: NewTodo[][] = [];
+    const markRange = vi.fn(() => "x");
+    // "Line one" = 1..9, hard break = 9..10, "line two" = 10..18.
+    await keepFlag(
+      { doc: doc(editor), from: 6, to: 14, quote: "one line", note: "n", inScene: true, docId: "scene_1" },
+      { markRange, createTodos: async (items) => void filed.push(items) },
+    );
+    expect(markRange).not.toHaveBeenCalled();
+    expect(filed).toEqual([[{ scope: "scene", scene_id: "scene_1", text: "n — “one line”" }]]);
+  });
+
   it("builds the note text", () => {
     expect(editKeepNote("why", "new")).toBe("why — proposed: “new”");
     expect(editKeepNote("why", "")).toBe("why — proposed: cut");

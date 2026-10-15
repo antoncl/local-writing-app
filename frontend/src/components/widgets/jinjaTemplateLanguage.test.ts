@@ -87,6 +87,21 @@ describe("jinjaTemplateLanguage (#2496)", () => {
     ]);
   });
 
+  it("a raw block is literal text up to endraw, across lines", () => {
+    const src = "{% raw %}Use {{ name }} and\n{% if %} here{%- endraw %} {{ x }}";
+    expect(styled(src)).toEqual([
+      ["{%", "meta"],
+      ["raw", "keyword"],
+      ["%}", "meta"],
+      ["{%-", "meta"],
+      ["endraw", "keyword"],
+      ["%}", "meta"],
+      ["{{", "meta"],
+      ["x", "variableName"],
+      ["}}", "meta"],
+    ]);
+  });
+
   it("a tag spanning lines stays a tag; a heading flag never leaks into it", () => {
     const t = styled("# Head {% if a\nand b %} tail");
     expect(t).toEqual([

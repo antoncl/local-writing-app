@@ -21,6 +21,10 @@ export interface TemplateState {
   quote: "'" | '"' | null;
   /** This line is a Markdown heading (its prose is styled as one). */
   heading: boolean;
+  /** The first word of the open `{% %}` statement (`raw`, `if`, …), or null. */
+  stmt: string | null;
+  /** Inside a `{% raw %}` block: literal text up to `{% endraw %}`. */
+  raw: boolean;
 }
 
 const KEYWORDS = new Set([
@@ -30,11 +34,22 @@ const KEYWORDS = new Set([
   "endblock", "extends", "raw", "endraw", "role", "endrole", "recursive", "ignore", "missing",
 ]);
 const CONSTANTS = new Set(["true", "false", "none", "True", "False", "None"]);
-const CLOSER: Record<Tag, string> = { "{{": "}}", "{%": "%}", "{#": "#}" };
+const CLOSER: Record<"{{" | "{%", RegExp> = { "{{": /^-?\}\}/, "{%": /^-?%\}/ };
+const ENDRAW = /\{%-?\s*endraw\b/;
 
 type Stream = Parameters<StreamParser<TemplateState>["token"]>[0];
 
 function proseToken(stream: Stream, state: TemplateState): string | null {
+  if (state.raw) {
+    // Literal text: nothing is a tag until `{% endraw %}`.
+    const at = stream.string.slice(stream.pos).search(ENDRAW);
+    if (at !== 0) {
+      if (at < 0) stream.skipToEnd();
+      else stream.pos += at;
+      return state.heading ? "heading" : null;
+    }
+    state.raw = false;
+  }
   const opener = stream.match(/^\{[{%#]-?/) as RegExpMatchArray | null;
   if (opener) {
     const tag = opener[0].slice(0, 2) as Tag;
@@ -74,8 +89,10 @@ function tagToken(stream: Stream, state: TemplateState): string | null {
     return "string";
   }
   if (stream.eatSpace()) return null;
-  if (stream.match(new RegExp(`^-?${CLOSER[tag].replace(/[{}%]/g, "\\$&")}`))) {
+  if (stream.match(CLOSER[tag])) {
+    state.raw = tag === "{%" && state.stmt === "raw";
     state.tag = null;
+    state.stmt = null;
     return "meta";
   }
   const ch = stream.peek();
@@ -87,6 +104,7 @@ function tagToken(stream: Stream, state: TemplateState): string | null {
   if (stream.match(/^\d+(\.\d+)?/)) return "number";
   const word = stream.match(/^[A-Za-z_][A-Za-z0-9_]*/) as RegExpMatchArray | null;
   if (word) {
+    if (tag === "{%" && state.stmt === null) state.stmt = word[0];
     if (CONSTANTS.has(word[0])) return "atom";
     if (KEYWORDS.has(word[0])) return "keyword";
     return "variableName";
@@ -97,7 +115,7 @@ function tagToken(stream: Stream, state: TemplateState): string | null {
 
 export const jinjaTemplateParser: StreamParser<TemplateState> = {
   name: "jinja-template",
-  startState: () => ({ tag: null, quote: null, heading: false }),
+  startState: () => ({ tag: null, quote: null, heading: false, stmt: null, raw: false }),
   copyState: (s) => ({ ...s }),
   token: (stream, state) => {
     // A Markdown heading is a line of prose that starts with `#`s and a space.

@@ -41,11 +41,13 @@ function setup() {
     { quote: "on the mat", problem: "The Keep has no mats", entry: "lore_2" },
   ]);
   const openEntry = vi.fn();
+  const keep = vi.fn();
   installLineNotes(editor.view, placed, editor.state.doc.content.size - 1, {
     openEntry,
     entryName: (id) => NAMES[id] ?? "",
+    keep,
   });
-  return { editor, openEntry };
+  return { editor, openEntry, keep };
 }
 
 const keydown = (editor: Editor, key: string) => {
@@ -80,6 +82,16 @@ describe("LineNoteSuggestions (notes kind)", () => {
     expect(dom.querySelectorAll(".line-edit-old, .line-edit-new")).toHaveLength(0);
     expect(dom.querySelectorAll(".line-note-current")).toHaveLength(1);
     expect(editor.state.doc.textContent).toBe(TEXT);
+  });
+
+  it("renders Keep before Dismiss, titled, and clicking it calls keep with the current note", () => {
+    const { editor, keep } = setup();
+    const button = q(editor, "line-note-card-keep")!;
+    expect(button.getAttribute("title")).toBe("Keep as a TODO — decide later");
+    expect(button.nextElementSibling).toBe(q(editor, "line-note-card-dismiss"));
+    button.click();
+    expect(keep).toHaveBeenCalledTimes(1);
+    expect(keep.mock.calls[0][1]).toMatchObject({ quote: "cat", problem: "Mira has no cat" });
   });
 
   it("is not an edit list: the edit accessors see nothing", () => {

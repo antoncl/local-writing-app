@@ -8,7 +8,9 @@ import { buildLineEditCard } from "../lineEditCard";
 import {
   type ReviewKind,
   type ReviewMeta,
+  type ReviewOutcome,
   installReview,
+  liveItem,
   pluginKey,
   reviewState,
   revealCurrent,
@@ -22,6 +24,8 @@ export type LineEditState = {
   edits: LineEditSuggestion[];
   /** How many edits were accepted since the list was installed. */
   accepted: number;
+  /** How many were kept as TODOs (ADR-0099), likewise. */
+  kept: number;
   /** The edit the review bar and keys act on; null only when `edits` is empty. */
   currentId: number | null;
   wide: boolean;
@@ -45,7 +49,14 @@ function widgetFor(view: EditorView, edit: LineEditSuggestion, current: boolean)
   return added;
 }
 
-export const EDITS: ReviewKind = {
+/** What the run lends the review: keeping an edit as a TODO (ADR-0099). The
+ *  edit is passed as the review holds it when the writer clicks. */
+export type LineEditCallbacks = {
+  keep: (view: EditorView, edit: LineEditSuggestion) => void;
+};
+
+/** A kind bound to one run's callbacks. */
+export const editsKind = (callbacks: LineEditCallbacks): ReviewKind => ({
   name: "edits",
   idAttr: "data-line-edit-id",
   quoted: (item) => (item as LineEditSuggestion).find,
@@ -74,18 +85,22 @@ export const EDITS: ReviewKind = {
       prev: () => stepLineEdit(view, -1),
       next: () => stepLineEdit(view, 1),
       accept: () => acceptCurrentLineEdit(view),
+      keep: () => {
+        const edit = liveItem(view.state, item.id);
+        if (edit) callbacks.keep(view, edit as LineEditSuggestion);
+      },
       reject: () => rejectCurrentLineEdit(view),
     }),
   cardKey: (item) => (item as LineEditSuggestion).reason,
   accept: (view) => acceptCurrentLineEdit(view),
   reject: (view) => rejectCurrentLineEdit(view),
-};
+});
 
 /** The open edit list, or an empty one when the open review is not edits. */
 export function lineEditState(state: EditorState): LineEditState {
   const s = reviewState(state);
-  if (s.review?.name !== "edits") return { edits: [], accepted: 0, currentId: null, wide: s.wide };
-  return { edits: s.items as LineEditSuggestion[], accepted: s.accepted, currentId: s.currentId, wide: s.wide };
+  if (s.review?.name !== "edits") return { edits: [], accepted: 0, kept: 0, currentId: null, wide: s.wide };
+  return { edits: s.items as LineEditSuggestion[], accepted: s.accepted, kept: s.kept, currentId: s.currentId, wide: s.wide };
 }
 
 /** The current edit, or undefined when none is pending. */
@@ -94,8 +109,12 @@ export function currentLineEdit(state: EditorState): LineEditSuggestion | undefi
   return edits.find((e) => e.id === currentId);
 }
 
-export const installLineEdits = (view: EditorView, edits: PlacedEdit[], collapseTo?: number): void =>
-  installReview(view, EDITS, edits, collapseTo);
+export const installLineEdits = (
+  view: EditorView,
+  edits: PlacedEdit[],
+  collapseTo?: number,
+  callbacks: LineEditCallbacks = { keep: () => {} },
+): void => installReview(view, editsKind(callbacks), edits, collapseTo);
 
 export const setCurrentLineEdit = setCurrentItem;
 
@@ -104,12 +123,12 @@ export function stepLineEdit(view: EditorView, dir: 1 | -1): void {
   if (reviewState(view.state).review?.name === "edits") stepReview(view, dir);
 }
 
-function resolve(view: EditorView, ids: number[], accepted: boolean): void {
+function resolve(view: EditorView, ids: number[], outcome: ReviewOutcome): void {
   const { edits } = lineEditState(view.state);
   const targets = edits.filter((e) => ids.includes(e.id));
   if (targets.length === 0) return;
   const tr = view.state.tr;
-  if (accepted) {
+  if (outcome === "accepted") {
     // Descending, so each replace leaves the positions of the ones before it intact.
     // The new text takes the marks of the replaced range, not the stored marks.
     for (const edit of [...targets].sort((a, b) => b.from - a.from)) {
@@ -122,27 +141,27 @@ function resolve(view: EditorView, ids: number[], accepted: boolean): void {
       tr.replaceWith(edit.from, edit.to, view.state.schema.text(edit.replace, marks));
     }
   }
-  tr.setMeta(pluginKey, { type: "resolve", ids, accepted } satisfies ReviewMeta);
+  tr.setMeta(pluginKey, { type: "resolve", ids, outcome } satisfies ReviewMeta);
   view.dispatch(tr);
 }
 
 export function acceptCurrentLineEdit(view: EditorView): void {
   const { currentId } = lineEditState(view.state);
   if (currentId === null) return;
-  resolve(view, [currentId], true);
+  resolve(view, [currentId], "accepted");
   revealCurrent(view);
 }
 
 export function rejectCurrentLineEdit(view: EditorView): void {
   const { currentId } = lineEditState(view.state);
   if (currentId === null) return;
-  resolve(view, [currentId], false);
+  resolve(view, [currentId], "rejected");
   revealCurrent(view);
 }
 
-export const acceptLineEdit = (view: EditorView, id: number) => resolve(view, [id], true);
-export const rejectLineEdit = (view: EditorView, id: number) => resolve(view, [id], false);
+export const acceptLineEdit = (view: EditorView, id: number) => resolve(view, [id], "accepted");
+export const rejectLineEdit = (view: EditorView, id: number) => resolve(view, [id], "rejected");
 export const acceptAllLineEdits = (view: EditorView) =>
-  resolve(view, lineEditState(view.state).edits.map((e) => e.id), true);
+  resolve(view, lineEditState(view.state).edits.map((e) => e.id), "accepted");
 export const rejectAllLineEdits = (view: EditorView) =>
-  resolve(view, lineEditState(view.state).edits.map((e) => e.id), false);
+  resolve(view, lineEditState(view.state).edits.map((e) => e.id), "rejected");

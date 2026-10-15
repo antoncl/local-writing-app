@@ -294,6 +294,10 @@ function closeLabelFromStore(ref: string): string {
 export const TodoAnchor = Mark.create({
   name: "todoAnchor",
   inclusive: false,
+  // Outermost of the marks on a run, so a TODO over formatted words ("the *old*
+  // docks") renders as ONE span, and so serializes to ONE marker pair. Inside
+  // the formatting it would be one span per text node.
+  priority: 1100,
   addAttributes() {
     return {
       anchorId: {

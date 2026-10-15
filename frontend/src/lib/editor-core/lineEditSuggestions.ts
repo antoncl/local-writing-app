@@ -26,7 +26,7 @@ import {
 
 // Re-exported so callers and tests keep their import path.
 export {
-  EDITS,
+  editsKind,
   LINE_EDIT_CURRENT_CLASS,
   LINE_EDIT_NEW_CLASS,
   LINE_EDIT_OLD_CLASS,
@@ -41,9 +41,11 @@ export {
   rejectLineEdit,
   setCurrentLineEdit,
   stepLineEdit,
+  type LineEditCallbacks,
   type LineEditState,
   type LineEditSuggestion,
 } from "./reviewKinds/edits";
+export { keepReviewItem, liveItem } from "./reviewKinds/core";
 export {
   LINE_NOTE_CURRENT_CLASS,
   LINE_NOTE_QUOTE_CLASS,
@@ -127,7 +129,7 @@ export const LineEditSuggestions = Extension.create({
             if (meta?.type === "layout") return { ...old, wide: meta.wide };
             if (meta?.type === "install") {
               const items = meta.items.map((e) => ({ ...e, id: nextId++ }));
-              return { review: meta.review, items, accepted: 0, currentId: nextByPosition(items, 0), wide: old.wide };
+              return { review: meta.review, items, accepted: 0, kept: 0, currentId: nextByPosition(items, 0), wide: old.wide };
             }
             const { review } = old;
             if (!review || old.items.length === 0) return old;
@@ -141,11 +143,15 @@ export const LineEditSuggestions = Extension.create({
                 return [{ ...item, from, to }];
               });
             }
-            let accepted = old.accepted;
+            let { accepted, kept } = old;
             let currentId = meta?.type === "current" ? meta.id : old.currentId;
             if (meta?.type === "resolve") {
+              // Counted from the old list: an accepted edit's own range no longer
+              // holds its quote, so the mapping above already dropped it.
+              const resolved = old.items.filter((e) => meta.ids.includes(e.id)).length;
               items = items.filter((e) => !meta.ids.includes(e.id));
-              if (meta.accepted) accepted += meta.ids.length;
+              if (meta.outcome === "accepted") accepted += resolved;
+              if (meta.outcome === "kept") kept += resolved;
             }
             if (!items.some((e) => e.id === currentId)) {
               // The current item went (resolved, or dropped by typing): the next
@@ -153,7 +159,7 @@ export const LineEditSuggestions = Extension.create({
               const was = old.items.find((e) => e.id === old.currentId);
               currentId = nextByPosition(items, was ? tr.mapping.map(was.from, 1) : 0);
             }
-            return { review, items, accepted, currentId, wide: old.wide };
+            return { review, items, accepted, kept, currentId, wide: old.wide };
           },
         },
         view: (view) => ({ destroy: observeCardRoom(view) }),

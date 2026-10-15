@@ -38,6 +38,8 @@ export type ReviewState = {
   items: ReviewItem[];
   /** How many items were accepted since the list was installed. */
   accepted: number;
+  /** How many were kept as TODOs (ADR-0099), likewise. */
+  kept: number;
   /** The item the review bar and keys act on; null only when `items` is empty. */
   currentId: number | null;
   /** Room for the decision card in the margin right of the prose column (set by
@@ -45,14 +47,17 @@ export type ReviewState = {
   wide: boolean;
 };
 
+/** How a flag was settled: taken, turned down, or turned into a TODO (ADR-0099). */
+export type ReviewOutcome = "accepted" | "rejected" | "kept";
+
 export type ReviewMeta =
   | { type: "install"; review: ReviewKind; items: Omit<ReviewItem, "id">[] }
-  | { type: "resolve"; ids: number[]; accepted: boolean }
+  | { type: "resolve"; ids: number[]; outcome: ReviewOutcome }
   | { type: "current"; id: number }
   | { type: "layout"; wide: boolean };
 
 export const pluginKey = new PluginKey<ReviewState>("line-edit-suggestions");
-export const EMPTY: ReviewState = { review: null, items: [], accepted: 0, currentId: null, wide: false };
+export const EMPTY: ReviewState = { review: null, items: [], accepted: 0, kept: 0, currentId: null, wide: false };
 
 export const reviewState = (state: EditorState): ReviewState => pluginKey.getState(state) ?? EMPTY;
 
@@ -65,6 +70,16 @@ export function currentItem(state: EditorState): ReviewItem | undefined {
 /** Text of a range the way a quote was matched: leaves as the placement sentinel. */
 export const rangeText = (state: EditorState, from: number, to: number) =>
   state.doc.textBetween(from, to, "\n", "￼");
+
+/** The item with `id` as the open review holds it now (positions mapped). */
+export const liveItem = (state: EditorState, id: number): ReviewItem | undefined =>
+  reviewState(state).items.find((i) => i.id === id);
+
+/** Resolve one item as kept: its TODO is made, the document is not touched. */
+export function keepReviewItem(view: EditorView, id: number): void {
+  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "resolve", ids: [id], outcome: "kept" } satisfies ReviewMeta));
+  revealCurrent(view);
+}
 
 /** The item at or after `pos` by position, wrapping to the first. */
 export function nextByPosition(items: ReviewItem[], pos: number): number | null {

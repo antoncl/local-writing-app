@@ -243,7 +243,14 @@ class TodoActions {
   // store is refreshed from the document.
   async createTodos(items: NewTodo[]): Promise<void> {
     await api.createTodos(items);
-    setTodos((await api.getTodos()).items);
+    // Written: from here a failure must NOT reach the review, or its retry
+    // would create the same TODOs again. A failed refresh only leaves the
+    // list stale until the next load.
+    try {
+      setTodos((await api.getTodos()).items);
+    } catch (err) {
+      console.warn("TODOs were saved, but the TODO list could not be refreshed:", err);
+    }
   }
 
   async markReviewItemDone(reviewItemId: string): Promise<void> {

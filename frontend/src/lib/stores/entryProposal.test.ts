@@ -1185,6 +1185,21 @@ describe("EntryProposalController — follow-ups (ADR-0099 §4)", () => {
     expect(c.onCreateTodos).toHaveBeenCalledTimes(2);
   });
 
+  it("a decision changed after a TODO failure IS written on the retry", async () => {
+    const c = withFollowUps();
+    c.setBodyResolution("new body");
+    c.toggleFollowUp(0);
+    vi.mocked(c.onCreateTodos!).mockRejectedValueOnce(new Error("todo write failed"));
+    expect(await c.commit()).toBe(false);
+
+    // Still in the open review, the writer changes the body decision.
+    c.setBodyResolution("edited body");
+    expect(await c.commit()).toBe(true);
+    expect(c.onFlush).toHaveBeenCalledTimes(2);
+    expect(c.onAdoptBody).toHaveBeenLastCalledWith("edited body");
+    expect(c.onCreateTodos).toHaveBeenCalledTimes(2);
+  });
+
   it("Discard drops the follow-ups without a TODO call", () => {
     const c = withFollowUps();
     c.toggleFollowUp(0);

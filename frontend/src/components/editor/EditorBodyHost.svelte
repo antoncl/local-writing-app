@@ -587,6 +587,7 @@
     titleField={model.chatTitleField}
     onBodyChange={on.change}
     onFocus={() => on.focus()}
+    hostPaneId={deps.hostPaneId}
   />
 {/if}
 {#if model.bodyShape === "view"}

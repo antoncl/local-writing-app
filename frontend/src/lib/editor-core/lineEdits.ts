@@ -31,7 +31,7 @@ const TYPOGRAPHIC: Record<string, string> = {
   "—": "-", "–": "-", "‒": "-", "―": "-",
   " ": " ", " ": " ",
 };
-const normalize = (s: string) => s.split("").map((c) => TYPOGRAPHIC[c] ?? c).join("");
+export const normalize = (s: string) => s.split("").map((c) => TYPOGRAPHIC[c] ?? c).join("");
 
 /** One text block's visible text within [from, to], with each character's
  *  document position. */

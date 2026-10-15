@@ -24,6 +24,7 @@
   import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
   import { journalEntryKey } from "@/lib/chat/journal";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import { linkQuotes } from "@/lib/chat/quoteLinks";
   import type { ChatMessage } from "@/lib/types";
 
   interface Props {
@@ -37,6 +38,10 @@
     showJumpToLatest?: boolean;
     onScroll?: () => void;
     onJumpToLatest?: () => void;
+    /** #2498: the subject scene's plain text — an assistant quote found in it
+     *  becomes a link. Null when the chat isn't about a loaded scene. */
+    quoteSource?: string | null;
+    onQuoteClick?: (quote: string) => void;
   }
 
   let {
@@ -47,6 +52,8 @@
     showJumpToLatest = false,
     onScroll,
     onJumpToLatest,
+    quoteSource = null,
+    onQuoteClick,
   }: Props = $props();
 
   let katexReady = $state(false);
@@ -70,10 +77,43 @@
     void katexReady;
     return renderChatContent(text);
   }
+
+  // An assistant reply with its verified quotes linked (#2498). Memoized per
+  // rendered html + source so a streaming tail doesn't re-link every finished
+  // message; the streaming message itself stays unlinked until it completes.
+  const linkedCache = new Map<string, string>();
+  let linkedFor: string | null = null;
+  function renderAssistant(content: string, streaming: boolean): string {
+    const html = render(content);
+    if (!quoteSource || streaming) return html;
+    if (linkedFor !== quoteSource) {
+      linkedCache.clear();
+      linkedFor = quoteSource;
+    }
+    let linked = linkedCache.get(html);
+    if (linked === undefined) {
+      linked = linkQuotes(html, quoteSource);
+      linkedCache.set(html, linked);
+    }
+    return linked;
+  }
+
+  function activateQuote(event: Event): boolean {
+    const el = (event.target as Element | null)?.closest?.("[data-quote]") as HTMLElement | null;
+    if (!el?.dataset.quote) return false;
+    onQuoteClick?.(el.dataset.quote);
+    return true;
+  }
+  function onMessagesKey(event: KeyboardEvent) {
+    if ((event.key === "Enter" || event.key === " ") && activateQuote(event)) event.preventDefault();
+  }
 </script>
 
 <div class="cbv-transcript">
-<div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history" onscroll={onScroll}>
+<!-- Delegated handlers (#2498): the focusable, role="link" elements are the
+     quote links inside; the container itself isn't interactive. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history" onscroll={onScroll} onclick={activateQuote} onkeydown={onMessagesKey}>
   {#if chatHistory.length === 0}
     <p class="cbv-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
   {/if}
@@ -115,7 +155,7 @@
         <div class="cbv-message-content cbv-typing">…thinking</div>
       {:else if message.content}
         {#if message.role === "assistant"}
-          <div class="cbv-message-content cbv-message-rendered">{@html render(message.content)}</div>
+          <div class="cbv-message-content cbv-message-rendered">{@html renderAssistant(message.content, chatRunning && i === chatHistory.length - 1)}</div>
         {:else}
           <div class="cbv-message-content">{message.content}</div>
         {/if}
@@ -226,6 +266,12 @@
     margin: 0.4em 0; padding: 8px 10px; background: var(--inset); border-radius: 8px; overflow-x: auto;
   }
   :global(.cbv-message-rendered code) { font-family: var(--mono); font-size: var(--fs-md); }
+  /* #2498: a quote that occurs in the chat's scene — quiet, like a link in prose. */
+  :global(.chat-quote-link) {
+    text-decoration: underline dotted; text-decoration-color: var(--accent);
+    text-underline-offset: 3px; cursor: pointer;
+  }
+  :global(.chat-quote-link:hover) { background: var(--accent-soft); }
 
   /* 4a · thinking accordion. */
   .cbv-thinking {

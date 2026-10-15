@@ -18,7 +18,9 @@
   in App.svelte's chat pane (used to compare unified vs bespoke).
 -->
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { QuoteSourceController } from "@/lib/chat/quoteSource.svelte";
+  import { revealQuoteBeside } from "@/lib/stores/quoteReveal";
   import { api } from "@/lib/api";
   import { lastReportedTurn } from "@/lib/chat/loreFit";
   import { journalEntryKey } from "@/lib/chat/journal";
@@ -113,6 +115,8 @@
     // so it's intentionally dropped here.
     onBodyChange?: () => void;
     onFocus?: () => void;
+    // This chat's pane id — where a quote link opens the scene beside (#2498).
+    hostPaneId?: string | null;
   }
 
   let {
@@ -127,7 +131,16 @@
     titleField,
     onBodyChange,
     onFocus,
+    hostPaneId = null,
   }: Props = $props();
+
+  // #2498: the subject scene's text, so assistant quotes that occur in it link.
+  // Re-read when a turn completes (or the chat/structure changes).
+  const quoteSource = new QuoteSourceController();
+  $effect(() => {
+    void chatRunning; void chatHistory.length; void structure;
+    untrack(() => void quoteSource.refresh(chatSubject, structure));
+  });
 
 
   let chatSession: ChatSession | null = $state(null);
@@ -1185,6 +1198,9 @@
       onScroll={recomputePinned}
       showJumpToLatest={!pinnedToBottom}
       onJumpToLatest={() => scrollToBottom()}
+      quoteSource={quoteSource.plain}
+      onQuoteClick={(quote) => quoteSource.sceneId && hostPaneId &&
+        void revealQuoteBeside({ sceneId: quoteSource.sceneId, quote, besidePanelId: hostPaneId })}
     />
 
     {#if !isLocked && strippedInputs.some((i) => !i.hidden)}

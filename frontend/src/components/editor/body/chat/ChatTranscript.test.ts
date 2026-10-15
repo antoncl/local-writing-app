@@ -2,7 +2,7 @@
 // The transcript is a data-displaying surface, so it gets a mount test (#642):
 // the rows must actually render, and the assistant speaker header must name
 // the answering assistant, not a hardcoded product name (#989).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@/lib/test/component";
 import ChatTranscript from "./ChatTranscript.svelte";
 import type { ChatMessage } from "@/lib/types";
@@ -317,5 +317,31 @@ describe("ChatTranscript", () => {
     expect(reach.querySelector("i.ti-unlink")).not.toBeNull();
     expect(reach.querySelector("i.ti-scale")).toBeNull();
     expect(reach.textContent?.trim()).toBe("The Weir");
+  });
+
+  // #2498: a quote in an assistant reply that occurs in the subject scene links.
+  describe("quote links", () => {
+    const SCENE = "She said the lantern was still burning, and then nothing more.";
+    const history = [
+      { role: "user", content: "Is *the lantern was still burning* right?" },
+      { role: "assistant", content: "Yes: *the lantern was still burning* is in the scene.", thinking: "*the lantern was still burning*" },
+    ] as ChatMessage[];
+
+    it("links the assistant's quote and reports the doc text on click and Enter", async () => {
+      const onQuoteClick = vi.fn();
+      const { container } = render(ChatTranscript, { chatHistory: history, chatRunning: false, quoteSource: SCENE, onQuoteClick });
+      const links = container.querySelectorAll("[data-quote]");
+      expect(links.length).toBe(1);
+      expect(links[0].closest(".cbv-message-assistant")).not.toBeNull();
+      await fireEvent.click(links[0]);
+      expect(onQuoteClick).toHaveBeenLastCalledWith("the lantern was still burning");
+      await fireEvent.keyDown(links[0], { key: "Enter" });
+      expect(onQuoteClick).toHaveBeenCalledTimes(2);
+    });
+
+    it("links nothing without a quoteSource", () => {
+      const { container } = render(ChatTranscript, { chatHistory: history, chatRunning: false });
+      expect(container.querySelector("[data-quote]")).toBeNull();
+    });
   });
 });

@@ -23,6 +23,10 @@ This project is a private, local-first fiction writing application.
   placed into a scene (display words over the `MutationSetEntry.placed`
   boolean). The verbs are `stage` (a chat stages a set onto a card) and `place`
   (the writer places it into a scene, making it active).
+- Use `Flag` for an item the AI places on the prose for the writer to decide
+  on — a line edit or a lore-check note (ADR-0099). Flags are transient; one
+  the writer wants to keep becomes a `TODO`. In code they are review items on
+  the review surface.
 
 Avoid the term `Codex` for story information because it reads as derivative and now has OpenAI product baggage.
 

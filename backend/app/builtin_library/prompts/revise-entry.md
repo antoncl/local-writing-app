@@ -58,7 +58,7 @@ The entry's current content — every field and its body — is provided to you 
 {% set open_todos = todos(e) %}
 {% if open_todos %}
 The writer has open TODOs on this entry — things they mean to address. Take them up in the conversation when they bear on it; never claim one is done (the writer ticks them).
-{% for t in open_todos %}- {{ t.text }}{% if t.from %} (follow-up from {{ t.from }}){% endif %}
+{% for t in open_todos %}- {{ t.text }}{% if t.from %} (raised from {{ t.from }}){% endif %}
 
 {% endfor %}
 

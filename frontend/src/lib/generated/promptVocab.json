@@ -191,7 +191,7 @@
       "name": "todos",
       "kind": "helper",
       "signature": "todos(x)",
-      "summary": "A list of the writer's open TODOs on `x` — an entry, a node id, a scene, or `None`. Each item has `text`, `quote` (the words a TODO marks in the prose; empty when it marks none) and `from` (the title of the entry a follow-up TODO came from; empty otherwise). For a scene it also lists the scene's own TODOs and the ones marked in its prose. Empty for `None`, an unknown node, or no open TODOs. It reads the TODOs as saved, when the prompt renders, and never marks one done — the writer does that. `{% for t in todos(e) %}- {{ t.text }}{% endfor %}`"
+      "summary": "A list of the writer's open TODOs on `x` — an entry, a node id, a scene, or `None`. Each item has `text`, `quote` (the words a TODO marks in the prose; empty when it marks none) and `from` (the title of the entry the app raised the TODO from — a follow-up's origin, or the changed entry behind a review item; empty for a TODO the writer made). For a scene it also lists the scene's own TODOs and the ones marked in its prose. Empty for `None`, an unknown node, or no open TODOs. It reads the TODOs as saved, when the prompt renders, and never marks one done — the writer does that. `{% for t in todos(e) %}- {{ t.text }}{% endfor %}`"
     },
     {
       "name": "type_name",

@@ -163,7 +163,7 @@ class ReviseEntryTodosTests(_Base):
         )
         text = self._render({"entry": self.vane, "entry_type": ""})
         self.assertIn("The writer has open TODOs on this entry", text)
-        self.assertIn("\n- Fix the age\n- Revisit after the rename (follow-up from Mara Quinn)\n", text)
+        self.assertIn("\n- Fix the age\n- Revisit after the rename (raised from Mara Quinn)\n", text)
         self.assertNotIn("\n\n\n", text)
 
     def test_revise_without_todos_has_no_section_and_no_stray_lines(self) -> None:

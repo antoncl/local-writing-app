@@ -41,7 +41,10 @@ def todos(project: ProjectService, x: Any) -> list[dict[str, str]]:
             or (is_scene and item.scope == "scene" and item.scene_id == node_id)
         )
     ]
-    anchors = _anchor_words(project, node_id) if any(i.anchor_id for i in items) else {}
+    # A scene's saved body, read once: its anchored TODOs' words and its
+    # embedded TODOs (one body scanned, not every scene file).
+    body = str(_attr_or_item(_safe_read_node(project, node_id), "body") or "") if is_scene else ""
+    anchors = _anchor_words(body) if any(i.anchor_id for i in items) else {}
     out = [
         {
             "text": item.text,
@@ -51,17 +54,16 @@ def todos(project: ProjectService, x: Any) -> list[dict[str, str]]:
         for item in items
     ]
     if is_scene:
-        for embedded in project.read_embedded_todos().items:
-            if embedded.scene_id == node_id and embedded.status == "open":
+        for embedded in project._scan_embedded_todos_in_body(node_id, body, ""):
+            if embedded.status == "open":
                 out.append(
                     {"text": embedded.note or embedded.text, "quote": embedded.text, "from": ""}
                 )
     return out
 
 
-def _anchor_words(project: ProjectService, scene_id: str) -> dict[str, str]:
-    """anchor id -> the words it marks, from the saved scene body (read once)."""
-    body = str(_attr_or_item(_safe_read_node(project, scene_id), "body") or "")
+def _anchor_words(body: str) -> dict[str, str]:
+    """anchor id -> the words it marks in a saved scene body."""
     return {m.group(1): " ".join(m.group(2).split()) for m in TODO_ANCHOR_PATTERN.finditer(body)}
 
 

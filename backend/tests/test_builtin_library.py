@@ -1116,6 +1116,32 @@ class DraftScenePromptTests(unittest.TestCase):
         self._set(self.scene_ids[0], summary="Honor leaves the station.", charge_in="neg")
         self.assertIn("### Charge in\nneg", self._preview(self.scene_ids[0]))  # no label → value
 
+    def test_scene_brief_shows_list_items_by_label(self) -> None:
+        """#2515: a list of selects, and a grouped item's members, by label."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("groups", {})["turn"] = {
+            "name": "Turn",
+            "members": [
+                {"key": "who", "name": "Who", "type": "text"},
+                {"key": "way", "name": "Direction", "type": "select",
+                 "options": [{"value": "up", "label": "Rises"}, {"value": "down", "label": "Falls"}]},
+            ],
+        }
+        data.setdefault("fields", {}).update({
+            "moods": {"name": "Moods", "type": "list", "item_type": "select",
+                      "options": [{"value": "calm", "label": "Calm"}, {"value": "dread", "label": "Dread"}]},
+            "turns": {"name": "Turns", "type": "list", "item_group": "turn"},
+        })
+        scene_type = data.setdefault("entry_types", {}).setdefault("manuscript:scene", {})
+        scene_type.setdefault("fields", []).extend(["moods", "turns"])
+        self.service._write_yaml(schema_path, data)
+        self._set(self.scene_ids[0], summary="Honor leaves the station.",
+                  moods=["dread", "calm"], turns=[{"who": "Honor", "way": "down"}])
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("### Moods\n1. Dread\n2. Calm", text)
+        self.assertIn("### Turns\n1. Who: Honor; Direction: Falls", text)
+
     def _roleplay_system(self, scene_id: str) -> str:
         from app.services.ai.preview import PreviewRequest, build_preview
 

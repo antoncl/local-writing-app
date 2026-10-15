@@ -37,7 +37,9 @@ from app.models import (
 )
 from app.models.schema import MetadataSchema
 from app.services.ai.chat import run_chat_turn
+from app.services.ai.entry_patch import parse_entry_patch_json, parse_follow_ups
 from app.services.ai.field_contract import FieldContract
+from app.services.ai.follow_ups import resolve_follow_ups
 from app.services.ai.list_identity import reconcile_list_identity_report
 from app.services.ai.patch_schema import patch_response_schema
 from app.services.project.errors import ProjectServiceError
@@ -105,12 +107,28 @@ def _body_clause(body_description: str | None, *, entry_type: str, creating: boo
     return clause
 
 
+_FOLLOW_UPS_SHAPE = (
+    ', "follow_ups": [{"entry": "<entry name as the conversation used it>", '
+    '"change": "<what should change>", "why": "<why>"}]'
+)
+_FOLLOW_UPS_CLAUSE = (
+    '- "follow_ups": If — and only if — the conversation established that a '
+    "DIFFERENT lore entry should change, add an item for it: its name exactly as "
+    'the conversation named it in "entry", the change in "change", and why in '
+    '"why". Never list the entry being committed here. Leave "follow_ups" out, '
+    "or empty, when no other entry needs to change. Every item in \"fields\" is a "
+    "change to the entry being committed and nothing else: another entry's new "
+    'text never goes in "fields", only its change in "follow_ups".'
+)
+
+
 def render_extraction_envelope(
     project_service: ProjectService,
     *,
     entry_type: str,
     creating: bool,
     stored: list[dict[str, Any]],
+    follow_ups: bool = False,
 ) -> str:
     """Build the "commit now" turn's text from the field set the chat's lock
     render registered (ADR-0067 S2) — no re-parse, no re-render.
@@ -138,6 +156,10 @@ def render_extraction_envelope(
     remaining fields reuse `FieldContract` (`store`/`render`) for the descriptor
     formatting, so their lines are byte-identical in shape to what the chat-start
     system message already showed the model (ADR-0067 §3).
+
+    ADR-0099 §4: `follow_ups` (the revise destination only) appends the
+    `"follow_ups"` key to the shape and one clause asking for other entries the
+    conversation established should change. Off, the text is unchanged.
 
     #1899: length is anchored to the entry as it stands (revise) or the field's
     description (create), never to a token cap — a cap is a ceiling, not a
@@ -176,6 +198,7 @@ def render_extraction_envelope(
         if body_allowed
         else '{"fields": [{"field": "<field id>", "value": <value>}]}'
     )
+    shape = shape[:-1] + (_FOLLOW_UPS_SHAPE if follow_ups else "") + "}"
     written_out = (
         "a field's (or the body's) complete final text"
         if body_allowed
@@ -229,6 +252,7 @@ def render_extraction_envelope(
         )
         fields_clause += ' Use {"fields": []} if nothing changed.'
     lines.append(fields_clause)
+    lines.extend([_FOLLOW_UPS_CLAUSE] if follow_ups else [])
     lines.append("")
     lines.append("The fields you may set:")
     if descriptors:
@@ -462,6 +486,7 @@ async def run_entry_patch_extraction(
     creating: bool,
     node_id: str | None = None,
     request: ExtractEntryPatchRequest,
+    follow_ups: bool = False,
 ) -> EntryPatchExtraction:
     """Read the chat's registered field set back, run the commit as a cached
     continuation of that SAME chat, validate the reply, then HARD-ENFORCE the
@@ -487,6 +512,10 @@ async def run_entry_patch_extraction(
     reports the chat's total after it; the last call's total rides back as
     `cost_usd_total`, so the client assigns its snapshot from the response
     instead of round-tripping a cost or refreshing.
+
+    `follow_ups` (ADR-0099 §4; the revise route passes `request.follow_ups`,
+    the create route never) also asks for other entries the conversation said
+    should change, resolved by `resolve_follow_ups` onto the returned patch.
 
     `node_id` is the revise route's target node (None on the create route,
     which has none yet) — used ONLY to reconcile any id-bearing list field
@@ -540,12 +569,15 @@ async def run_entry_patch_extraction(
         entry_type=entry_type,
         creating=creating,
         stored=chat.field_contract_stored,
+        follow_ups=follow_ups,
     )
     turn_messages = _messages_with_cue(request.messages, envelope)
     # #2199: built once from the same `stored` set the envelope/ceiling use, so
     # a provider with constrained decoding (Ollama) can't be asked to hold a
     # different shape on the retry than the first turn.
-    schema = patch_response_schema(chat.field_contract_stored, creating=creating)
+    schema = patch_response_schema(
+        chat.field_contract_stored, creating=creating, follow_ups=follow_ups
+    )
 
     chat_reply = await run_chat_turn(
         project,
@@ -640,10 +672,13 @@ async def run_entry_patch_extraction(
             project, entry_type=entry_type, node_id=node_id, patch=patch
         )
         patch = _place_scene_pills(project, entry_type=entry_type, node_id=node_id, patch=patch)
+    patch = _with_follow_ups(project, patch, patch_reply.content, node_id, asked=follow_ups)
     _record_if_unusable(project, patch, patch_reply)
     project.record_ai_trace(
         {
             **trace,
+            "follow_ups": len(patch.follow_ups),
+            "follow_ups_dropped": patch.follow_ups_dropped,
             **_reply_trace_fields(patch_reply),
             "ok": True,
             "error": None,
@@ -662,6 +697,26 @@ async def run_entry_patch_extraction(
         # #2201: only carried when the patch it came from is unusable — a
         # usable patch has no need to show its raw reply back to the author.
         raw_reply=patch_reply.content if _is_unusable(patch) else None,
+    )
+
+
+def _with_follow_ups(
+    project: ProjectService,
+    patch: AIEntryPatch,
+    reply: str,
+    committed_id: str | None,
+    *,
+    asked: bool,
+) -> AIEntryPatch:
+    """`patch` with the reply's follow-ups resolved to entries (ADR-0099 §4) —
+    unchanged unless they were asked for. They are not field writes, so the
+    write ceiling never sees them."""
+    if not asked or patch.garbled:
+        return patch
+    raw, malformed = parse_follow_ups(parse_entry_patch_json(reply) or {})
+    resolved, dropped = resolve_follow_ups(project, raw, committed_id)
+    return patch.model_copy(
+        update={"follow_ups": resolved, "follow_ups_dropped": malformed + dropped}
     )
 
 
@@ -720,7 +775,7 @@ def _is_unusable(patch: AIEntryPatch) -> bool:
     empty (no body, no fields). Shared by `_record_if_unusable`'s errors.log
     diagnostic (#2195) and `run_entry_patch_extraction`'s `raw_reply` (#2201),
     so the two never disagree on what counts as "nothing to commit"."""
-    return patch.garbled or (patch.body is None and not patch.fields)
+    return patch.garbled or (patch.body is None and not patch.fields and not patch.follow_ups)
 
 
 def _record_if_unusable(

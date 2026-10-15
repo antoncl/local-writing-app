@@ -21,6 +21,7 @@
   import {
     promptEntriesOfferedOn,
     proposeDefaultPrompt,
+    REVISE_ENTRY_TITLE,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import {
@@ -93,7 +94,13 @@
   // (`proposeDefaultPrompt`). The tile keeps the menu button too whenever more
   // than the default is offered, so the writer can still reach another prompt.
   let defaultPrompt = $derived(proposeDefaultPrompt(proposePrompts));
-  let showMenuButton = $derived(!defaultPrompt || proposePrompts.length > 1);
+  // ADR-0099 §4: a follow-up item is a plain request to change THIS entry, not
+  // a change to follow — its primary is "Revise entry" instead.
+  let revisePrompt = $derived(proposeDefaultPrompt(proposePrompts, REVISE_ENTRY_TITLE));
+  const isFollowUp = (item: TodoItem): boolean => item.source?.reason === "follow_up";
+  const primaryFor = (item: TodoItem): PromptEntrySummary | null =>
+    isFollowUp(item) ? revisePrompt : defaultPrompt;
+  const showMenuFor = (item: TodoItem): boolean => !primaryFor(item) || proposePrompts.length > 1;
 
   // One popover open at a time; each row's trigger button is keyed by item id
   // so the popover (a DOM sibling of the button that opened it, per
@@ -113,7 +120,7 @@
     // ADR-0093 §4: the change itself rides as the prompt's snapshot pick,
     // seeded from the item's source block — the source entry and the
     // owning-lane baseline snapshot id ("" = the whole entry).
-    if (item.source) {
+    if (item.source && !isFollowUp(item)) {
       const sourceEntry = $loreEntriesStore.find((entry) => entry.id === item.source?.node_id);
       const sourceRef: SubjectRef = {
         id: item.source.node_id,
@@ -151,19 +158,21 @@
             onClick={() => void todoActions.openFileTodo(item)}
           >
             {#snippet trailing()}
+              {@const primary = primaryFor(item)}
+              {@const showMenuButton = showMenuFor(item)}
               <div class="ri-propose-anchor">
-                {#if defaultPrompt}
+                {#if primary}
                   <!-- ADR-0091 §4: the primary opens the default straight away —
                        no popover — matching NodeRow's plain trailing-button
                        idiom for a direct action. -->
                   <button
                     type="button"
-                    title={`Propose with ${defaultPrompt.title}`}
+                    title={`Propose with ${primary.title}`}
                     aria-label={`Propose a follow-up for ${item.text}`}
                     onmousedown={(event) => event.stopPropagation()}
                     onclick={(event) => {
                       event.stopPropagation();
-                      void pickPrompt(item, defaultPrompt);
+                      void pickPrompt(item, primary);
                     }}
                   ><i class="ti ti-message-plus" aria-hidden="true"></i></button>
                 {/if}
@@ -171,24 +180,24 @@
                   <button
                     type="button"
                     bind:this={triggerEls[item.id]}
-                    class={defaultPrompt ? "row-action-add" : undefined}
-                    title={defaultPrompt
+                    class={primary ? "row-action-add" : undefined}
+                    title={primary
                       ? "Other prompts…"
                       : proposePrompts.length > 0
                         ? "Propose…"
                         : "No prompt is offered on this type"}
-                    aria-label={defaultPrompt
+                    aria-label={primary
                       ? `Other prompts for ${item.text}`
                       : `Propose a follow-up for ${item.text}`}
                     aria-haspopup="menu"
                     aria-expanded={openItemId === item.id}
-                    disabled={!defaultPrompt && proposePrompts.length === 0}
+                    disabled={!primary && proposePrompts.length === 0}
                     onmousedown={(event) => event.stopPropagation()}
                     onclick={(event) => {
                       event.stopPropagation();
                       openItemId = openItemId === item.id ? null : item.id;
                     }}
-                  ><i class={defaultPrompt ? "ti ti-dots-vertical" : "ti ti-message-plus"} aria-hidden="true"></i></button>
+                  ><i class={primary ? "ti ti-dots-vertical" : "ti ti-message-plus"} aria-hidden="true"></i></button>
                 {/if}
                 {#if showMenuButton && proposePrompts.length > 0}
                   <Popover

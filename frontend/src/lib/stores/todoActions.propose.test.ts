@@ -107,3 +107,30 @@ describe("todoActions.proposeFromReviewItem (ADR-0090 §4)", () => {
     expect(chatSessions.openChatFromPromptEntry).not.toHaveBeenCalled();
   });
 });
+
+describe("todoActions.proposeFromReviewItem — a follow-up item (ADR-0099 §4)", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "changeMessage").mockResolvedValue({
+      source_id: "lore_marek",
+      baseline_snapshot_id: "",
+      text: "should not be used",
+    });
+    vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue("chat_new");
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    reviewProposals.take("lore_ilse");
+    composerPrefills.clear("chat_new");
+  });
+
+  it("prefills the composer with the item's own text and fetches no change message", async () => {
+    const item = reviewItem({
+      text: "Make her older \u2014 she saw the war",
+      source: { node_id: "lore_marek", snapshot_id: "", reason: "follow_up", marker_id: "" },
+    });
+    await todoActions.proposeFromReviewItem(item, PROMPT, {}, { subjectTitle: "Ilse" });
+    expect(api.changeMessage).not.toHaveBeenCalled();
+    expect(composerPrefills.peek("chat_new")).toBe("Make her older \u2014 she saw the war");
+    expect(reviewProposals.peek("lore_ilse")).toBe("todo_1");
+  });
+});

@@ -1,7 +1,7 @@
 # ADR-0099: The AI proposes; what persists is a TODO you keep
 
 **Status:** Living draft (2026-10-15) — #2502
-**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: none yet.
+**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups).
 
 ### How this ADR is kept
 
@@ -49,6 +49,7 @@ And nothing in the prompt vocabulary reads TODOs, so a kept intention can't be b
 4. **Follow-ups from a revise commit.** A commit to the **revise** destination may also return **follow-ups**: changes the conversation established for OTHER lore entries.
    - **Asked for, only there.** The extraction turn asks for `follow_ups: [{entry, change, why}]` only when the commit is a revise, and only for changes the conversation established. Stage and create commits don't ask. Any prompt whose output is `extract_to_node` and commits to an existing entry takes part (Revise entry, the plot and arc revisers, Follow a change, Summarize scene); no per-prompt switch.
    - **Entries by name.** The extraction turn carries ids only for the conversation's explicit picks, so `entry` is the entry's **name**, as the conversation used it. The backend resolves it against lore titles and aliases, case-insensitively; a name that matches no entry, matches more than one, or is the entry being committed is dropped. Dropped follow-ups are counted on `AIEntryPatch.follow_ups_dropped` and in the `ai_commit_extraction` trace.
+   - **One field, one value.** A reply that sets a field twice is garbled (one retry, then an error), never resolved to the last value: it is how a model that also wrote the other entry's text into `fields` shows (#2504, found on Qwen3.8-9B), and the instruction says another entry's text never goes in `fields`.
    - **Shape and parsing.** The response schema declares `follow_ups` after `fields` (`fields` stays required, possibly empty), so Ollama's ordered grammar emits it second, and the envelope's example shows that order. The parser accepts an object whose only content is follow-ups (`{"fields": [], "follow_ups": [...]}`); a commit with follow-ups and no field changes is a valid result, not "proposed no changes". Follow-ups are not writes to the committed entry, so ADR-0067 §4's field contract doesn't govern them.
    - **Review.** The entry's commit review lists them below the patch: the entry's name, the change, the why, each with a tick box, **unticked**.
    - **Done.** Writes the patch as today (when anything was adopted), then creates the ticked follow-ups in one call to a new batch endpoint, `POST /api/todos/batch` (over `_create_todo_items`). If that call fails, the review stays open with its ticks and an error; the patch, already written, is not rolled back. Done with ticked follow-ups and no adopted change writes only the TODOs. Discard drops the follow-ups with the patch.

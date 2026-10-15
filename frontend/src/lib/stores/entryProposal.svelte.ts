@@ -28,7 +28,7 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { DiffView, EntryMetadata, EntryPatch, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
+import type { DiffView, EntryMetadata, EntryPatch, FollowUp, MetadataFieldDefinition, MetadataFieldType, MetadataSchema, MetadataValue, NewTodo } from "@/lib/types";
 import { normalizeReviewMarkdown, type FieldFlip } from "@/lib/utils/entryRevision";
 import { sameRenderedValue } from "@/lib/utils/snapshotDiff";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
@@ -122,6 +122,19 @@ export function bodyAdopter(host: {
   };
 }
 
+/** The TODO a kept follow-up becomes (ADR-0099 §4): homed on the entry it is
+ *  for, sourced from the entry whose conversation produced it. */
+export function followUpTodo(followUp: FollowUp, sourceId: string): NewTodo {
+  const change = followUp.change.trim();
+  const why = followUp.why.trim();
+  return {
+    scope: "node",
+    node_id: followUp.entry_id,
+    text: why ? `${change} — ${why}` : change,
+    source: { node_id: sourceId, reason: "follow_up" },
+  };
+}
+
 export class EntryProposalController {
   // Fed by the host each render — the derivations below track these. `nodeId` is
   // the open node's id (any kind); the review is keyed on it, never on the kind.
@@ -171,12 +184,18 @@ export class EntryProposalController {
   // marks it done. The controller itself never imports `@/lib/api` (see the
   // module note); the actual write is the host's, like every other adoption.
   onReviewItemAdopted: ((reviewItemId: string) => void | Promise<void>) | null = null;
+  // ADR-0099 §4: write the ticked follow-ups as TODOs (one batch). Throws on
+  // failure — `commit()` keeps the review open and shows the message.
+  onCreateTodos: ((items: NewTodo[]) => Promise<void>) | null = null;
 
   /** The patch committed for the open node, or null. Purely proposal-driven —
    *  a node reviews iff a brainstorm committed a patch for its id. */
   proposal = $derived(
     this.nodeId ? entryBrainstorm.proposalFor(this.nodeId) : null,
   );
+
+  // ADR-0099 §4: the follow-ups the proposal carries for other entries (ticks below).
+  followUps = $derived<FollowUp[]>(this.proposal?.follow_ups ?? []);
 
   /** The `long_text` fields the patch proposes, paired with their current value —
    *  each reviewed as its own run-diff flip. Structured fields go to
@@ -341,7 +360,9 @@ export class EntryProposalController {
       ((this.proposal.body != null && !this.bodyFrozen) ||
         this.fields.length > 0 ||
         this.structuredFlips.length > 0 ||
-        Object.keys(this.listReviews).length > 0),
+        Object.keys(this.listReviews).length > 0 ||
+        // ADR-0099 §4: a follow-ups-only patch is still a review.
+        this.followUps.length > 0),
   );
 
   // ---- review-local resolution (the accumulation, never a write) -------------
@@ -364,6 +385,26 @@ export class EntryProposalController {
   // the start of every `commit()` attempt and by `resetResolution()`, so a
   // retry (or a superseded proposal) doesn't show a stale message.
   commitError = $state<string | null>(null);
+
+  // ADR-0099 §4: the follow-ups the proposal carries for OTHER entries, and which
+  // of them the author ticked to keep as TODOs (all unticked at first — keeping
+  // one is a decision, never a default). Indices into `followUps`.
+  #ticked = $state<Record<number, true>>({});
+  // What a `commit()` last wrote (its fields + body, serialized), so a retry
+  // after a failed TODO write doesn't re-write the same patch — but does write
+  // a decision changed since.
+  #writtenPatch: string | null = null;
+
+  isFollowUpTicked(index: number): boolean {
+    return this.#ticked[index] === true;
+  }
+
+  toggleFollowUp(index: number): void {
+    const next = { ...this.#ticked };
+    if (next[index]) delete next[index];
+    else next[index] = true;
+    this.#ticked = next;
+  }
 
   // ---- the judge axis: which whole version the prose flips render (#710) -----
   //
@@ -472,7 +513,8 @@ export class EntryProposalController {
   /** Whether the author has adopted anything — the "you have changes" signal the
    *  close guard reads to decide between a silent discard and the Save prompt. */
   hasPendingChanges = $derived(
-    this.resolvedBody !== null ||
+    Object.keys(this.#ticked).length > 0 ||
+      this.resolvedBody !== null ||
       Object.values(this.resolvedText).some((v) => v !== null) ||
       Object.values(this.adoptedStructured).some((v) => v) ||
       Object.values(this.listResolutions).some((forField) =>
@@ -489,6 +531,8 @@ export class EntryProposalController {
     this.adoptedStructured = {};
     this.listResolutions = {};
     this.commitError = null;
+    this.#ticked = {};
+    this.#writtenPatch = null;
     // A fresh review opens on the interleaved diff — the judge toggle is a
     // per-review reading choice, not carried across proposals (#710).
     this.view = "both";
@@ -533,7 +577,11 @@ export class EntryProposalController {
     }
     const body = this.bodyFrozen ? null : this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;
-    if (hasFields || body !== null) {
+    // The patch write is absolute (values, a composed list, a body), so writing
+    // it again is harmless; skip only an IDENTICAL rewrite — after a failed
+    // TODO step, a decision changed in the still-open review is written.
+    const signature = JSON.stringify({ fields, body });
+    if (this.#writtenPatch !== signature && (hasFields || body !== null)) {
       if (hasFields) {
         try {
           await this.onAdoptFields?.(fields);
@@ -559,6 +607,20 @@ export class EntryProposalController {
       // transaction is only "done" once the write lands, so don't clear the
       // proposal and lose the patch.
       if ((await this.onFlush?.()) === false) return false;
+      this.#writtenPatch = signature;
+    }
+    // ADR-0099 §4: AFTER the patch (never rolled back by a TODO failure). A
+    // failure keeps the review open with the ticks intact; `#writtenPatch`
+    // stops the retry from writing the same patch again.
+    const ticked = this.followUps.filter((_, i) => this.#ticked[i]);
+    if (ticked.length > 0 && this.nodeId) {
+      const sourceId = this.nodeId;
+      try {
+        await this.onCreateTodos?.(ticked.map((f) => followUpTodo(f, sourceId)));
+      } catch (err) {
+        this.commitError = err instanceof Error ? err.message : String(err);
+        return false;
+      }
     }
     this.resetResolution();
     this.clear();

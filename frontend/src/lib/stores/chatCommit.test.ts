@@ -233,6 +233,7 @@ describe("ChatCommitController — commitToEntry", () => {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
       chat_id: "chat_1",
+      follow_ups: true,
     });
   });
 
@@ -880,5 +881,66 @@ describe("ChatCommitController — stageToPendingSet", () => {
     await c.stageToPendingSet();
 
     expect(deps.revealEntry).not.toHaveBeenCalled();
+  });
+});
+
+
+// ADR-0099 §4: only the revise destination asks the extraction for follow-ups.
+describe("ChatCommitController — follow-ups (ADR-0099 §4)", () => {
+  beforeEach(() => {
+    entryBrainstorm.clear("lore-1");
+    vi.clearAllMocks();
+  });
+
+  function controller(over: Partial<ChatCommitDeps> = {}) {
+    const made = makeController(over);
+    made.c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    made.c.inputDrafts = { entry: "lore-1" };
+    made.c.subjectEntryType = "lore:character";
+    return made;
+  }
+
+  const followUp = { entry_id: "lore-2", entry_name: "Kaela Voss", change: "Make her older", why: "she saw the war" };
+
+  it("revise extraction sends follow_ups: true", async () => {
+    const { c } = controller();
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
+    await c.commitToEntry();
+    expect(extractPatch).toHaveBeenCalledWith("lore-1", expect.objectContaining({ follow_ups: true }));
+  });
+
+  it("stage extraction does not ask for follow-ups", async () => {
+    const { c } = controller();
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
+    createSet.mockResolvedValue(madeSet("set-1"));
+    await c.stageToPendingSet();
+    expect(extractPatch).toHaveBeenCalledTimes(1);
+    expect(extractPatch.mock.calls[0][1]).not.toHaveProperty("follow_ups");
+  });
+
+  it("create extraction does not ask for follow-ups", async () => {
+    const { c } = makeController();
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry_type: "lore:character" };
+    extractDraft.mockResolvedValue(okResult({ body: "a life" }));
+    await c.commitDraft();
+    expect(extractDraft.mock.calls[0][1]).not.toHaveProperty("follow_ups");
+  });
+
+  it("a follow-ups-only patch reaches the review instead of 'no changes'", async () => {
+    const { c, deps } = controller();
+    extractPatch.mockResolvedValue(okResult({ body: null, fields: {}, follow_ups: [followUp] }));
+    await c.commitToEntry();
+    expect(entryBrainstorm.proposalFor("lore-1")?.follow_ups).toEqual([followUp]);
+    expect(deps.setNotice).not.toHaveBeenCalledWith(expect.stringContaining("no changes"));
+  });
+
+  it("says how many follow-ups could not be matched to an entry", async () => {
+    const { c, deps } = controller();
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" }, follow_ups_dropped: 2 }));
+    await c.commitToEntry();
+    expect(deps.setNotice).toHaveBeenCalledWith(
+      expect.stringContaining("2 follow-up(s) couldn't be matched to an entry"),
+    );
   });
 });

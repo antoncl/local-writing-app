@@ -1,4 +1,4 @@
-import type { EmbeddedTodoList, Scene, TodoDocument } from "@/lib/types";
+import type { EmbeddedTodoList, NewTodo, Scene, TodoDocument, TodoItem } from "@/lib/types";
 import { request } from "./core";
 
 export const todosApi = {
@@ -14,6 +14,13 @@ export const todosApi = {
         scene_id: sceneId,
         anchor_id: anchorId,
       }),
+    });
+  },
+  // ADR-0099 §4: several TODOs in one write (follow-ups the author kept).
+  createTodos(items: NewTodo[]) {
+    return request<{ items: TodoItem[] }>("/todos/batch", {
+      method: "POST",
+      body: JSON.stringify({ items }),
     });
   },
   updateTodo(

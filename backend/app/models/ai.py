@@ -1074,6 +1074,17 @@ class ValidateEntryDraftRequest(BaseModel):
     raw: str = ""
 
 
+class FollowUp(BaseModel):
+    """A change the conversation established on a DIFFERENT lore entry than the
+    one being committed (ADR-0099 §4). `entry_id` is resolved by the backend
+    from the name the model used; `entry_name` is that entry's title."""
+
+    entry_id: str
+    entry_name: str
+    change: str
+    why: str = ""
+
+
 class AIEntryPatch(BaseModel):
     """A validated, review-ready patch parsed from a brainstorm commit
     (ADR-0046 §4/§6.3).
@@ -1098,6 +1109,11 @@ class AIEntryPatch(BaseModel):
     # #2200: a plain-English reason `garbled` is true, from
     # `diagnose_garbled_reply` — None when the patch isn't garbled.
     garbled_reason: str | None = None
+    # ADR-0099 §4: other entries the conversation said should change, with the
+    # count of proposed ones that couldn't be resolved (unknown/ambiguous name,
+    # the committed entry itself, malformed). Only filled when asked for.
+    follow_ups: list[FollowUp] = Field(default_factory=list)
+    follow_ups_dropped: int = 0
 
 
 class ExtractEntryPatchRequest(BaseModel):
@@ -1114,6 +1130,9 @@ class ExtractEntryPatchRequest(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     assistant_id: str | None = None
     chat_id: str = Field(min_length=1)
+    # ADR-0099 §4: the revise destination asks the model for follow-ups on
+    # other entries; create and stage never do.
+    follow_ups: bool = False
 
 
 class ExtractEntryDraftRequest(ExtractEntryPatchRequest):

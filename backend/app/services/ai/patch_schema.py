@@ -69,7 +69,9 @@ def _item_schema(field_id: str, value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def patch_response_schema(stored: list[dict[str, Any]], *, creating: bool) -> dict[str, Any]:
+def patch_response_schema(
+    stored: list[dict[str, Any]], *, creating: bool, follow_ups: bool = False
+) -> dict[str, Any]:
     """Build the JSON schema an entry-patch reply must conform to, from the
     SAME `stored` descriptor list the envelope was rendered from and the
     commit-time ceiling enforces (ADR-0067 §2/§4) — never re-derived from the
@@ -80,7 +82,11 @@ def patch_response_schema(stored: list[dict[str, Any]], *, creating: bool) -> di
     grammar compiler doesn't support, so create mode no longer forces title or
     body into the reply here — the create path refuses a titleless draft at
     accept (`treeActions.createDraft`, #2209) and the envelope asks for the
-    title. A proposed create-mode title must still be non-empty."""
+    title. A proposed create-mode title must still be non-empty.
+
+    ADR-0099 §4: `follow_ups` declares the `follow_ups` array AFTER `fields`
+    (the grammar fixes key order, so the model writes its fields first);
+    `fields` stays required."""
     items: list[dict[str, Any]] = []
     for f in stored:
         if not isinstance(f, dict) or not f.get("id"):
@@ -93,9 +99,24 @@ def patch_response_schema(stored: list[dict[str, Any]], *, creating: bool) -> di
             value = {**value, "minLength": 1}
         items.append(_item_schema(field_id, value))
 
+    properties: dict[str, Any] = {"fields": {"type": "array", "items": {"anyOf": items}}}
+    if follow_ups:
+        properties["follow_ups"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "entry": {"type": "string"},
+                    "change": {"type": "string"},
+                    "why": {"type": "string"},
+                },
+                "required": ["entry", "change", "why"],
+                "additionalProperties": False,
+            },
+        }
     return {
         "type": "object",
-        "properties": {"fields": {"type": "array", "items": {"anyOf": items}}},
+        "properties": properties,
         "required": ["fields"],
         "additionalProperties": False,
     }

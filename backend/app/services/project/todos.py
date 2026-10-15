@@ -29,6 +29,11 @@ class TodosMixin:
         todos, _ = self._create_todo_items([request])
         return todos
 
+    def create_todos(self, requests: list[CreateTodoRequest]) -> list[TodoItem]:
+        """The batch sibling of `create_todo`: every item minted, one write."""
+        _, created = self._create_todo_items(requests)
+        return created
+
     def _create_todo_items(
         self, requests: list[CreateTodoRequest]
     ) -> tuple[TodoDocument, list[TodoItem]]:

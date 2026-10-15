@@ -188,6 +188,12 @@
       "summary": "`str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix."
     },
     {
+      "name": "todos",
+      "kind": "helper",
+      "signature": "todos(x)",
+      "summary": "A list of the writer's open TODOs on `x` — an entry, a node id, a scene, or `None`. Each item has `text`, `quote` (the words a TODO marks in the prose; empty when it marks none) and `from` (the title of the entry the app raised the TODO from — a follow-up's origin, or the changed entry behind a review item; empty for a TODO the writer made). For a scene it also lists the scene's own TODOs and the ones marked in its prose. Empty for `None`, an unknown node, or no open TODOs. It reads the TODOs as saved, when the prompt renders, and never marks one done — the writer does that. `{% for t in todos(e) %}- {{ t.text }}{% endfor %}`"
+    },
+    {
       "name": "type_name",
       "kind": "helper",
       "signature": "type_name(x)",

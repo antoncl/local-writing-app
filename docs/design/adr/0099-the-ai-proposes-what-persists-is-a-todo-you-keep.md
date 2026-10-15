@@ -1,7 +1,7 @@
 # ADR-0099: The AI proposes; what persists is a TODO you keep
 
 **Status:** Living draft (2026-10-15) — #2502
-**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups).
+**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups), #2506 (S2: `todos(x)`).
 
 ### How this ADR is kept
 

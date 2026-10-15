@@ -679,6 +679,14 @@ def _register_scene_mutations(
     )
 
 
+def _register_todos(env: SandboxedEnvironment, project: ProjectService) -> None:
+    """Register `todos(x)` (#2506): the open TODOs on a node. Logic in
+    `todos_helper.py`, imported at call time because that module imports this one."""
+    from app.services.ai.todos_helper import todos
+
+    env.globals["todos"] = lambda x: todos(project, x)
+
+
 def _register_use(env: SandboxedEnvironment, project: ProjectService, schema: Any) -> None:
     """Register `use(node)` / `use(node, "stable"|"volatile")` /
     `use(node, snapshot=id)` — split out of `register_helpers` (like
@@ -837,6 +845,7 @@ def register_helpers(
     _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
     _register_lore_as_of(env)
     _register_scene_mutations(env, project, schema, _mutations_index)
+    _register_todos(env, project)
     _register_stop(env)
     _register_use(env, project, schema)
     _register_lore_named_in(env, project)

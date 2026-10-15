@@ -31,14 +31,13 @@ You roleplay one character within an ongoing scene. Stay in voice, in motive, in
 After the beat, on a new line write exactly `[[interiority]]`, then this character's private interiority for the moment — their objective, their subtext, what they are really thinking but not showing. It is theirs alone; the other characters never see it, so it can be candid. Always write the beat first, then the marker line, then the interiority.
 {# The scene's effective tense (its own, else inherited down the manuscript)
    — the one narration setting a beat follows; POV stays the played
-   character's (#2513). The rest is the shared Project settings snippet. #}
+   character's (#2513). The rest is the shared Project settings snippet, last,
+   so its heading doesn't swallow the lines after it. #}
 {% set tense = resolved_narration(scene).tense if scene else none %}
 {% if tense %}
 
 Write the beat in {{ tense }} tense.
 {% endif %}
-
-{% include "Project settings" %}
 {% if char %}
 
 You are playing **{{ char.title }}**.
@@ -48,6 +47,8 @@ You are playing **{{ char.title }}**.
 {{ char.body }}
 {% endif %}
 {% endif %}
+
+{% include "Project settings" %}
 {% endrole %}
 
 {% role "user" %}

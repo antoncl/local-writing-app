@@ -34,6 +34,8 @@ const codeHighlightStyle = HighlightStyle.define([
     tag: [t.operator, t.punctuation, t.bracket, t.brace, t.paren, t.separator, t.meta, t.tagName, t.angleBracket],
     color: "var(--syntax-punct)",
   },
+  // A Markdown heading in a prompt's prose (#2496): weight only, the base colour.
+  { tag: t.heading, fontWeight: "bold" },
 ]);
 
 export const codeSyntaxHighlighting = syntaxHighlighting(codeHighlightStyle);

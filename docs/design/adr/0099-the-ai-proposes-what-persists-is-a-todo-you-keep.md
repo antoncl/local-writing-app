@@ -1,7 +1,7 @@
 # ADR-0099: The AI proposes; what persists is a TODO you keep
 
 **Status:** Living draft (2026-10-15) — #2502
-**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups), #2506 (S2: `todos(x)`).
+**Context verified against `4da34dea` (2026-10-15), the code before the feature.** Slices built: #2504 (S3: follow-ups), #2506 (S2: `todos(x)`), #2508 (S1: Keep).
 
 ### How this ADR is kept
 
@@ -42,7 +42,7 @@ And nothing in the prompt vocabulary reads TODOs, so a kept intention can't be b
      - In a **scene** (a body the embedded-TODO index scans), when the flag lies in **one paragraph** and **no existing TODO** touches its range: an **embedded TODO** over the flagged words — a new `markRange(from, to, note)` on `TodoAnchors` that marks the plugin's mapped range without moving the selection. `enforceUnique` learns that adjacent text nodes in one paragraph carrying the same anchor id are one TODO (fixing hand-marked TODOs across formatting too).
      - In a scene, when the flag spans paragraphs or overlaps an existing TODO: a **`scene`-scoped file TODO** quoting the words. No embedded TODO is created and none is replaced.
      - In **any other node's body** (a lore entry, where line edits also run): a **`node`-scoped file TODO** on that node, quoting the words. It is a writer-made TODO (no `source`), and like any `node` TODO it appears in the entry's review items.
-   - **Writing it.** `createTodo` takes a request object shaped like the backend's `CreateTodoRequest` (scope, `scene_id`, `node_id`, text), and the caller refreshes the TODO store, as the TODO actions do today.
+   - **Writing it.** A file TODO goes through the batch TODO call follow-ups added (`createTodos`, which refreshes the TODO store); a failed write leaves the flag where it is and says why. An embedded TODO is a mark on the editor's document and is saved with the scene. The `todoAnchor` mark is the outermost mark (`priority`), so a TODO over formatted words serializes as one marker pair.
    - **Cost.** A line-edit run records its cost when the writer took anything from it: an edit accepted **or kept**.
    - `EDITS` becomes a factory taking the run's callbacks, like `notesKind(links)`; both cards' action sets gain `keep`.
 
@@ -85,7 +85,7 @@ And nothing in the prompt vocabulary reads TODOs, so a kept intention can't be b
 ## Consequences
 
 - Flag cards gain **Keep**; the review plugin gains the `kept` outcome; `EDITS` becomes a factory; `TodoAnchors` gains `markRange`, and `enforceUnique` treats one paragraph's adjacent same-id nodes as one TODO.
-- `createTodo` takes a request object; a batch TODO endpoint is added.
+- A batch TODO endpoint is added (follow-ups), and Keep uses it for file TODOs.
 - The extraction envelope (revise only), the patch schema, the parser, `AIEntryPatch` (`follow_ups`, `follow_ups_dropped`) and the entry review learn follow-ups; `TodoSourceReason` is split from `ChangeCandidateRoute`; a follow-up's Propose opens Revise entry.
 - One prompt helper (`todos`); the built-in Revise entry reads it.
 - AGENTS.md gains *flag*.

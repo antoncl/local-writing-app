@@ -61,7 +61,7 @@ describe("LineEditSuggestions", () => {
     // one new-text span (the pure cut has none); the only buttons are the current edit's card
     expect(dom.querySelectorAll(".line-edit-new")).toHaveLength(1);
     expect(dom.querySelector(".line-edit-new")?.textContent).toBe("dog");
-    expect(dom.querySelectorAll("button")).toHaveLength(4);
+    expect(dom.querySelectorAll("button")).toHaveLength(5);
     expect(dom.querySelectorAll("button")).toHaveLength(dom.querySelectorAll(".line-edit-card button").length);
   });
 
@@ -78,6 +78,22 @@ describe("LineEditSuggestions", () => {
       expect(editor.view.dom.querySelector('[data-testid="line-edit-card-accept"]')?.getAttribute("title")).toContain("Alt+Enter");
       expect(editor.view.dom.querySelector('[data-testid="line-edit-card-reject"]')?.getAttribute("title")).toContain("Alt+Backspace");
       expect(editor.view.dom.querySelector('[data-testid="line-edit-card-prev"]')?.getAttribute("aria-label")).toBe("Previous edit");
+    });
+
+    it("renders Keep before Reject, titled, and clicking it calls keep with the current edit", () => {
+      const editor = setup();
+      const keep = vi.fn();
+      const { placed } = placeLineEdits(editor.state.doc, 0, editor.state.doc.content.size, [
+        { find: "cat", replace: "dog", reason: "livelier" },
+      ]);
+      rejectAllLineEdits(editor.view);
+      installLineEdits(editor.view, placed, undefined, { keep });
+      const button = editor.view.dom.querySelector<HTMLElement>('[data-testid="line-edit-card-keep"]')!;
+      expect(button.getAttribute("title")).toBe("Keep as a TODO — decide later");
+      expect(button.nextElementSibling).toBe(editor.view.dom.querySelector('[data-testid="line-edit-card-reject"]'));
+      button.click();
+      expect(keep).toHaveBeenCalledTimes(1);
+      expect(keep.mock.calls[0][1]).toMatchObject({ find: "cat", replace: "dog", reason: "livelier" });
     });
 
     it("follows the current edit: step, accept advancing, selecting another edit", () => {

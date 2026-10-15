@@ -10,6 +10,7 @@ import {
   type ReviewKind,
   type ReviewMeta,
   installReview,
+  liveItem,
   pluginKey,
   reviewState,
   revealCurrent,
@@ -29,6 +30,8 @@ export type LineNoteState = {
 export type LineNoteLinks = {
   openEntry: (id: string) => void;
   entryName: (id: string) => string;
+  /** Keep a note as a TODO (ADR-0099), passed as the review holds it. */
+  keep?: (view: EditorView, note: LineNoteSuggestion) => void;
 };
 
 export const LINE_NOTE_QUOTE_CLASS = "line-note-quote";
@@ -57,6 +60,10 @@ export function notesKind(links: LineNoteLinks): ReviewKind {
         prev: () => stepLineNote(view, -1),
         next: () => stepLineNote(view, 1),
         openEntry: () => links.openEntry(note.entry),
+        keep: () => {
+          const live = liveItem(view.state, note.id);
+          if (live) links.keep?.(view, live as LineNoteSuggestion);
+        },
         dismiss: () => dismissCurrentLineNote(view),
       });
     },
@@ -95,7 +102,7 @@ export function stepLineNote(view: EditorView, dir: 1 | -1): void {
 
 function dismiss(view: EditorView, ids: number[]): void {
   if (ids.length === 0) return;
-  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "resolve", ids, accepted: false } satisfies ReviewMeta));
+  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "resolve", ids, outcome: "rejected" } satisfies ReviewMeta));
 }
 
 export function dismissCurrentLineNote(view: EditorView): void {

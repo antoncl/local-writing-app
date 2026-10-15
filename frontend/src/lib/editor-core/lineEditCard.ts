@@ -12,8 +12,11 @@ export type LineEditCardActions = {
   prev: () => void;
   next: () => void;
   accept: () => void;
+  keep: () => void;
   reject: () => void;
 };
+
+export const KEEP_TITLE = "Keep as a TODO — decide later";
 
 export function button(
   testid: string,
@@ -52,6 +55,7 @@ export function buildLineEditCard(reason: string, wide: boolean, actions: LineEd
   row.className = "lec-actions";
   row.append(
     button("line-edit-card-accept", "lec-accept", "Accept this edit", "Accept this edit (Alt+Enter)", "Accept", actions.accept),
+    button("line-edit-card-keep", "lec-step", "Keep this edit as a TODO", KEEP_TITLE, "Keep", actions.keep),
     button("line-edit-card-reject", "lec-reject", "Reject this edit", "Reject this edit (Alt+Backspace)", "Reject", actions.reject),
     button("line-edit-card-prev", "lec-step", "Previous edit", "Previous edit (Alt+Up)", "‹", actions.prev),
     button("line-edit-card-next", "lec-step", "Next edit", "Next edit (Alt+Down)", "›", actions.next),

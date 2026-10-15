@@ -108,6 +108,7 @@
   import { applyScrollWhenLaidOut, rememberScrollOnScroll, scrollRestorePlan } from "@/lib/editor-core/scrollMemory";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { bodyMemory } from "@/lib/stores/bodyMemory.svelte";
+  import { todoActions } from "@/lib/stores/todoActions.svelte";
   import type {
     DocumentKind,
     EditableDocument,
@@ -336,6 +337,10 @@
     onOpenEntry: (id) =>
       void editorPanes.openNodeOfKind(id, "lore").catch((e) => editorPanes.setStatus(e instanceof Error ? e.message : String(e))),
     onOpenChat: (payload) => onOpenChat?.(payload),
+    keepWriters: {
+      markRange: (from, to, note) => todoAnchors.markRange(from, to, note),
+      createTodos: (items) => todoActions.createTodos(items),
+    },
   });
 
   $effect(() => {

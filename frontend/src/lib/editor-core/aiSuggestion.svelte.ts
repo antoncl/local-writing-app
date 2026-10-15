@@ -13,6 +13,7 @@
 
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import { api } from "@/lib/api";
 import type { AIStreamEvent } from "@/lib/api/core";
 import { countWords } from "@/lib/utils/wordCount";
@@ -48,6 +49,7 @@ import {
   dismissCurrentLineNote,
   installLineEdits,
   installLineNotes,
+  keepReviewItem,
   lineEditState,
   lineNoteState,
   rejectAllLineEdits,
@@ -55,6 +57,7 @@ import {
   stepLineEdit,
   stepLineNote,
 } from "@/lib/editor-core/lineEditSuggestions";
+import { editKeepNote, keepFlag, noteKeepNote, type KeepWriters } from "@/lib/editor-core/keepFlag";
 import { fetchLineNotes, noteNotice, type NotesDone } from "@/lib/editor-core/aiLineNotes";
 import {
   hasMutationMarker,
@@ -90,6 +93,9 @@ export interface AiSuggestionDeps {
   onNotice?: (message: string) => void;
   // Open a lore entry by id (a lore-check note's "Open entry").
   onOpenEntry?: (id: string) => void;
+  // Keep a flag as a TODO (ADR-0099): the embedded-mark write (null when it
+  // couldn't be made) and the file-TODO write (throws when it failed).
+  keepWriters?: KeepWriters;
   onOpenChat: (payload: {
     entry: PromptEntrySummary;
     inputs: Record<string, unknown>;
@@ -152,6 +158,9 @@ export class AiSuggestionController {
   #runEpoch = 0;
   // The running generation's abort handle (#2464): Cancel and Esc abort it.
   #abort: AbortController | null = null;
+  // Flags whose Keep is in flight (a file TODO write), so a second click on the
+  // same flag doesn't make a second TODO.
+  #keeping = new Set<number>();
 
   #deps: AiSuggestionDeps;
 
@@ -604,6 +613,8 @@ export class AiSuggestionController {
       installLineNotes(editor.view, placed, to, {
         openEntry: (id) => this.#deps.onOpenEntry?.(id),
         entryName: (id) => names.get(id) ?? "",
+        keep: (view, note) =>
+          void this.#keepFlag(view, note.id, note.from, note.to, note.quote, noteKeepNote(note.problem, names.get(note.entry) || note.entry)),
       });
       this.#syncLineNotes(editor);
       this.#watchLineNotes(editor);
@@ -615,6 +626,35 @@ export class AiSuggestionController {
       this.generating = false;
       this.updateToolbarPosition();
     }
+  }
+
+  // Keep one flag as a TODO (ADR-0099), then resolve it as kept. A failed write
+  // leaves the flag where it is and says why.
+  async #keepFlag(view: EditorView, id: number, from: number, to: number, quote: string, note: string): Promise<void> {
+    const scene = this.#deps.getScene();
+    const writers = this.#deps.keepWriters;
+    if (!scene || !writers || this.#keeping.has(id)) return;
+    this.#keeping.add(id);
+    try {
+      await keepFlag(
+        {
+          doc: view.state.doc,
+          from,
+          to,
+          quote,
+          note,
+          inScene: this.#deps.getDocumentKind() === "manuscript",
+          docId: scene.id,
+        },
+        writers,
+      );
+    } catch (e) {
+      this.error = (e as Error).message;
+      return;
+    } finally {
+      this.#keeping.delete(id);
+    }
+    if (!view.isDestroyed) keepReviewItem(view, id);
   }
 
   // A check has nothing to accept, so its cost and telemetry are recorded when the
@@ -759,7 +799,9 @@ export class AiSuggestionController {
         cost_usd: res.cost_usd ?? null,
       };
       this.#lineEditRange = { from, to };
-      installLineEdits(editor.view, placed, to);
+      installLineEdits(editor.view, placed, to, {
+        keep: (view, edit) => void this.#keepFlag(view, edit.id, edit.from, edit.to, edit.find, editKeepNote(edit.reason, edit.replace)),
+      });
       this.#syncLineEdits(editor);
       this.#watchLineEdits(editor);
       if (dropped > 0) {
@@ -793,14 +835,14 @@ export class AiSuggestionController {
           to: transaction.mapping.map(this.#lineEditRange.to, -1),
         };
       }
-      const { edits, accepted } = lineEditState(editor.state);
+      const { edits, accepted, kept } = lineEditState(editor.state);
       if (edits.length > 0) {
         this.#syncLineEdits(editor);
         return;
       }
       // Resolved or dropped to nothing. Telemetry once, and only if the writer
-      // took at least one edit.
-      if (accepted > 0) {
+      // took at least one edit: accepted, or kept as a TODO.
+      if (accepted > 0 || kept > 0) {
         this.#persistAcceptedInvocation(findPromptEntry(this.#deps.getPromptCtx(), this.#lastInvokedEntryId), null);
       }
       this.meta = null;

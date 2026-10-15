@@ -1,7 +1,7 @@
 # ADR-0098: A lore check answers with notes, not edits
 
 **Status:** Living draft (2026-10-14) — #2488
-**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2), #2492 (S3).
+**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2), #2492 (S3), #2488 (S4: links from the scene's references; the unnamed-lore measurement).
 
 ### How this ADR is kept
 
@@ -12,7 +12,9 @@ This ADR is a living draft while the feature is built. It is approved once the d
 
 **Settled:** a check answers with notes, never edits; nothing is written; a note names its entry by id; notes and edits share one review surface; the check is offered on scenes.
 
-**Open, expected to change:** how the check gathers its lore (decisions 6 and 8). The first version checks only the lore it is given, and the deferred tool lookups may replace or extend that.
+**Settled since the #2488 measurement:** how the check gathers its lore — names, their links, the scene's references and their links, and the writer's picks (decision 6); no tool calling (decision 9).
+
+**Open:** nothing in the design. Tool lookups remain a deferred option with a stated condition (Deferred).
 
 ## Context
 
@@ -54,7 +56,28 @@ A single tool pass whose final reply was *not* forced produced a readable answer
 - It took 0.34–0.70 of the tool latency.
 - It works on any model, including those that report no tool support.
 
-The measurement says nothing about lore that the passage doesn't name.
+### Measured again: lore the passage doesn't name (#2488)
+
+The same lore, plus two distractors, and a passage that names none of the contradicted entries: "She pushed through the crowd on the docks, her green eyes … She flexed her right hand, the old scar … The short, loud dockmaster was waiting by the ship's twin airlocks, a candle burning in his good hand." *She* is the POV character (Kaela), *the ship* is her ship (the Lantern), *the docks* are her station's (Meridian), and *the dockmaster* (Orren Dask) is reached by his title alone: nothing names him and nothing links to him. Five planted contradictions. Conditions:
+- **POV only**: what `lore_named_in` sent before this measurement (nothing is named; the scene's POV is).
+- **POV + links**: the POV entry and what it links to (her ship, her station).
+- **Tools**: `list_lore` (names plus a one-line gist) and `lookup_lore`, then a final reply.
+- **Hybrid**: the POV and its links in the prompt, and the tools for anything else.
+
+| Model (trials) | POV only | POV + links | Tools | Hybrid |
+|---|---|---|---|---|
+| Haiku 5.5 (10) | 20/40 | 38/50 (title 0) | 49/50 (title 10/10), ~13× the input tokens | 49/50 (title 10/10) |
+| Gemma4, Q5_K_M (5) | 10/20 | 20/25 (title 0) | 20/25: title 5/5, the candle 0/5 | 20/25 (title 0, no title lookup) |
+| Qwen3.8-9B, Q4_K_M (5) | 10/20 | 16/25 (title 0) | 8/25 | 19/25 (no tool calls at all) |
+
+(The "POV only" cells for the local models and Haiku come from the first run of this measurement, without the title contradiction.)
+
+**What it shows:**
+- Following links from the scene's references is the universal gain: every model goes from half to nearly all of what names and links can reach, at no extra latency, on any model.
+- Tools add one thing — references by title alone — and only on a strong model: Haiku found the dockmaster every time, the local models with lore already in the prompt never looked him up.
+- On a weak model tools are a hazard: Qwen with tools found fewer contradictions than with no extra lore at all. Hybrid avoids that collapse, but only because the local models then stop calling tools.
+- An alias covers the title case for every model: "the dockmaster" as an alias of Orren Dask makes him *named*.
+- A model's advertised tool support is not proof: lfm2.5's Ollama package reports tools, but its chat template renders none, so it never saw the tools (0 calls).
 
 ## Decision
 
@@ -103,7 +126,8 @@ The measurement says nothing about lore that the passage doesn't name.
 6. **The lore a check sends is declared by the prompt.** A new helper, `lore_named_in(text)`, returns the ids of:
    - the entries named or aliased in `text`, found by the same matcher automatic lore uses, so entries set to *Manual only* or *Never include* are not detected;
    - the entries those link to through their reference fields, again excluding *Manual only* and *Never include*;
-   - the scene's own reference-field targets (its point-of-view character, its location).
+   - the scene's own reference-field targets (its point-of-view character, its location);
+   - the entries those link to, excluding *Manual only* and *Never include* (#2488). A passage that only says "she", "the ship" or "the docks" still brings the POV character's ship and home — measured above, it is what closes the gap for every model.
 
    The prompt also includes the *Relevant lore* picker, the box Expand and Describe already show. Entries the writer picks there are sent too, so lore the passage doesn't name (a pronoun, a title, an implication) can still be checked when the writer knows it matters.
 
@@ -121,11 +145,11 @@ The measurement says nothing about lore that the passage doesn't name.
    - Marker ids rather than a character offset, because the mutations index is built from the saved file: an offset taken from the editor would drift with any unsaved text before the selection, and a marker's identity does not.
    - The resolver is unchanged. An anchor counts when its offset is at or before the position and a close when the position is at or past it, so the last marker and every earlier one count while every later one does not.
 8. **The review says what was checked.** The footer lists the entries the run sent: "Checked against: Kaela, The Meridian, …". The check sees only the lore it was given, so "No contradictions found." means none against *those* entries, and the list shows the writer what was left out.
-9. **No tool calling in the first version.** Tool lookups are deferred, not rejected (see Deferred).
+9. **No tool calling.** The lore is gathered by names, links and picks (decision 6). Tool lookups stay deferred (see Deferred).
 
 ## Deferred
 
-- **Tool lookups for lore the passage doesn't name.** The measurement above covers only named lore, where lore in the prompt found as much at a third to two-thirds of the latency. A passage that says "she", "the captain" or "the ship" names nothing the matcher finds, and only the writer's picks cover it. The next step is a second measurement: the same models, passages whose contradicted lore is reached only by pronoun, title or implication, with tools (the model looks entries up by name) against named lore plus picks. If tools find clearly more, decision 6 gains a tool path for models that report tool support, shown in the assistant lists since #2485. Until then the picker and the "Checked against" list are the answer.
+- **Tool lookups, for references by title alone.** Measured (above, #2488): links from the scene's references close the unnamed-lore gap for every model; tools add only the title-only reference, and only on a strong model, at about three times the latency and thirteen times the input tokens, while a weak local model with tools found fewer contradictions than with none. An alias covers the title case on any model. Reconsidered only if writers hit title-only references that aliases can't reasonably cover, and then as hybrid (links in the prompt, tools for the rest), opted into per assistant rather than switched on by a model's advertised tool support — which proved unreliable (lfm2.5).
 
 ## Rejected alternatives
 

@@ -1,6 +1,6 @@
 <script lang="ts">
 
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { DetailsDetach } from "@/lib/editor-core/detailsDetach.svelte";
   import { contentOverrideMarks } from "@/lib/editor-core/contentOverrideMarks";
@@ -589,23 +589,35 @@
     return bodyHost?.loadScene(nextScene, mode);
   }
 
-  export function highlightEmbeddedTodo(todoId: string) {
-    bodyHost?.highlightEmbeddedTodo(todoId);
+  // A reveal into the prose shows the Body tab first (#2500): under another body
+  // tab (Conversations, a list tab) the prose stays mounted but hidden, so the
+  // reveal would land out of sight.
+  async function inBody(reveal: () => void): Promise<void> {
+    if (activeBodyTab !== "body") {
+      setBodyTab("body");
+      await tick();
+    }
+    reveal();
   }
 
-  // A search hit's reveal (#1925) goes to whichever body the shape mounts.
+  export function highlightEmbeddedTodo(todoId: string) {
+    void inBody(() => bodyHost?.highlightEmbeddedTodo(todoId));
+  }
+
+  // A search hit's reveal (#1925) — and a chat's quote link (#2498) — goes to
+  // whichever body the shape mounts.
   export function revealSearchMatch(reveal: SearchReveal) {
-    bodyHost?.revealSearchMatch(reveal);
+    void inBody(() => bodyHost?.revealSearchMatch(reveal));
   }
 
   // A review item's scene open (#2124): reveal its `mutates_source` marker,
   // or its source's first mention.
   export function revealMutationMarker(markerId: string) {
-    bodyHost?.revealMutationMarker(markerId);
+    void inBody(() => bodyHost?.revealMutationMarker(markerId));
   }
 
   export function revealFirstMention(names: string[]) {
-    bodyHost?.revealFirstMention(names);
+    void inBody(() => bodyHost?.revealFirstMention(names));
   }
 
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge

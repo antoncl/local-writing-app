@@ -113,7 +113,7 @@
       "name": "lore_named_in",
       "kind": "helper",
       "signature": "lore_named_in(text)",
-      "summary": "A list of lore ids — the lore entries whose name or alias appears in `text`, then the entries those link to through their reference fields, then the entries the prompt's own scene links to (its POV, location, ...). No duplicates; entries marked \"never include\" are left out, and \"only when picked\" entries are left out unless the scene itself links to them. It prints nothing; hand the list to `use()` to place the entries: `{% do use(lore_named_in(selection)) %}`."
+      "summary": "A list of lore ids — the lore entries whose name or alias appears in `text`, then the entries those link to through their reference fields, then the entries the prompt's own scene links to (its POV, location, ...), then the entries those link to — so a passage that only says \"she\" or \"the ship\" still brings the POV character's ship and home. No duplicates; entries marked \"never include\" are left out, and \"only when picked\" entries are left out unless the scene itself links to them. It prints nothing; hand the list to `use()` to place the entries: `{% do use(lore_named_in(selection)) %}`."
     },
     {
       "name": "next_scene",

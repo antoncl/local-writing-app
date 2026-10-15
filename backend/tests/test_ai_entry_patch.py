@@ -113,12 +113,19 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
             {"body": "Hi", "fields": {"bio": "x", "aliases": ["a"]}},
         )
 
-    def test_list_form_skips_malformed_items_and_keeps_the_last_repeat(self) -> None:
-        raw = (
-            '{"fields": [{"field": "bio", "value": "first"}, "stray", {"value": "no id"},'
-            ' {"field": "age"}, {"field": "bio", "value": "second"}]}'
-        )
-        self.assertEqual(parse_entry_patch_json(raw), {"fields": {"bio": "second"}})
+    def test_list_form_skips_malformed_items(self) -> None:
+        raw = '{"fields": [{"field": "bio", "value": "first"}, "stray", {"value": "no id"}, {"field": "age"}]}'
+        self.assertEqual(parse_entry_patch_json(raw), {"fields": {"bio": "first"}})
+
+    def test_a_field_set_twice_is_garbled(self) -> None:
+        # #2504: no right value to keep — and a second `body` is how a reply that
+        # also wrote ANOTHER entry's text into `fields` shows.
+        for repeated in ("bio", "body"):
+            raw = (
+                f'{{"fields": [{{"field": "{repeated}", "value": "this entry"}},'
+                f' {{"field": "{repeated}", "value": "another entry"}}]}}'
+            )
+            self.assertIsNone(parse_entry_patch_json(raw), repeated)
 
     def test_repairs_unescaped_quotes_inside_a_value(self) -> None:
         # #2302, the replayed Gemma reply's shape.

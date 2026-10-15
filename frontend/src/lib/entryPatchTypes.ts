@@ -16,6 +16,15 @@ import type { MetadataValue } from "./metadataTypes";
 // from scratch (a scene summary) where a run-diff would be noise.
 export type ReviewMode = "visual_diff" | "replace";
 
+// ADR-0099 §4: a change the conversation implied for ANOTHER entry. `entry_id`
+// is resolved by the backend; the author ticks the ones to keep as TODOs.
+export type FollowUp = {
+  entry_id: string;
+  entry_name: string;
+  change: string;
+  why: string;
+};
+
 export type EntryPatch = {
   body: string | null;
   fields: Record<string, MetadataValue>;
@@ -24,6 +33,8 @@ export type EntryPatch = {
   // default `visual_diff` review. The `replace` path also strips `body` so a
   // whole-field regenerate can never rewrite a scene's prose.
   reviewMode?: ReviewMode;
+  // ADR-0099 §4: carried by the revise destination only; absent => none.
+  follow_ups?: FollowUp[];
 };
 
 // The validated patch returned by POST /api/ai/entry-patch/{id}. `dropped` names
@@ -36,6 +47,8 @@ export type AIEntryPatch = EntryPatch & {
   // unresolved tag vocabulary). Absent entries fall back to just naming the field.
   dropped_reasons?: Record<string, string>;
   garbled: boolean;
+  // ADR-0099 §4: follow-ups the backend couldn't match to an entry.
+  follow_ups_dropped?: number;
   // #2200: a plain-English reason `garbled` is true; absent/null when it isn't.
   garbled_reason?: string | null;
 };

@@ -13,6 +13,8 @@ from app.models import (
     CreateAssistantEntryRequest,
     CreateChatSessionRequest,
     CreateTodoRequest,
+    CreateTodosRequest,
+    CreateTodosResponse,
     EmbeddedTodoList,
     ReferenceCandidatesResponse,
     ReferenceGraphResponse,
@@ -279,6 +281,14 @@ def get_embedded_todos(project: CurrentProject) -> EmbeddedTodoList:
 def create_todo(project: CurrentProject, request: CreateTodoRequest) -> TodoDocument:
     with translate_errors():
         return project.create_todo(request)
+
+
+@router.post("/api/todos/batch", response_model=CreateTodosResponse)
+def create_todos(project: CurrentProject, request: CreateTodosRequest) -> CreateTodosResponse:
+    """N todos in ONE `todo.yaml` write (ADR-0099 §4 keeps a handful of
+    follow-ups as TODOs). Each item is validated like `POST /api/todos`."""
+    with translate_errors():
+        return CreateTodosResponse(items=project.create_todos(request.items))
 
 
 @router.patch("/api/todos/{todo_id}", response_model=TodoDocument)

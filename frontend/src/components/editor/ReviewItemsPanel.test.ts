@@ -360,3 +360,61 @@ describe("ReviewItemsPanel — the two-button Propose tile (ADR-0091 §4)", () =
     expect(screen.queryByRole("button", { name: /Other prompts/ })).not.toBeInTheDocument();
   });
 });
+
+describe("ReviewItemsPanel — a follow-up item (ADR-0099 §4)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    loreEntriesStore.set([
+      { id: "lore_marek", title: "Marek Vell", body: "", entry_type: "lore:character", metadata: {} },
+    ]);
+    metadataSchemaStore.set(SCHEMA);
+  });
+
+  const followUpItem = (): TodoItem => ({
+    ...reviewItem("t9", "guard", "Make him older \u2014 he saw the war"),
+    source: { node_id: "lore_marek", snapshot_id: "", reason: "follow_up", marker_id: "" },
+  });
+  const props = () => ({
+    nodeId: "guard",
+    nodeTitle: "City Guard",
+    subjectEntryType: "lore:character",
+    promptEntries: [reviseEntry(["lore:character"]), followAChange(["lore:character"])],
+  });
+
+  it("shows 'follow-up from <title>' as the detail line", () => {
+    todosStore.set([followUpItem()]);
+    render(ReviewItemsPanel, { props: props() });
+    expect(screen.getByText("follow-up from Marek Vell")).toBeInTheDocument();
+  });
+
+  it("its Propose opens Revise entry with no change inputs seeded", async () => {
+    const propose = vi.spyOn(todoActions, "proposeFromReviewItem").mockResolvedValue(undefined);
+    todosStore.set([followUpItem()]);
+    // Even a Revise entry that DECLARES the hidden change inputs gets none seeded.
+    const revise = {
+      ...reviseEntry(["lore:character"]),
+      inputs: promptWithChangeInputs([]).inputs,
+    } as PromptEntrySummary;
+    render(ReviewItemsPanel, {
+      props: { ...props(), promptEntries: [revise, followAChange(["lore:character"])] },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Propose with Revise entry|Propose a follow-up for/ }));
+
+    expect(propose).toHaveBeenCalledTimes(1);
+    const [, prompt, seeded] = propose.mock.calls[0];
+    expect(prompt).toEqual(expect.objectContaining({ title: "Revise entry" }));
+    expect(seeded).toEqual({ entry: "guard" });
+  });
+
+  it("any other item still proposes with Follow a change", async () => {
+    const propose = vi.spyOn(todoActions, "proposeFromReviewItem").mockResolvedValue(undefined);
+    todosStore.set([reviewItem("t1", "guard", "Follow up on Marek Vell's change")]);
+    render(ReviewItemsPanel, { props: props() });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Propose a follow-up for/ }));
+
+    const [, prompt] = propose.mock.calls[0];
+    expect(prompt).toEqual(expect.objectContaining({ title: "Follow a change" }));
+  });
+});

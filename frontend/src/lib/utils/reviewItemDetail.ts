@@ -19,5 +19,7 @@ const REASON_PHRASE: Record<ChangeCandidateRoute, string> = {
  *  item, given its source and the source's resolved title (or its bare id,
  *  when no lookup is cheap). */
 export function reviewItemSourceDetail(source: TodoSource, sourceTitle: string): string {
+  // ADR-0099 §4: a follow-up is not a change candidate — it has no route.
+  if (source.reason === "follow_up") return `follow-up from ${sourceTitle}`;
   return `${REASON_PHRASE[source.reason]} · from ${sourceTitle}`;
 }

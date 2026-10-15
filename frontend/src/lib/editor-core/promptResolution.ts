@@ -374,6 +374,8 @@ export function findPromptEntry(
 
 // The title of the built-in Propose opens by default (ADR-0091 §4).
 export const FOLLOW_A_CHANGE_TITLE = "Follow a change";
+// The built-in a follow-up review item (ADR-0099 §4) proposes with.
+export const REVISE_ENTRY_TITLE = "Revise entry";
 
 // Case-insensitive title match, preferring the project's own over the
 // Library's (the same shadowing rule includes-by-title already use). Shared by

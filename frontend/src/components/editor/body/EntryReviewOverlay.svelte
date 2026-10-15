@@ -9,6 +9,7 @@
   // One prop: the whole controller. Every field/callback hangs off it, so the
   // overlay is a pure view of the review state — no shell coupling.
   import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
+  import FollowUpsSection from "@/components/editor/body/FollowUpsSection.svelte";
   import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
   import type { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
 
@@ -80,6 +81,11 @@
     />
   {/if}
 {/key}
+<FollowUpsSection
+  followUps={review.followUps}
+  isTicked={(i) => review.isFollowUpTicked(i)}
+  onToggle={(i) => review.toggleFollowUp(i)}
+/>
 
 <style>
   .entry-review-error {

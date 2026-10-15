@@ -97,6 +97,8 @@ export function wireEntryReview(host: EntryReviewHost): EntryProposalController 
   // The write goes through the todo controller like every other todo write;
   // its `run` surfaces a failure without undoing the adopt.
   entryReview.onReviewItemAdopted = (reviewItemId) => todoActions.markReviewItemDone(reviewItemId);
+  // ADR-0099 §4: the follow-ups the author ticked become TODOs.
+  entryReview.onCreateTodos = (items) => todoActions.createTodos(items);
 
   // The hooks the pane's close path uses to commit or discard the review.
   const reviewCommitter = {

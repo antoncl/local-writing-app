@@ -102,7 +102,13 @@ export const loreApi = {
   // patch + cost.
   extractEntryPatch(
     nodeId: string,
-    body: { messages: { role: string; content: string }[]; assistant_id: string | null; chat_id: string },
+    body: {
+      messages: { role: string; content: string }[];
+      assistant_id: string | null;
+      chat_id: string;
+      // ADR-0099 §4: ask for cross-entry follow-ups (the revise destination only).
+      follow_ups?: boolean;
+    },
   ) {
     return request<EntryPatchExtraction>(`/ai/entry-patch/${encodeURIComponent(nodeId)}/extract`, {
       method: "POST",

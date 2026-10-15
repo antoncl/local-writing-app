@@ -27,7 +27,7 @@ import {
   setTodos,
   todosStore,
 } from "@/lib/stores/todos";
-import type { EmbeddedTodoRecord, PromptEntrySummary, Scene, SearchHit, TodoItem } from "@/lib/types";
+import type { EmbeddedTodoRecord, NewTodo, PromptEntrySummary, Scene, SearchHit, TodoItem } from "@/lib/types";
 
 class TodoActions {
   // The Todo pane's "Add" compose field (two-way bound).
@@ -237,6 +237,15 @@ class TodoActions {
   // ADR-0090 §4: the adopt side of Propose — a committed patch marks the
   // review item done. Here, not in the editor host: every todo write goes
   // through this controller and lands the returned document in the store.
+  // ADR-0099 §4: a review's ticked follow-ups, in one write. Unlike the other
+  // actions this THROWS — the review's Done keeps itself open on a failure and
+  // shows the message. The batch response lists only the new items, so the
+  // store is refreshed from the document.
+  async createTodos(items: NewTodo[]): Promise<void> {
+    await api.createTodos(items);
+    setTodos((await api.getTodos()).items);
+  }
+
   async markReviewItemDone(reviewItemId: string): Promise<void> {
     await this.run(async () => {
       setTodos((await api.updateTodo(reviewItemId, { status: "done" })).items);
@@ -259,7 +268,12 @@ class TodoActions {
     const nodeId = item.node_id;
     if (!source || !nodeId) return;
     await this.run(async () => {
-      const message = await api.changeMessage(source.node_id, source.snapshot_id);
+      // ADR-0099 §4: a follow-up's own text IS the opening request — there is
+      // no change to describe.
+      const text =
+        source.reason === "follow_up"
+          ? item.text
+          : (await api.changeMessage(source.node_id, source.snapshot_id)).text;
       const chatId = await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
         subject: nodeId,
         subjectTitle: opts.subjectTitle,
@@ -274,7 +288,7 @@ class TodoActions {
       // the pane is created and remounted by this same gesture, and every
       // load of the chat re-applies the hold until the writer edits or sends
       // (composerPrefill.svelte.ts, browser-verified).
-      composerPrefills.set(chatId, message.text);
+      composerPrefills.set(chatId, text);
     });
   }
 }

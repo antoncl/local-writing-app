@@ -109,6 +109,13 @@ function droppedSuffix(dropped: string[], reasons?: Record<string, string>): str
   return ` Ignored ${dropped.length} field(s) the model couldn't set legally: ${named.join(", ")}.`;
 }
 
+// ADR-0099 §4: follow-ups whose entry the backend couldn't match are dropped;
+// say how many, in the same trailing-sentence shape as `droppedSuffix`.
+function followUpsDroppedSuffix(count?: number): string {
+  if (!count) return "";
+  return ` ${count} follow-up(s) couldn't be matched to an entry and were ignored.`;
+}
+
 // Why a patch proposed nothing (#2195): the fields the validator dropped, or —
 // when none were — that the model's raw reply is shown below (#2201; still
 // logged to errors.log too, but the in-app disclosure is what the author sees).
@@ -262,13 +269,19 @@ export class ChatCommitController {
   // transcript, assistant, and chat_id) — kept in one place so the two
   // destinations can never drift on what's posted. The garbled message is
   // per-caller (an entry "patch" vs a staged "change").
-  private extractPatch(entryId: string, garbledMessage: string): Promise<AIEntryPatch | null> {
+  private extractPatch(
+    entryId: string,
+    garbledMessage: string,
+    followUps = false,
+  ): Promise<AIEntryPatch | null> {
     return this.runExtraction(
       () =>
         api.extractEntryPatch(entryId, {
           messages: this.deps.getHistory(),
           assistant_id: this.deps.getAssistantId() || null,
           chat_id: this.deps.getChatId(),
+          // ADR-0099 §4: only the revise destination asks for follow-ups.
+          ...(followUps ? { follow_ups: true } : {}),
         }),
       garbledMessage,
     );
@@ -325,6 +338,7 @@ export class ChatCommitController {
         this.extractPatch(
           entryId,
           "Couldn't read the model's response as a patch — ask it to finalize again.",
+          true,
         ),
       publish: (patch) => this.publishRevisePatch(entryId, patch),
     };
@@ -341,11 +355,12 @@ export class ChatCommitController {
     const body = reviewMode === "replace" ? null : patch.body;
     const hasBody = body != null;
     const hasFields = Object.keys(patch.fields).length > 0;
-    if (!hasBody && !hasFields) {
+    const followUps = patch.follow_ups ?? [];
+    if (!hasBody && !hasFields && followUps.length === 0) {
       this.deps.setNotice(`The model proposed no changes to commit.${emptyPatchReason(patch.dropped, patch.dropped_reasons)}`);
       return;
     }
-    entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
+    entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode, ...(followUps.length > 0 ? { follow_ups: followUps } : {}) });
     this.deps.revealEntry(entryId);
     // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but the
     // review renders on the entry pane. Name where it went so the author knows to
@@ -353,7 +368,7 @@ export class ChatCommitController {
     // which has no document pane) gets the kind-neutral "the entry".
     const reviewOn = this.deps.entryTitle(entryId) ?? "the entry";
     this.deps.setNotice(
-      `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped, patch.dropped_reasons)}${this.outputTokensSuffix()}`,
+      `Committed — review it on ${reviewOn}.${droppedSuffix(patch.dropped, patch.dropped_reasons)}${followUpsDroppedSuffix(patch.follow_ups_dropped)}${this.outputTokensSuffix()}`,
     );
   }
 

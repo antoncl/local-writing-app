@@ -4,6 +4,10 @@
 
 import type { ChangeCandidateRoute } from "./propagationTypes";
 
+/** A TODO source's reason: a change-candidate route, or ADR-0099 §4's
+ *  `follow_up` (an AI-proposed change for another entry). */
+export type TodoSourceReason = ChangeCandidateRoute | "follow_up";
+
 /** ADR-0090 §3: where a review item's change came from — the source entry,
  *  the baseline it was measured from (`""` = the whole entry, not a
  *  snapshot), the route of the candidate's first reason, and — only when
@@ -11,8 +15,17 @@ import type { ChangeCandidateRoute } from "./propagationTypes";
 export type TodoSource = {
   node_id: string;
   snapshot_id: string;
-  reason: ChangeCandidateRoute;
+  reason: TodoSourceReason;
   marker_id: string;
+};
+
+/** One TODO to create (POST /todos or /todos/batch). */
+export type NewTodo = {
+  text: string;
+  scope: "project" | "scene" | "node";
+  scene_id?: string | null;
+  node_id?: string | null;
+  source?: Pick<TodoSource, "node_id" | "reason"> | null;
 };
 
 export type TodoItem = {

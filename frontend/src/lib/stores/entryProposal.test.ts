@@ -1090,3 +1090,107 @@ describe("EntryProposalController — list review capture and commit (ADR-0096 �
     expect(c.listReviews.beats.L).toEqual([beat("beat_2", "E2")]);
   });
 });
+
+describe("EntryProposalController — follow-ups (ADR-0099 §4)", () => {
+  const fu = (n: number) => ({
+    entry_id: `lore-${n}`,
+    entry_name: `Entry ${n}`,
+    change: `change ${n}`,
+    why: n === 2 ? "" : `why ${n}`,
+  });
+  const withFollowUps = (body: string | null = "new body"): EntryProposalController => {
+    const c = entryController("e1");
+    c.onAdoptBody = vi.fn();
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    c.onCreateTodos = vi.fn(async () => {});
+    entryBrainstorm.propose("e1", { ...patch(body), follow_ups: [fu(1), fu(2), fu(3)] });
+    return c;
+  };
+
+  beforeEach(() => entryBrainstorm.clear("e1"));
+
+  it("holds the follow-ups, all unticked, and toggles one", () => {
+    const c = withFollowUps();
+    expect(c.followUps).toHaveLength(3);
+    expect([0, 1, 2].map((i) => c.isFollowUpTicked(i))).toEqual([false, false, false]);
+    c.toggleFollowUp(1);
+    expect(c.isFollowUpTicked(1)).toBe(true);
+    c.toggleFollowUp(1);
+    expect(c.isFollowUpTicked(1)).toBe(false);
+  });
+
+  it("a follow-ups-only proposal is still a review", () => {
+    const c = entryController("e1");
+    entryBrainstorm.propose("e1", { ...patch(null), follow_ups: [fu(1)] });
+    expect(c.hasReview).toBe(true);
+  });
+
+  it("Done writes the patch, then ONE createTodos call with the exact shape", async () => {
+    const c = withFollowUps();
+    c.setBodyResolution("new body");
+    c.toggleFollowUp(0);
+    c.toggleFollowUp(1);
+
+    expect(await c.commit()).toBe(true);
+
+    expect(c.onFlush).toHaveBeenCalledTimes(1);
+    expect(c.onCreateTodos).toHaveBeenCalledTimes(1);
+    expect(c.onCreateTodos).toHaveBeenCalledWith([
+      {
+        scope: "node",
+        node_id: "lore-1",
+        text: "change 1 \u2014 why 1",
+        source: { node_id: "e1", reason: "follow_up" },
+      },
+      // an empty why yields just the change
+      { scope: "node", node_id: "lore-2", text: "change 2", source: { node_id: "e1", reason: "follow_up" } },
+    ]);
+  });
+
+  it("nothing adopted but a follow-up ticked: Done writes only the TODOs", async () => {
+    const c = withFollowUps();
+    c.toggleFollowUp(2);
+
+    expect(await c.commit()).toBe(true);
+
+    expect(c.onFlush).not.toHaveBeenCalled();
+    expect(c.onAdoptBody).not.toHaveBeenCalled();
+    expect(c.onCreateTodos).toHaveBeenCalledTimes(1);
+    expect(c.proposal).toBeNull();
+  });
+
+  it("no ticks: no TODO call", async () => {
+    const c = withFollowUps();
+    c.setBodyResolution("new body");
+    await c.commit();
+    expect(c.onCreateTodos).not.toHaveBeenCalled();
+  });
+
+  it("a TODO failure keeps the review open with ticks intact and never re-writes the patch", async () => {
+    const c = withFollowUps();
+    c.setBodyResolution("new body");
+    c.toggleFollowUp(0);
+    vi.mocked(c.onCreateTodos!).mockRejectedValueOnce(new Error("todo write failed"));
+
+    expect(await c.commit()).toBe(false);
+    expect(c.commitError).toBe("todo write failed");
+    expect(c.proposal).not.toBeNull();
+    expect(c.isFollowUpTicked(0)).toBe(true);
+    expect(c.onFlush).toHaveBeenCalledTimes(1);
+
+    expect(await c.commit()).toBe(true);
+    expect(c.onFlush).toHaveBeenCalledTimes(1); // the patch was not written again
+    expect(c.onAdoptBody).toHaveBeenCalledTimes(1);
+    expect(c.onCreateTodos).toHaveBeenCalledTimes(2);
+  });
+
+  it("Discard drops the follow-ups without a TODO call", () => {
+    const c = withFollowUps();
+    c.toggleFollowUp(0);
+    c.abandon();
+    expect(c.onCreateTodos).not.toHaveBeenCalled();
+    expect(c.proposal).toBeNull();
+    expect(c.isFollowUpTicked(0)).toBe(false);
+  });
+});

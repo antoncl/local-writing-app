@@ -20,6 +20,18 @@ ChangeCandidateRoute = Literal[
     "mentioned_by_source",
 ]
 
+# ADR-0099 §4: a TODO's source reason is a change-candidate route OR
+# `follow_up` — a change the conversation named on a different entry. Kept
+# apart from `ChangeCandidateRoute` so a candidate's reason can never be one.
+TodoSourceReason = Literal[
+    "references_source",
+    "referenced_by_source",
+    "mutates_source",
+    "mentions_source",
+    "mentioned_by_source",
+    "follow_up",
+]
+
 
 class TodoSource(BaseModel):
     """Where a review item's change came from (ADR-0090 §3): the source
@@ -29,7 +41,7 @@ class TodoSource(BaseModel):
 
     node_id: str
     snapshot_id: str = ""
-    reason: ChangeCandidateRoute
+    reason: TodoSourceReason
     marker_id: str = ""
 
 
@@ -57,6 +69,16 @@ class CreateTodoRequest(BaseModel):
     anchor_id: str | None = None
     node_id: str | None = None
     source: TodoSource | None = None
+
+
+class CreateTodosRequest(BaseModel):
+    """POST /api/todos/batch body — N todos, one `todo.yaml` write."""
+
+    items: list[CreateTodoRequest] = Field(min_length=1)
+
+
+class CreateTodosResponse(BaseModel):
+    items: list[TodoItem] = Field(default_factory=list)
 
 
 class UpdateTodoRequest(BaseModel):

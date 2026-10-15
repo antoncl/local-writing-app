@@ -25,6 +25,7 @@ __all__ = [
     "diagnose_garbled_reply",
     "is_proposable_field",
     "parse_entry_patch_json",
+    "parse_follow_ups",
     "tag_vocabulary_target",
 ]
 
@@ -130,6 +131,40 @@ def _strip_code_fence(text: str) -> str:
     return inner.strip()
 
 
+def _is_patch_shaped(obj: dict[str, Any]) -> bool:
+    """Carries a ``body``, ``fields`` and/or ``follow_ups`` key (ADR-0099 §4:
+    ``{"fields": [], "follow_ups": [...]}`` is a real reply, not garble)."""
+    return "body" in obj or "fields" in obj or "follow_ups" in obj
+
+
+def parse_follow_ups(obj: dict[str, Any]) -> tuple[list[dict[str, str]], int]:
+    """The follow-up items of a parsed patch object, tolerantly (ADR-0099 §4):
+    each as ``{"entry", "change", "why"}`` strings, plus how many items were
+    malformed (not an object, or no non-empty string ``entry``/``change``) and
+    skipped. ``why`` defaults to ``""``."""
+    items = obj.get("follow_ups")
+    if not isinstance(items, list):
+        return [], 0
+    parsed: list[dict[str, str]] = []
+    dropped = 0
+    for item in items:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        entry, change, why = item.get("entry"), item.get("change"), item.get("why")
+        if not (isinstance(entry, str) and entry.strip() and isinstance(change, str) and change.strip()):
+            dropped += 1
+            continue
+        parsed.append(
+            {
+                "entry": entry.strip(),
+                "change": change.strip(),
+                "why": why.strip() if isinstance(why, str) else "",
+            }
+        )
+    return parsed, dropped
+
+
 def _patch_shaped_or_empty(obj: dict[str, Any]) -> dict[str, Any] | None:
     """``obj`` if it is legal to honor as a patch — empty (``{}``, "nothing
     changed") or carrying a ``body``/``fields`` key — else ``None``.
@@ -140,12 +175,12 @@ def _patch_shaped_or_empty(obj: dict[str, Any]) -> dict[str, Any] | None:
     no reported reason (nothing in it maps to a real field). Garbled here
     triggers the caller's one firm retry (`run_entry_patch_extraction`) instead.
     """
-    if not obj or "body" in obj or "fields" in obj:
+    if not obj or _is_patch_shaped(obj):
         return obj
     return None
 
 
-def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any]:
+def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any] | None:
     """``obj`` with a list-form ``"fields"`` folded back into the patch shape.
 
     #2296: the extraction envelope (and the constrained-decoding schema) ask
@@ -154,8 +189,12 @@ def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any]:
     downstream reads ``{"body": <str>, "fields": {<id>: <value>}}``, so the
     ``body`` item lifts to the top-level key and the rest key by id. The
     object form still passes through unchanged. A malformed item (not an
-    object, no string ``"field"``, or no ``"value"``) is skipped; a repeated
-    id keeps its last value."""
+    object, no string ``"field"``, or no ``"value"``) is skipped.
+
+    A field set twice makes the whole reply garbled (``None``): there is no
+    right value to keep. It is how a reply that also wrote ANOTHER entry's
+    text into ``fields`` shows (#2504 — a second ``body`` that was the other
+    entry's), and keeping the last one would propose that text for this entry."""
     items = obj.get("fields")
     if not isinstance(items, list):
         return obj
@@ -164,6 +203,8 @@ def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any]:
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("field"), str) or "value" not in item:
             continue
+        if item["field"] in fields or (item["field"] == "body" and "body" in out):
+            return None
         if item["field"] == "body":
             out["body"] = item["value"]
         else:
@@ -174,7 +215,8 @@ def _fields_from_items(obj: dict[str, Any]) -> dict[str, Any]:
 
 def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     """Return the patch object parsed from ``raw``, or ``None`` if garbled —
-    always in the object form (list-form ``"fields"`` folded, #2296)."""
+    always in the object form (list-form ``"fields"`` folded, #2296); a field
+    set twice is garbled."""
     parsed = _parse_patch_object(raw)
     return _fields_from_items(parsed) if parsed is not None else None
 
@@ -223,7 +265,7 @@ def _parse_patch_object(raw: str) -> dict[str, Any] | None:
         for span in _balanced_object_spans(candidate)
         if (obj := _as_json_dict(span)) is not None
     ]
-    patch_shaped = [obj for obj in embedded if "body" in obj or "fields" in obj]
+    patch_shaped = [obj for obj in embedded if _is_patch_shaped(obj)]
     if len(patch_shaped) == 1:
         return patch_shaped[0]
     if len(patch_shaped) >= 2:
@@ -320,7 +362,7 @@ def _diagnose_embedded(candidate: str) -> str:
         for span in _balanced_object_spans(candidate)
         if (obj := _as_json_dict(span)) is not None
     ]
-    patch_shaped = [obj for obj in embedded if "body" in obj or "fields" in obj]
+    patch_shaped = [obj for obj in embedded if _is_patch_shaped(obj)]
     if len(patch_shaped) >= 2:
         return (
             "The reply holds several entry-shaped JSON objects, so it isn't "

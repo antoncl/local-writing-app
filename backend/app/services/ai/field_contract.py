@@ -30,7 +30,7 @@ def _describe_field(f: dict[str, Any]) -> str:
     plus the live vocabulary in the SAME line — so the instruction is
     actionable right where the model reads what to propose, not a separate
     paragraph it has to cross-reference. `tag_vocabulary` is ranked by usage
-    (`_fields()`/`_tag_vocabulary_titles`) and capped; `tag_vocabulary_total`
+    (`_fields()`/`field_roster.tag_vocabulary_titles`) and capped; `tag_vocabulary_total`
     (round 2, Y2) is the UNCAPPED count, so a truncated list says so rather
     than silently reading as the whole vocabulary."""
     tag_titles = f.get("tag_vocabulary")

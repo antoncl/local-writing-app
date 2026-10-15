@@ -18,10 +18,12 @@ entry_type: prompt:snippet
   `body` (the prose — the prompt decides whether to show it), `status` and
   `tags` (bookkeeping), and the narration fields `pov_mode` / `pov` / `tense`,
   which "Prose generation settings" and the prompt's point-of-view line carry.
-  A select shows its option's label, not the stored value. A list field keeps
-  its order, one numbered item per line (a grouped item as
-  `member: value` pairs).
+  A select shows its option's label, not the stored value — in a list item
+  too (#2515). A list field keeps its order, one numbered item per line (a
+  grouped item as `Member: value` pairs, by member label).
 #}
+{#- A list item value by its option label, when its member has options. -#}
+{% macro shown(member, value) %}{{ member.option_labels.get(value, value) if (member and value is string) else value }}{% endmacro %}
 {% set s = brief_scene %}
 ## This scene: {{ s.title }}
 {{ s.summary }}
@@ -43,12 +45,13 @@ _{{ f.description }}_
 {% for item in v %}{{ f.option_labels.get(item, item) }}{{ ", " if not loop.last }}{% endfor %}
 
 {% elif v is sequence and v is not string %}
+{% set members = f.get("items") or [] %}
 {% for item in v %}
 {% if item is mapping %}
-{{ loop.index }}. {% for k, iv in item.items() if iv %}{{ k }}: {{ iv }}{{ "; " if not loop.last }}{% endfor %}
+{{ loop.index }}. {% for k, iv in item.items() if iv %}{% set ms = members | selectattr("key", "equalto", k) | list %}{{ ms[0].label if ms else k }}: {{ shown(ms[0] if ms else none, iv) }}{{ "; " if not loop.last }}{% endfor %}
 
 {% else %}
-{{ loop.index }}. {{ item }}
+{{ loop.index }}. {{ shown(members[0] if members else none, item) }}
 {% endif %}
 {% endfor %}
 {% else %}

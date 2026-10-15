@@ -21,6 +21,7 @@
 <script lang="ts">
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import type { PromptCommit, PromptContextStrategy, PromptOnAccept, PromptOutput } from "@/lib/types";
+  import type { OutputHandlerKey } from "@/lib/editor-core/outputHandlers";
 
   interface Props {
     // Persisted shape (bind:'d by the parent) — the instance's context_strategy.
@@ -43,7 +44,10 @@
     onEnterInline,
   }: Props = $props();
 
-  type Handler = "" | "inline" | "inline_edits" | "inline_notes" | "extract_to_node";
+  // Every authorable handler in the registry, plus "" (a plain conversation).
+  // finalize_scene is a scene projection, not authored here. Derived, so a new
+  // handler key fails type-checking until MODE_HINTS covers it.
+  type Handler = "" | Exclude<OutputHandlerKey, "finalize_scene">;
   // The modes that run in the prose editor on a selection or the caret (#2475).
   const INLINE_HANDLERS: ReadonlySet<Handler> = new Set(["inline", "inline_edits", "inline_notes"]);
 

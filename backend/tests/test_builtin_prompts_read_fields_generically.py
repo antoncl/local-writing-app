@@ -35,11 +35,6 @@ EXCEPTIONS = {
     # A roleplay scene is played, not drafted to a design: Dynamics is the one
     # scene field read as stage direction, and a beat list would railroad it.
     ("roleplay.md", "dynamics"): "roleplay direction only",
-    # Hand-rolled project settings that predate the "Project settings" snippet.
-    ("roleplay.md", "tense"): "project settings, not yet the snippet",
-    ("roleplay.md", "measurement_system"): "project settings, not yet the snippet",
-    ("roleplay.md", "spelling"): "project settings, not yet the snippet",
-    ("impersonate.md", "spelling"): "project settings, not yet the snippet",
 }
 
 

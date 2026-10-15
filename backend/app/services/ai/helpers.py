@@ -453,6 +453,14 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             "label": override.label if override and override.label else field.name,
             "type": field.type,
             "options": [opt.value for opt in field.options] if field.options and field.type != "list" else [],
+            # The display text for each option value (#2513), so a template that
+            # READS a select shows what the author sees ("Rebel"), not the stored
+            # key ("reb"). A label defaults to its value, like the rail's.
+            "option_labels": (
+                {opt.value: opt.label or opt.value for opt in field.options}
+                if field.options and field.type != "list"
+                else {}
+            ),
             # Author help text (#1004): what the field is FOR, so the model
             # proposes on-target values. Always present (None when unset) so the
             # template can test `f.description` without hitting StrictUndefined.
@@ -1034,12 +1042,13 @@ def _pov(
 
 def _resolved_narration(project: ProjectService, schema: Any, scene: Any) -> dict[str, Any]:
     """The scene's EFFECTIVE narration folded down the manuscript structure
-    (ADR-0079): `{"mode", "character"}`. Unlike `pov(scene)` (the scene's OWN pov
+    (ADR-0079): `{"mode", "character", "tense"}`. Unlike `pov(scene)` (the scene's OWN pov
     field), this resolves inheritance — a scene that inherits its POV from an act
     or the book reports that value here — and applies the mode-gates-character
     rule (an omniscient / objective mode has no character). `character` is an
     EntryRef when it resolves to a lore id, so `resolved_narration(scene).character.title`
-    works; `mode` is the raw `pov_mode` value (or None).
+    works; `mode` is the raw `pov_mode` value and `tense` the raw `tense` value
+    (each None when unset).
 
     The fold lives on `StructureNode.resolved_cascade`, stamped by `read_structure`
     — the same access `story_so_far` uses — so no `read_scene` change is needed.
@@ -1059,7 +1068,7 @@ def _resolved_narration(project: ProjectService, schema: Any, scene: Any) -> dic
         if isinstance(character_id, str) and _is_lore_id(character_id)
         else None
     )
-    return {"mode": narration["mode"], "character": character}
+    return {"mode": narration["mode"], "character": character, "tense": narration["tense"]}
 
 
 # ----- `story_so_far(scene)` ----------------------------------------------

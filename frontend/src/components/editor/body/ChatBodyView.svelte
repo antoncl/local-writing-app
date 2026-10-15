@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { chatWritesProse } from "@/lib/chat/quoteLinks";
   import { QuoteSourceController } from "@/lib/chat/quoteSource.svelte";
   import { revealQuoteBeside } from "@/lib/stores/quoteReveal";
   import { api } from "@/lib/api";
@@ -213,8 +214,9 @@
   // ADR-0067 S2: the field descriptors the prompt registered via field_contract.
   // Captured from the lock render's preview response and echoed on every save,
   // mirrored beside chatUsedNodeIds — the commit reads this back instead of
-  // re-rendering a separate extractor.
-  let chatFieldContractStored: Record<string, unknown>[] = [];
+  // re-rendering a separate extractor. Reactive (#2513): a chat that writes
+  // the scene's prose links no quotes.
+  let chatFieldContractStored = $state.raw<Record<string, unknown>[]>([]);
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -1200,7 +1202,7 @@
       onScroll={recomputePinned}
       showJumpToLatest={!pinnedToBottom}
       onJumpToLatest={() => scrollToBottom()}
-      quoteSource={quoteSource.plain}
+      quoteSource={chatWritesProse(chatFieldContractStored) ? null : quoteSource.plain}
       onQuoteClick={(quote) => quoteSource.sceneId &&
         void revealQuoteBeside({ sceneId: quoteSource.sceneId, quote, besidePanelId: hostPaneId })}
     />

@@ -153,7 +153,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
             inputs={"entry": "", "entry_type": "lore:character"},
             project=self.service.current_project(),
         )
-        self.assertIn("metric", rendered)  # general facts still reach the brainstorm
+        self.assertIn("Metric", rendered)  # general facts still reach the brainstorm
         self.assertNotIn("Narrative POV", rendered)  # but POV/tense do not
         self.assertNotIn("First person", rendered)
 

@@ -9,8 +9,9 @@ entry_type: prompt:snippet
   reads. Include it INSIDE a {% role %} block, ONLY in prompts that generate
   manuscript prose destined for a scene:
       {% include "Prose generation settings" %}
-  Each setting resolves scene-first: a scene's own pov_mode / tense wins, and
-  falls back to the project's when the scene leaves it blank. Kept OUT of
+  Each setting is the scene's EFFECTIVE value (#2513): its own, else what it
+  inherits down the manuscript (act, chapter, book — `resolved_narration`), else
+  the project's. Shown by its option label. Kept OUT of
   chat / roleplay and metadata-field brainstorms (revise-entry) on purpose: a
   first-person, present-tense manuscript must not push a character's descriptive
   fields — or a chat reply — into first person. The general facts (language,
@@ -19,10 +20,11 @@ entry_type: prompt:snippet
 #}
 {%- if project is defined and project and project.metadata -%}
 {%- set ns = namespace(rows=[]) -%}
+{%- set nar = resolved_narration(scene) if (scene is defined and scene) else none -%}
 {%- for f in fields("project:project") if f.proposable and f.id in ["pov_mode", "tense"] -%}
-{%- set sval = (scene.metadata.get(f.id) if (scene is defined and scene) else none) -%}
+{%- set sval = ((nar.mode if f.id == "pov_mode" else nar.tense) if nar else none) -%}
 {%- set val = sval or project.metadata.get(f.id) -%}
-{%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, val)] -%}{%- endif -%}
+{%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, f.option_labels.get(val, val))] -%}{%- endif -%}
 {%- endfor -%}
 {%- if ns.rows %}
 ## Prose style

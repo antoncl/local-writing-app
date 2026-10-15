@@ -57,16 +57,9 @@ The point-of-view character is **{{ narration.character.title }}**.
 {{ story_so_far(scene) }}
 
 {% endif %}
-{% if scene.summary %}
-## This scene: {{ scene.title }}
-{{ scene.summary }}
+{% set brief_scene = scene %}
+{% include "Scene brief" %}
 
-{% endif %}
-{% if scene.metadata.dynamics %}
-### Scene dynamics
-{{ scene.metadata.dynamics }}
-
-{% endif %}
 {% endif %}
 ## The text so far
 Continue from the end of this.

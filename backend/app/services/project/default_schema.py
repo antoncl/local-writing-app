@@ -337,14 +337,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "hidden": True,
         },
         "dynamics": {
-            # Scene-current per-character beats for the roleplay use case.
-            # The roleplay template reads this verbatim; both characters
-            # see all beats so the AI plays them as one continuous scene.
+            # Scene-current per-character beats. Roleplay reads this verbatim
+            # as stage direction (both characters see all beats, so the AI
+            # plays them as one continuous scene); Draft scene and Continue
+            # read it through the Scene brief snippet (#2511).
             "name": "Dynamics",
             "description": (
                 "Scene-current beats for the characters in this scene — how each is "
                 "behaving and what's driving them right now. Read verbatim by the "
-                "roleplay AI as direction; present-tense, not backstory. A few "
+                "AI as direction; present-tense, not backstory. A few "
                 "lines per character, not a scene."
             ),
             "type": "long_text",

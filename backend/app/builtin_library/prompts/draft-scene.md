@@ -32,7 +32,7 @@ context_strategy:
 ---
 {#
   Draft scene (#2421, #2456): a conversation on one scene that drafts its prose
-  from its summary — or redrafts prose it already has — and commits the result
+  from its brief (#2511: the summary and every other field the author filled in) — or redrafts prose it already has — and commits the result
   as the scene's body, behind a visual diff. The change markers the brief asks
   for are placed back as the scene's mutation pills on commit.
 
@@ -54,10 +54,10 @@ context_strategy:
 {# Register the one field this prompt writes — the scene's prose body — so the
    commit saves exactly that. Emits nothing. #}
 {% for f in fields(e) if f.proposable and f.id == "body" %}{% do field_contract.store(f) %}{% endfor %}
-You draft one scene of a novel with its author, from the author's summary of it. Write the draft straight away, in full; then revise it as the author asks — each time, write the whole scene out again, not just the changed passages. A first draft gets the scene onto the page: every event in the summary, in order, dramatized as it happens — action, dialogue, and the point-of-view character's perception — not reported after the fact. It does not need to be polished.
+You draft one scene of a novel with its author, from the author's brief for it: the summary, and whatever else the author has set down for the scene — its beats, what is at stake, what opposes whom. Write the draft straight away, in full; then revise it as the author asks — each time, write the whole scene out again, not just the changed passages. A first draft gets the scene onto the page: every event the brief calls for, in order — when it lists beats, every beat, in their order — dramatized as it happens — action, dialogue, and the point-of-view character's perception — not reported after the fact. It does not need to be polished.
 
 - Write only this scene. Stop when its last event has happened; do not carry on into what comes next, and do not end on a reflective or summarizing paragraph.
-- Do not invent major events the summary does not call for, and do not bring in named characters the context does not give you.
+- Do not invent major events the brief does not call for, and do not bring in named characters the context does not give you.
 - Keep dialogue tags plain.
 - Write the scene as plain prose: no title, no headings, no Markdown — apart from the change markers, when the brief lists any. Put any comment to the author before or after the scene, never inside it.
 
@@ -94,13 +94,8 @@ What happens next, so this scene can lead into it. Do not write any of it.
 {{ following.summary }}
 
 {% endif %}
-## This scene: {{ e.title }}
-{{ e.summary }}
-{% if e.metadata.dynamics %}
-
-### Scene dynamics
-{{ e.metadata.dynamics }}
-{% endif %}
+{% set brief_scene = e %}
+{% include "Scene brief" %}
 {% if changes %}
 
 ### Changes this scene makes
@@ -111,7 +106,7 @@ These happen during the scene, in this order. Make each one happen in the story,
 {% if e.body | trim %}
 
 ### The scene as it is written now
-Redraft it to the summary: keep what already works, and rewrite what doesn't.
+Redraft it to the brief: keep what already works, and rewrite what doesn't.
 
 {{ e.body | trim }}
 {% endif %}

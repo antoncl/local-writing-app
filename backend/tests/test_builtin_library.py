@@ -1069,6 +1069,39 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertNotIn("Where the previous scene left off", text)
         self.assertIn("Honor leaves the station.", text)
 
+    def _add_scene_design_fields(self) -> None:
+        """#2511: the author's own scene fields, as a user schema adds them."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {}).update({
+            "value_at_stake": {"name": "Value at stake", "type": "text",
+                               "description": "The human value this scene turns."},
+            "scene_beats": {"name": "Beats", "type": "list", "item_type": "long_text",
+                            "description": 'Prefix the beat where the value turns with "TURN:".'},
+            "private_note": {"name": "Private note", "type": "text", "ai_proposable": False},
+        })
+        scene_type = data.setdefault("entry_types", {}).setdefault("manuscript:scene", {})
+        scene_type.setdefault("fields", []).extend(["value_at_stake", "scene_beats", "private_note"])
+        self.service._write_yaml(schema_path, data)
+
+    def test_draft_scene_sends_every_field_the_author_designed(self) -> None:
+        self._add_scene_design_fields()
+        self._set(self.scene_ids[0], summary="Honor leaves the station.",
+                  dynamics="Honor is curt.", value_at_stake="duty / self",
+                  scene_beats=["She packs.", "TURN: She refuses the posting."],
+                  private_note="remember to cut this", pov_mode="first", tense="past")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("## This scene: Opening\nHonor leaves the station.", text)
+        self.assertIn("### Dynamics", text)
+        self.assertIn("Honor is curt.", text)
+        self.assertIn("### Value at stake", text)
+        self.assertIn("_The human value this scene turns._", text)
+        self.assertIn("1. She packs.\n2. TURN: She refuses the posting.", text)
+        self.assertNotIn("remember to cut this", text)  # not for the AI
+        self.assertNotIn("### Tense", text)  # narration is Prose style's, not the brief's
+        self.assertNotIn("### Status", text)  # bookkeeping
+        self.assertIn("every beat, in their order", text)
+
     def test_draft_scene_names_the_pov_character_inherited_from_the_act(self) -> None:
         self._set(self.act.scene_id, kind="container", pov_mode="third_limited", pov=self.honor.id)
         self._set(self.scene_ids[0], summary="Honor leaves the station.")

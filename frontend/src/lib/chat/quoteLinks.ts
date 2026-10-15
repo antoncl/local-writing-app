@@ -122,3 +122,11 @@ export function linkQuotes(html: string, plain: string): string {
   }
   return body.innerHTML;
 }
+
+/** Whether a chat's replies ARE the scene's prose rather than talk about it
+ *  (#2513): its field contract writes the subject's `body` (Draft scene). Such
+ *  a reply repeats the scene's own lines, so linking its quotes would mark the
+ *  draft's dialogue as references back into the scene. */
+export function chatWritesProse(fieldContractStored: readonly Record<string, unknown>[]): boolean {
+  return fieldContractStored.some((f) => f.id === "body");
+}

@@ -274,9 +274,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         """
         roleplay = self.service.read_prompt_entry(self.roleplay_id).body
         for marker in (
-            "project.metadata.tense",
-            "project.metadata.measurement_system",
-            "project.metadata.spelling",
+            # #2513: the effective tense, and the shared settings snippet.
+            "resolved_narration(scene).tense",
+            '{% include "Project settings" %}',
             "character_turns",
         ):
             self.assertIn(marker, roleplay)
@@ -347,7 +347,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         text = out.messages[0].text
         self.assertIn("## Project settings", text)
         # Each setting is its own bullet line (not jammed onto one line).
-        self.assertIn("- Author: Jane Roe\n- Measurement system: metric", text)
+        self.assertIn("- Author: Jane Roe\n- Measurement system: Metric", text)
         # POV / tense are prose-generation settings — excluded here so they don't
         # bleed into metadata-field brainstorms (#1076).
         self.assertNotIn("Narrative POV", text)
@@ -574,7 +574,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         text = out.messages[0].text
         self.assertIn("## Prose style", text)
         # Each setting is its own bullet line (not jammed onto one line).
-        self.assertIn("- Narrative POV: first\n- Tense: past", text)
+        self.assertIn("- Narrative POV: First person\n- Tense: Past", text)
         self.assertNotIn("Jane Roe", text)  # general facts stay out of the prose snippet
 
     def test_prose_settings_snippet_prefers_scene_over_project(self) -> None:
@@ -618,8 +618,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         text = out.messages[0].text
         # Scene override wins for pov_mode; project fallback fills the blank tense —
         # each on its own bullet line.
-        self.assertIn("- Narrative POV: third_limited\n- Tense: past", text)
-        self.assertNotIn("first", text)  # the project's pov_mode did NOT win
+        self.assertIn("- Narrative POV: Third person", text)  # by label (#2513)
+        self.assertIn("- Tense: Past", text)
+        self.assertNotIn("First person", text)  # the project's pov_mode did NOT win
 
     def test_project_settings_snippet_is_inert_without_a_project(self) -> None:
         """Rendered in a context that does not define `project` (e.g. the unit
@@ -1079,9 +1080,12 @@ class DraftScenePromptTests(unittest.TestCase):
             "scene_beats": {"name": "Beats", "type": "list", "item_type": "long_text",
                             "description": 'Prefix the beat where the value turns with "TURN:".'},
             "private_note": {"name": "Private note", "type": "text", "ai_proposable": False},
+            "charge_in": {"name": "Charge in", "type": "select",
+                          "options": [{"value": "pos", "label": "Positive"}, {"value": "neg"}]},
         })
         scene_type = data.setdefault("entry_types", {}).setdefault("manuscript:scene", {})
-        scene_type.setdefault("fields", []).extend(["value_at_stake", "scene_beats", "private_note"])
+        scene_type.setdefault("fields", []).extend(
+            ["value_at_stake", "scene_beats", "private_note", "charge_in"])
         self.service._write_yaml(schema_path, data)
 
     def test_draft_scene_sends_every_field_the_author_designed(self) -> None:
@@ -1100,7 +1104,40 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertNotIn("remember to cut this", text)  # not for the AI
         self.assertNotIn("### Tense", text)  # narration is Prose style's, not the brief's
         self.assertNotIn("### Status", text)  # bookkeeping
-        self.assertIn("every beat, in their order", text)
+        self.assertIn("a numbered list is an order to follow", text)
+        # Beat lists are one author's design, not every author's (#2513).
+        self.assertNotIn("beat", self.prompt.body.lower())
+
+    def test_scene_brief_shows_a_select_by_its_label(self) -> None:
+        self._add_scene_design_fields()
+        self._set(self.scene_ids[0], summary="Honor leaves the station.", charge_in="pos")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("### Charge in\nPositive", text)  # #2513: not the stored "pos"
+        self._set(self.scene_ids[0], summary="Honor leaves the station.", charge_in="neg")
+        self.assertIn("### Charge in\nneg", self._preview(self.scene_ids[0]))  # no label → value
+
+    def _roleplay_system(self, scene_id: str) -> str:
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Roleplay"))
+        rendered, _ = build_preview(self.service, PreviewRequest(
+            template_source=prompt.body, target_scene_id=scene_id, session_id=None,
+            inputs={"character": self.honor.id}, text_before="", text_after="", commit=False))
+        return rendered.messages[0].text
+
+    def test_roleplay_tense_is_the_scenes_effective_tense(self) -> None:
+        from app.models import SaveProjectNodeRequest
+
+        current = self.service.read_project_node()
+        self.service.save_project_node(SaveProjectNodeRequest(
+            title=current.title, body="", entry_type=current.entry_type,
+            metadata={"tense": "present", "measurement_system": "metric"}))
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._roleplay_system(self.scene_ids[0])
+        self.assertIn("Write the beat in present tense.", text)  # the book's
+        self.assertIn("- Measurement system: Metric", text)  # the shared snippet
+        self._set(self.act.scene_id, kind="container", tense="past")
+        self.assertIn("Write the beat in past tense.", self._roleplay_system(self.scene_ids[0]))
 
     def test_draft_scene_names_the_pov_character_inherited_from_the_act(self) -> None:
         self._set(self.act.scene_id, kind="container", pov_mode="third_limited", pov=self.honor.id)

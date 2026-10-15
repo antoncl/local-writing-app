@@ -1,6 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { findQuote, linkQuotes, scenePlainText } from "./quoteLinks";
+import { chatWritesProse, findQuote, linkQuotes, scenePlainText } from "./quoteLinks";
+
+describe("chatWritesProse", () => {
+  it("is true only when the chat commits the subject's body", () => {
+    expect(chatWritesProse([{ id: "body" }])).toBe(true);
+    expect(chatWritesProse([{ id: "summary" }, { id: "tags" }])).toBe(false);
+    expect(chatWritesProse([])).toBe(false);
+  });
+});
 
 const SCENE = "She said “the lantern was still burning” — and then nothing more.\nA second block mentions rain on slate.";
 

@@ -21,12 +21,19 @@ entry_type: prompt:snippet
 {%- set ns = namespace(rows=[]) -%}
 {%- for f in fields("project:project") if f.proposable and f.id not in ["color", "pov_mode", "tense"] -%}
 {%- set val = project.metadata.get(f.id) -%}
-{%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, val)] -%}{%- endif -%}
+{%- if val is not none and val != "" -%}
+{#- Shown by option label (#2513): "Metric", not the stored "metric". -#}
+{%- set shown = namespace(parts=[]) -%}
+{%- for v in (val if (val is sequence and val is not string) else [val]) -%}
+{%- set shown.parts = shown.parts + [f.option_labels.get(v, v) | string] -%}
+{%- endfor -%}
+{%- set ns.rows = ns.rows + [(f.label, shown.parts | join(", "))] -%}
+{%- endif -%}
 {%- endfor -%}
 {%- if ns.rows %}
 ## Project settings
 Honor these project-wide settings in everything you write.
-{% for label, val in ns.rows %}- {{ label }}: {{ (val | join(", ")) if (val is sequence and val is not string) else val }}
+{% for label, val in ns.rows %}- {{ label }}: {{ val }}
 {% endfor %}
 
 {% endif -%}

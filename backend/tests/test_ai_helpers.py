@@ -331,14 +331,16 @@ class ResolvedNarrationHelperTests(_HelperFixtureBase):
 
         # A character-bearing mode keeps the resolved character.
         rc = {"pov_mode": {"value": "third_limited"}, "pov": {"value": "char_x"}}
-        self.assertEqual(resolved_narration(rc), {"mode": "third_limited", "character": "char_x"})
+        self.assertEqual(resolved_narration(rc), {"mode": "third_limited", "character": "char_x", "tense": None})
         # Omniscient / objective have no viewpoint character — dropped.
         for mode in ("third_omniscient", "third_objective"):
             rc = {"pov_mode": {"value": mode}, "pov": {"value": "char_x"}}
-            self.assertEqual(resolved_narration(rc), {"mode": mode, "character": None})
+            self.assertEqual(resolved_narration(rc), {"mode": mode, "character": None, "tense": None})
         # Unset all the way down → both None (never raises).
-        self.assertEqual(resolved_narration(None), {"mode": None, "character": None})
-        self.assertEqual(resolved_narration({}), {"mode": None, "character": None})
+        self.assertEqual(resolved_narration(None), {"mode": None, "character": None, "tense": None})
+        self.assertEqual(resolved_narration({}), {"mode": None, "character": None, "tense": None})
+        # Tense folds the same way (#2513).
+        self.assertEqual(resolved_narration({"tense": {"value": "past"}})["tense"], "past")
 
     def test_resolved_narration_global_folds_to_the_character(self) -> None:
         # The global is registered and resolves the scene's POV off resolved_cascade

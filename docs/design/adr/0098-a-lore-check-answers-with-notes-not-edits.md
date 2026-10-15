@@ -1,7 +1,7 @@
 # ADR-0098: A lore check answers with notes, not edits
 
 **Status:** Living draft (2026-10-14) — #2488
-**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2).
+**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2), #2492 (S3).
 
 ### How this ADR is kept
 

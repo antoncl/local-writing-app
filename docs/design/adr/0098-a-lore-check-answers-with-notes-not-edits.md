@@ -1,20 +1,9 @@
 # ADR-0098: A lore check answers with notes, not edits
 
-**Status:** Living draft (2026-10-14) — #2488
-**Context verified against `ecea329d` (2026-10-14), the code before the feature.** Slices built: #2490 (S1), #2491 (S2), #2492 (S3), #2488 (S4: links from the scene's references; the unnamed-lore measurement).
+**Status:** Accepted — 2026-10-15, Anton Lauridsen, after the feature was built against it as a living draft (2026-10-14 → 2026-10-15). Text by Claude from conversations with Anton that began with the Ollama tool-use brainstorm. Issue #2488; slices #2490 (S1: notes end to end), #2491 (S2: lore as of the selection), #2492 (S3: authoring notes prompts), #2488 (S4: links from the scene's references; the unnamed-lore measurement).
+**Context verified against `ecea329d` (2026-10-14), the code before the feature.**
 
-### How this ADR is kept
-
-This ADR is a living draft while the feature is built. It is approved once the design and the feature set have settled, not before the first slice.
-- Each slice's PR rewrites the decisions it changes in place and adds itself to the slice list above. There are no amendment sections while the draft is live.
-- The Context stays pinned to the commit the design started from: it describes what the feature was built on, not the code after it.
-- On approval the status becomes Accepted, and from then on a change is an amendment, as for any ADR.
-
-**Settled:** a check answers with notes, never edits; nothing is written; a note names its entry by id; notes and edits share one review surface; the check is offered on scenes.
-
-**Settled since the #2488 measurement:** how the check gathers its lore — names, their links, the scene's references and their links, and the writer's picks (decision 6); no tool calling (decision 9).
-
-**Open:** nothing in the design. Tool lookups remain a deferred option with a stated condition (Deferred).
+While a living draft, each slice rewrote the decisions it changed in place; from this approval on, a change is an amendment, as for any ADR.
 
 ## Context
 

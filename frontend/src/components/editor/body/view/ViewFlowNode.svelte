@@ -14,17 +14,17 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import ViewOutputGroups from "./ViewOutputGroups.svelte";
   import { defaultFilterKind, inputArity, isInactiveParamNode, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { tagById } from "@/lib/stores/tagNodes";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { buildRefResolver } from "@/lib/utils/refResolve";
   import { toMultiValued } from "@/lib/views/viewParams";
-  import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
-  import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
+  import { isSortableField } from "@/lib/views/fieldAccess";
   import { moveAt, removeAt, updateAt } from "@/lib/utils/listEdits";
   import { useDesignerContext } from "./designerContext";
-  import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
+  import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
@@ -450,111 +450,7 @@
   function commitHandles(next: ViewHandle[]) {
     patch({ handles: next });
   }
-  function nextHandleId(list: ViewHandle[]): string {
-    let max = 0;
-    for (const h of list) {
-      const m = /^h(\d+)$/.exec(h.id);
-      if (m) max = Math.max(max, Number(m[1]));
-    }
-    return `h${max + 1}`;
-  }
-  function addHandle() {
-    const list = [...handles];
-    commitHandles([...list, { id: nextHandleId(list), name: "" }]);
-  }
-  function renameHandle(hid: string, name: string) {
-    commitHandles(handles.map((h) => (h.id === hid ? { ...h, name } : h)));
-  }
-  function setHandleColor(hid: string, color: string | null) {
-    commitHandles(handles.map((h) => (h.id === hid ? { ...h, color: color ?? null } : h)));
-  }
-  function removeHandle(hid: string) {
-    if (handles.length <= 1) return; // keep at least one group
-    commitHandles(handles.filter((h) => h.id !== hid));
-  }
-  function moveHandle(hid: string, delta: -1 | 1) {
-    const next = moveAt(handles, handles.findIndex((h) => h.id === hid), delta);
-    if (next) commitHandles(next);
-  }
-
-  // --- organize levels (ADR-0037 §2/§8 + Amendment 1: ν by attribute, owned per
-  // GROUP). Each named group carries its own levels (`ViewHandle.group_by`); the
-  // single/unnamed group keeps the output-node `group_by`. The `organizeSection`
-  // snippet renders the controls for either owner — the handlers below are pure
-  // over a (levels, onCommit) pair so both bindings reuse them.
-  //
-  // Offer only fields the ADR-0037 §2 table sanctions as organize levels:
-  // enum/select, multi-valued (tags / multi-ref), reference fields (real-node
-  // buckets), and the intrinsic `entry_type`. Continuous/identity/freeform
-  // fields (number, computed, color, long_text, title/id) would make one bucket
-  // per value, so they are dropped — mirroring `joinableFields`/`projectFields`.
-  // `boolean` is deliberately excluded: it is not in the §2 table and
-  // `segmentForField` has no label case for it (would render raw true/false).
-  // Tested against the EFFECTIVE type, so a computed field whose declared
-  // `value_type` is groupable (the assistants roster's `listed`, #333) is
-  // offered like any other — `type: "computed"` states authorship, not shape,
-  // and a read-only field is still a perfectly good bucket key.
-  const GROUPABLE_TYPES: string[] = ["select", "multi_select", "entity_ref", "entity_ref_list"];
-  let groupableFields = $derived(
-    nodeFields.filter(
-      (f) =>
-        f.key === "entry_type" ||
-        (f.def.category !== "intrinsic" && GROUPABLE_TYPES.includes(effectiveFieldType(f.def) ?? "")),
-    ),
-  );
-  // A stored level may name a field the roster can't currently offer — e.g. a
-  // field hidden since the level was authored. Show its raw key rather than a
-  // blank <select>; the level is preserved exactly as stored (display-only).
-  function levelLabel(field: string): string {
-    return groupableFields.find((f) => f.key === field)?.name ?? field;
-  }
-  // Per-list helpers (each group organizes independently, so used-field sets and
-  // add-availability are computed against *that* group's levels). The `used` set
-  // is built ONCE per group by the `organizeSection` snippet and threaded through
-  // — `canAddLevel`/`levelOptions` are called per level row, so recomputing the
-  // Set inside each would be O(levels²) work every render.
-  function usedFields(levels: ViewGroupByLevel[]): Set<string> {
-    return new Set(levels.map((l) => l.field));
-  }
-  function canAddLevel(used: Set<string>): boolean {
-    return groupableFields.some((f) => !used.has(f.key));
-  }
-  // A level's own <select> offers the unused groupable fields plus its own
-  // current field — so the no-duplicate-levels contract can't be bypassed by
-  // re-pointing a row at an already-used field.
-  function levelOptions(used: Set<string>, current: string): typeof groupableFields {
-    return groupableFields.filter((f) => f.key === current || !used.has(f.key));
-  }
-  // Pure mutators over one owner's levels list; each calls that owner's commit.
-  type LevelCommit = (next: ViewGroupByLevel[]) => void;
-  function addLevelTo(levels: ViewGroupByLevel[], commit: LevelCommit) {
-    const pick = groupableFields.find((f) => !usedFields(levels).has(f.key));
-    if (pick) commit([...levels, { field: pick.key }]);
-  }
-  // `setLevelField` / `toggleLevelOrder` are pure and unit-tested in
-  // groupLevelEdits.test.ts — the show_empty-preservation invariant (#374)
-  // lives there, not in these thin commit wrappers.
-  function setLevelFieldAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, field: string) {
-    commit(setLevelField(levels, i, field));
-  }
-  function toggleLevelOrderAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
-    commit(toggleLevelOrder(levels, i));
-  }
-  function removeLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
-    commit(removeAt(levels, i));
-  }
-  function moveLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, delta: -1 | 1) {
-    const next = moveAt(levels, i, delta);
-    if (next) commit(next);
-  }
-  // Organize is ALWAYS owned by a handle (ADR-0037 Amendment 1), including the
-  // single/unnamed group (the synthetic `in` handle). One uniform binding — no
-  // single-vs-grouped switch — so a group + its Organize move, add, and delete as
-  // one unit (graphToSpec lowers a lone handle's `group_by` to `ViewSpec.group_by`).
-  function commitHandleLevels(hid: string): LevelCommit {
-    return (next) =>
-      commitHandles(handles.map((h) => (h.id === hid ? { ...h, group_by: next.length > 0 ? next : undefined } : h)));
-  }
+  // The group editor itself (rename/colour/reorder, Organize levels) is ViewOutputGroups.
 </script>
 
 <!-- Base slot widgets (§C): a slot's typed picker, parametrized by value + setter
@@ -647,52 +543,6 @@
   {/if}
 {/snippet}
 
-
-{#snippet organizeSection(levels: ViewGroupByLevel[], commit: LevelCommit)}
-  <!-- Organize levels (ADR-0037 §8 + Amendment 1): ordered group-by dropdowns
-       for ONE group (a named handle, or the single/unnamed group). Node config,
-       not graph shape — so no canvas node competes with Nest. -->
-  {@const used = usedFields(levels)}
-  <div class="organize">
-    <div class="org-head">Organize</div>
-    {#each levels as level, i (i)}
-      <div class="handle-row">
-        <select
-          class="vfield lname"
-          value={level.field}
-          onchange={(e) => setLevelFieldAt(levels, commit, i, e.currentTarget.value)}
-          aria-label={`Organize level ${i + 1} field`}
-        >
-          {#if !groupableFields.some((f) => f.key === level.field)}
-            <option value={level.field}>{levelLabel(level.field)}</option>
-          {/if}
-          {#each levelOptions(used, level.field) as f (f.key)}
-            <option value={f.key}>{f.name}</option>
-          {/each}
-        </select>
-        <button
-          type="button"
-          class="hbtn"
-          class:on={level.order === "label"}
-          title="Sort buckets A–Z (otherwise by first appearance)"
-          aria-label="Toggle alphabetical bucket order"
-          aria-pressed={level.order === "label"}
-          onclick={() => toggleLevelOrderAt(levels, commit, i)}>A–Z</button
-        >
-        <button class="hbtn" type="button" title="Move level up" aria-label="Move level up" disabled={i === 0} onclick={() => moveLevelAt(levels, commit, i, -1)}>↑</button>
-        <button class="hbtn" type="button" title="Move level down" aria-label="Move level down" disabled={i === levels.length - 1} onclick={() => moveLevelAt(levels, commit, i, 1)}>↓</button>
-        <button class="hbtn del" type="button" title="Remove level" aria-label="Remove level" onclick={() => removeLevelAt(levels, commit, i)}>×</button>
-      </div>
-    {/each}
-    {#if groupableFields.length > 0}
-      <button class="add-handle" type="button" title="Add organize level" aria-label="Add organize level" disabled={!canAddLevel(used)} onclick={() => addLevelTo(levels, commit)}>
-        + Organize by…
-      </button>
-    {:else if levels.length === 0}
-      <p class="vhint org-empty">No groupable fields on this kind.</p>
-    {/if}
-  </div>
-{/snippet}
 
 <!-- Field predicate slot (§C uniform): field + op selects, then the value slot
      as literal | promoted formal | wired source — the same three modes every
@@ -812,42 +662,7 @@
        keep interacting with any config control from dragging/selecting the node
        (Svelte Flow acts on pointerdown; picker menus portal to <body>). -->
   {#if kind === "output"}
-  <!-- Output groups render in BOTH states (§240 / Wiring Desk) so each handle
-       sits ON its group's name row: at rest a read-only name row, expanded the
-       full group editor. The handle lives inside the row, so Svelte Flow aligns
-       it (and its wire) to that row instead of an even spread down the node. -->
-  <div class="handles nodrag" role="presentation" use:stopPointerdown>
-    {#each handles as h, i (h.id)}
-      <div class="group-block">
-        <div class="handle-row group-row">
-          <Handle type="target" position={Position.Left} id={h.id} class={portClass("port port-h", h.id)} />
-          {#if isExpanded}
-            <input
-              class="vfield hname"
-              type="text"
-              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
-              value={h.name}
-              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
-            />
-            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
-            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
-            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
-            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
-          {:else}
-            <span class="group-name">{h.name || (handles.length > 1 ? `Group ${i + 1}` : "All results")}</span>
-          {/if}
-        </div>
-        {#if isExpanded}
-          <div class="group-organize">
-            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
-          </div>
-        {/if}
-      </div>
-    {/each}
-    {#if isExpanded}
-      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
-    {/if}
-  </div>
+  <ViewOutputGroups {handles} {isExpanded} {nodeFields} {portClass} onCommitHandles={commitHandles} />
   {:else if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if rosterWarnText}
@@ -1291,44 +1106,10 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
-  /* named-handle (group) editor on the View node */
-  /* The output node's group list (§240). No left padding so each group's handle
-     sits at the node's left edge; the row content is indented to clear it + the
-     stripe. A header divider matches the other nodes' expanded configs. */
-  .handles {
-    padding: 6px 8px 8px 0;
-    border-top: 1px solid var(--divider);
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .handles > .add-handle {
-    margin-left: 15px;
-  }
   .handle-row {
     display: flex;
     align-items: center;
     gap: 4px;
-  }
-  /* Each group row owns its handle (positioned at the node edge) so the port
-     lines up with the group name — at rest and expanded. */
-  .group-row {
-    position: relative;
-    padding-left: 15px;
-  }
-  .group-name {
-    flex: 1;
-    min-width: 0;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .handle-row .hname {
-    margin: 0;
-    flex: 1;
-    width: auto;
-    min-width: 0;
   }
   .hbtn {
     border: 1px solid var(--border);
@@ -1364,27 +1145,8 @@
     opacity: 0.4;
     cursor: default;
   }
-  /* A group = its handle row + (when there are 2+ groups) its own Organize
-     (ADR-0037 Amendment 1). The Organize is indented under the row with a left
-     rule so it reads as belonging to that group, not to the result. */
-  .group-block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .group-organize {
-    margin-left: 14px;
-    border-left: 2px solid var(--border);
-    padding-left: 6px;
-  }
-  .group-organize .organize {
-    border-top: none;
-    margin-top: 0;
-    padding: 2px 0 4px;
-  }
-  /* Organize levels (ADR-0037 §8) — for the single/unnamed group, sits below the
-     lone handle, separated by a hairline so "which group" reads distinctly from
-     "how to organize within it". */
+  /* Sorter key list (the output node's group editor lives in ViewOutputGroups,
+     which carries its own copy of these shared rules). */
   .organize {
     padding: 8px 8px 8px;
     margin-top: 2px;
@@ -1403,10 +1165,6 @@
     flex: 1;
     width: auto;
     min-width: 0;
-  }
-  .hbtn.on {
-    color: var(--accent);
-    border-color: var(--accent);
   }
   .org-empty {
     margin: 0;

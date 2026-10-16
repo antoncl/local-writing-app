@@ -19,7 +19,6 @@
   import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
-  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import type {
     AssistantEntrySummary,
     NodePickerConfig,
@@ -31,13 +30,10 @@
     StructureDocument,
     StructureNode,
     TagEntry,
-    ViewExpr,
-    ViewSpec,
   } from "@/lib/types";
   import {
     buildInstanceColorMap,
     hexForRef,
-    stripeForType,
     stripeForNode,
   } from "@/lib/utils/pickerStripes";
   import { allowedTypeSet as allowedTypesFor, loreEntryRef, pickerMembership } from "@/lib/utils/pickerSources";
@@ -45,19 +41,9 @@
   import { currentNodeDrag, dropPick, readNodeDrag, type DropPickOptions } from "@/lib/nodeDrag";
   import { findStructureNodeById, isLeafNode } from "@/lib/utils/treeHelpers";
   import { createTargetFor, hasTitleMatch } from "@/lib/utils/pickerCreate";
-  import { buildSelectorRoster, isSelectorRef, membersForSelector, resolveSelector } from "@/lib/views/pickerSelectors";
-  import { walkViewExpr } from "@/lib/views/walkViewExpr";
-  import { LOOSE_CARDS_REF_ID, plotPickerSelectorRefs } from "@/lib/plot/plotPickerSelectors";
-  import {
-    flattenSelectors,
-    memberCountForRef,
-    membersUnderMatchingBuckets,
-    toggleSelectorBucket,
-    toggleSelectorGroup,
-    toggleSelectorMember,
-    type SelectorGroup,
-    type SelectorRow,
-  } from "@/lib/utils/selectorPickTree";
+  import { buildSelectorRoster, isSelectorRef } from "@/lib/views/pickerSelectors";
+  import { memberCountForRef, toggleInSet } from "@/lib/utils/selectorPickTree";
+  import { NodePickerSelectors } from "@/lib/widgets/nodePickerSelectors.svelte";
   import {
     isSearchActive,
     matchesEntry,
@@ -404,231 +390,39 @@
     buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries }),
   );
 
-  // Saved views (ADR-0074 Amendment 3): offered app-wide, like the "By tag" axis
-  // below — for every allowed kind, each saved view of that kind (its members
-  // clipped to the input's entry types where that can be done faithfully). NOT
-  // curated per input (that config source is retired), so a built-in snippet's
-  // picker offers views without naming project-specific view ids. Read from the
-  // `paneViews` roster (loaded app-wide at project open, refreshed on view CRUD)
-  // — no fetch, exactly as the By-tag axis reads the tag store; a view is grouped
-  // under its own `view_kind`, and system default views are excluded like the
-  // ViewSwitcher does.
-  //
-  // The clip is `{intersect: [view expr, type constraint]}` — the shape
-  // `tagSpecFor` uses — but ONLY for a flat single-`expr` view, where that is
-  // exactly "the view's members ∩ those types". A view with named `groups` (no
-  // top-level `expr` to intersect), a null `expr`, or a relational/row op
-  // (`nest`/`field_of`/`orphans_of`/`var`) is carried WHOLE and scoped by kind
-  // only: there is no single spec for "(grouped or row result) ∩ type", and
-  // rewriting one would drop handles or diverge from set intersection. The stored
-  // spec drives invocation-time expansion, so whatever clip applies lives in it.
-  const NON_FLAT_EXPR_KEYS = ["nest", "orphans_nest", "field_of", "orphans_of", "var"] as const;
-  function exprIsFlat(expr: ViewSpec["expr"]): boolean {
-    let flat = true;
-    walkViewExpr(expr, (e) => {
-      if (NON_FLAT_EXPR_KEYS.some((k) => (e as Record<string, unknown>)[k] != null)) flat = false;
-    });
-    return flat;
-  }
-  // Per-type scope is TRI-STATE (ADR-0074 Amendment 4, #1947): each allowed
-  // entry_type is EXACT (`{type: fqn}`) or FAMILY (`{descendants_of: fqn}`, self +
-  // subtypes), per `membership.families`. `typeScopeExpr` builds the leaf/union the
-  // selector specs (By tag / Saved views) intersect; `allowedTypeSet` widens a
-  // family fqn to its concrete descendants for the concrete-browse
-  // `.has(entry_type)` filters. Both honor the stored leaf — a `{type:
-  // lore:character}` scope excludes a deity, a `{descendants_of: lore:character}`
-  // scope includes it (the #1945 case, now author-controlled per type).
-  function typeScopeExpr(kind: string): ViewExpr | null {
-    const fqns = membership.entryTypes[kind] ?? [];
-    if (fqns.length === 0) return null;
-    const fam = new Set(membership.families[kind] ?? []);
-    const leaf = (fqn: string): ViewExpr => (fam.has(fqn) ? { descendants_of: fqn } : { type: fqn });
-    return fqns.length === 1 ? leaf(fqns[0]) : { union: fqns.map(leaf) };
-  }
+  // The three selector axes (Saved views / By tag / Plot) live in
+  // `lib/widgets/nodePickerSelectors.svelte.ts`; `typeScopeExpr` there builds the
+  // per-type scope they intersect. `allowedTypeSet` widens a family fqn (ADR-0074
+  // Amendment 4, #1947) to its concrete descendants for the concrete-browse
+  // `.has(entry_type)` filters below.
   function allowedTypeSet(kind: string): Set<string> {
     return allowedTypesFor(membership, metadataSchema ?? null, kind);
   }
-  function viewSelectorSpec(kind: string, spec: ViewSpec): ViewSpec {
-    const typeExpr = typeScopeExpr(kind);
-    if (typeExpr && spec.expr && !spec.groups?.length && exprIsFlat(spec.expr)) {
-      return { ...spec, kind, expr: { intersect: [spec.expr, typeExpr] } } as ViewSpec;
-    }
-    return { ...spec, kind } as ViewSpec;
-  }
-  const viewGroups = $derived.by<SelectorGroup[]>(() => {
-    if (!allowSelectors) return []; // selector axis — context_pick only (#1940)
-    const groups: SelectorGroup[] = [];
-    for (const kind of allowedKinds) {
-      for (const summary of paneViews.viewsFor(kind)) {
-        // Skip the read-only system default view (ADR-0036 §5) — it's the pane's
-        // implicit "everything" default, not a user selection, and ViewSwitcher
-        // excludes it the same way (`!v.system`). No spec ⇒ nothing to resolve.
-        if (!summary.spec || summary.system) continue;
-        const ref: NodePickerRef = {
-          id: `view:${summary.id}`,
-          kind: "view",
-          title: summary.title,
-          selector: viewSelectorSpec(kind, summary.spec),
-        };
-        // #2329: keep the view's own arrangement (buckets / nest parents) too, so
-        // its members list the way the view shows them; picking reads `members`.
-        const { members, tree } = resolveSelector(ref, selectorRoster);
-        // Skip a view that resolves to nothing — an empty, pickable row is noise.
-        // Mirrors tagGroups (and drops a null-`expr` view: the empty set).
-        if (members.length > 0) groups.push({ ref, members, tree });
-      }
-    }
-    return groups;
-  });
-
-  // Tags: every tag-kind vocabulary (ADR-0082 — `tag_nodes.ts` roster, loaded
-  // app-wide into tagNodesStore) becomes per-kind tag selectors ({kind, expr:
-  // {tagged: tag.id}}) — not just the general `tag:tag` vocabulary; a
-  // user-authored one (e.g. `tag:motifs`) is first-class too. Most context_pick
-  // inputs target one kind, so this is usually just "the tags". Read from the
-  // store, not a fetch — no network on the picker's own account. `tag:
-  // assistant_tag` is the one exclusion: a separate vocabulary (the assistant
-  // strip's own TAG control, viewParams.ts) that never belongs to a lore/scene
-  // roster filter. A vocabulary with zero members of the allowed kind is
-  // already dropped below (the members guard), so no scope list is needed here.
-  // `liveTags` (ADR-0082 §5): a merged tag left every picker the moment it
-  // merged — including this "By tag" axis, which would otherwise offer a
-  // dead selector no longer distinguishable from its survivor.
+  // Tags are read off the `$liveTags` store (ADR-0082 §5: a merged tag left every
+  // picker the moment it merged); `tag:assistant_tag` is the one exclusion — a
+  // separate vocabulary (the assistant strip's own TAG control, viewParams.ts)
+  // that never belongs to a lore/scene roster filter.
   const tagNodes = $derived($liveTags.filter((t) => t.entry_type !== "tag:assistant_tag"));
-  // A `tagged` leaf INTERSECTED with the kind's per-type scope (`typeScopeExpr`),
-  // so a tag can't over-match past the picker's scope (a lore:character input must
-  // not pull in a lore:location sharing the tag). The scope honors each type's
-  // stored leaf (exact `{type}` vs family `{descendants_of}`), so a family-scoped
-  // lore:character includes a lore:character:deity tagged the same, while an
-  // exact-scoped one does not. The stored spec drives invocation expansion too, so
-  // the constraint lives in it.
-  function tagSpecFor(kind: string, tagId: string): ViewSpec {
-    const typeExpr = typeScopeExpr(kind);
-    const expr = typeExpr ? { intersect: [{ tagged: tagId }, typeExpr] } : { tagged: tagId };
-    return { kind, expr } as ViewSpec;
-  }
-  const tagGroups = $derived.by<SelectorGroup[]>(() => {
-    if (!allowSelectors) return []; // selector axis — context_pick only (#1940)
-    const groups: SelectorGroup[] = [];
-    for (const kind of allowedKinds) {
-      for (const tag of tagNodes) {
-        // The `tagged:` id scheme (not `tag:${name}` — that collides with the
-        // `kind:key` entry_type FQN prefix, ADR-0082 §4).
-        const ref: NodePickerRef = {
-          id: `tagged:${kind}:${tag.id}`,
-          kind: "tag",
-          title: tag.title,
-          selector: tagSpecFor(kind, tag.id),
-        };
-        const members = membersForSelector(ref, selectorRoster);
-        // Skip a tag that resolves to nothing (a kind with no roster, or zero
-        // members of the kind) — an empty, pickable row is noise.
-        if (members.length > 0) groups.push({ ref, members });
-      }
-    }
-    return groups;
+  // Getters (not copies): `search` is bound to the popover, `value` / `allowedKinds`
+  // are live props — the controller re-reads them inside its deriveds.
+  const selectors = new NodePickerSelectors({
+    membership: () => membership,
+    allowedKinds: () => allowedKinds,
+    allowSelectors: () => allowSelectors,
+    plotEntries: () => plotEntries,
+    tags: () => tagNodes,
+    value: () => value,
+    search: () => search,
+    parsedSearch: () => parsedSearch,
+    selectorRoster: () => selectorRoster,
+    schema: () => metadataSchema ?? null,
+    instanceColorFor,
+    onChange: (detail) => onChange?.(detail),
   });
 
-  // The Plot axis: the ADR-0074 6th container shape (ADR-0048 plot) — one live
-  // card selector per plotline, per deck, plus "Loose cards" for the rest (#2439;
-  // lib/plot/plotPickerSelectors). The plot roster is cards (buildSelectorRoster),
-  // so each resolves to its current cards, live. Plotlines and decks stay even
-  // when empty (authored containers); an empty loose bucket is dropped.
-  const plotlineGroups = $derived.by<SelectorGroup[]>(() => {
-    if (!allowSelectors || !allowedKinds.includes("plot")) return []; // selector axis — context_pick only (#1940)
-    return plotPickerSelectorRefs(plotEntries)
-      .map((ref) => ({ ref, members: membersForSelector(ref, selectorRoster) }))
-      .filter((g) => g.ref.id !== LOOSE_CARDS_REF_ID || g.members.length > 0);
-  });
-
-  // Every selector group, for the picked-chip live counts.
-  const selectorGroups = $derived([...viewGroups, ...tagGroups, ...plotlineGroups]);
-
-  function toggleInSet(set: Set<string>, id: string): Set<string> {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
-  }
-  // Selector groups collapse by default too (#1520): the panel opens on the
-  // container level (a list of tags / views / plotlines), members hidden until
-  // expanded. `collapsed = allGroupIds \ userExpanded`.
-  function collapsedFrom(groups: SelectorGroup[], expanded: Set<string>): Set<string> {
-    return new Set(groups.map((g) => g.ref.id).filter((id) => !expanded.has(id)));
-  }
-  let expandedViewIds = $state<Set<string>>(new Set());
-  let expandedTagIds = $state<Set<string>>(new Set());
-  let expandedPlotlineIds = $state<Set<string>>(new Set());
-  function toggleViewCollapse(id: string) {
-    expandedViewIds = toggleInSet(expandedViewIds, id);
-  }
-  function toggleTagCollapse(id: string) {
-    expandedTagIds = toggleInSet(expandedTagIds, id);
-  }
-  function togglePlotlineCollapse(id: string) {
-    expandedPlotlineIds = toggleInSet(expandedPlotlineIds, id);
-  }
-  // A view's buckets / nest parents (#2329) open by default once the view is
-  // expanded — the view row is the collapsed-by-default level; this set records
-  // the tree rows the user folded.
-  let collapsedViewTreeKeys = $state<Set<string>>(new Set());
-  function toggleViewRowCollapse(row: SelectorRow) {
-    if (row.isSelector) toggleViewCollapse(row.id);
-    else collapsedViewTreeKeys = toggleInSet(collapsedViewTreeKeys, row.key);
-  }
-  const collapsedViewIds = $derived(
-    new Set([...collapsedFrom(viewGroups, expandedViewIds), ...collapsedViewTreeKeys]),
-  );
-  const collapsedTagIds = $derived(collapsedFrom(tagGroups, expandedTagIds));
-  const collapsedPlotlineIds = $derived(collapsedFrom(plotlineGroups, expandedPlotlineIds));
-
-  // Search + flatten, shared by both selector sections: a selector survives only
-  // if its title matches (whole member set shows) or a member matches (just
-  // those), so a non-matching selector never inflates the counter. Members carry
-  // no tags, so a `#tag` restrictor matches by title.
-  function selectorRowsFor(groups: SelectorGroup[], collapsedIds: Set<string>): SelectorRow[] {
-    if (groups.length === 0) return [];
-    if (!isSearchActive(search)) return flattenSelectors(groups, value, collapsedIds);
-    const searched: SelectorGroup[] = [];
-    for (const g of groups) {
-      if (matchesEntry({ title: g.ref.title }, parsedSearch)) {
-        searched.push(g);
-        continue;
-      }
-      // A member matches by its title — or by the name of a view group it sits
-      // in (#2329), so searching "Draft" surfaces a status view's Draft group.
-      const underGroup = new Set(
-        membersUnderMatchingBuckets(g.tree ?? [], (label) => matchesEntry({ title: label }, parsedSearch)).map(
-          (m) => `${m.kind}:${m.id}`,
-        ),
-      );
-      const members = g.members.filter(
-        (m) => underGroup.has(`${m.kind}:${m.id}`) || matchesEntry({ title: m.title }, parsedSearch),
-      );
-      if (members.length > 0) searched.push({ ref: g.ref, members, tree: g.tree });
-    }
-    return flattenSelectors(searched, value, collapsedIds, { expandAll: true });
-  }
-  const viewRows = $derived(selectorRowsFor(viewGroups, collapsedViewIds));
-  const tagRows = $derived(selectorRowsFor(tagGroups, collapsedTagIds));
-  const plotlineRows = $derived(selectorRowsFor(plotlineGroups, collapsedPlotlineIds));
-
-  // Toggle a selector row (container or member) against its group set.
-  function toggleSelectorRow(row: SelectorRow, groups: SelectorGroup[]) {
-    const g = groups.find((x) => x.ref.id === (row.memberOf ?? row.id));
-    if (!g) return;
-    if (row.isSelector) {
-      onChange?.({ value: toggleSelectorGroup(value, g) });
-    } else if (row.bucketMembers) {
-      onChange?.({ value: toggleSelectorBucket(value, g, row.bucketMembers) });
-    } else {
-      const m = g.members.find((x) => x.id === row.id);
-      if (m) onChange?.({ value: toggleSelectorMember(value, g, m) });
-    }
-  }
-
-  // Normalize each tri-state source to PickTree rows with bound handlers, so the
-  // shared PickTree renders every source uniformly (NodeRow + PickCheck + stripe).
+  // Normalize the manuscript tri-state source to PickTree rows with bound handlers
+  // (the selector axes' rows come from the controller), so the shared PickTree
+  // renders every source uniformly (NodeRow + PickCheck + stripe).
   const manuscriptTreeRows = $derived<PickTreeRow[]>(
     manuscriptRows.map((row) => ({
       key: row.id,
@@ -647,47 +441,6 @@
       onToggle: () => toggleManuscriptPick(row.id),
       onCollapse: () => toggleManuscriptCollapse(row.id),
     })),
-  );
-  function selectorTreeRows(
-    rows: SelectorRow[],
-    groups: SelectorGroup[],
-    onCollapse: (row: SelectorRow) => void,
-    countNoun: string,
-    countNounPlural?: string,
-  ): PickTreeRow[] {
-    return rows.map((row) => ({
-      key: row.key,
-      depth: row.depth,
-      hasChildren: row.hasChildren,
-      collapsed: row.collapsed,
-      // A view's bucket or nest parent (#2329) is a container too.
-      isContainer: row.isSelector || row.hasChildren,
-      // A bucket header is a section: its title folds it, its check picks its
-      // members (like the Lore entry-type header, #2305).
-      section: row.bucketMembers !== undefined,
-      state: row.state,
-      title: row.title,
-      // A member honours its node's own metadata.color (#1528, so a custom entry
-      // stands out in a tag's list too); a selector container keeps its type
-      // stripe; a bucket is not a node and carries none.
-      stripeColor: row.bucketMembers
-        ? null
-        : row.isSelector
-          ? stripeForType(row.entryType, metadataSchema)
-          : stripeForNode(instanceColorFor(row.entryType?.split(":")[0], row.id), row.entryType, metadataSchema),
-      count: row.isSelector || row.bucketMembers ? row.count : null,
-      countNoun,
-      countNounPlural,
-      onToggle: () => toggleSelectorRow(row, groups),
-      onCollapse: () => onCollapse(row),
-    }));
-  }
-  const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewRowCollapse, "item"));
-  const tagTreeRows = $derived(
-    selectorTreeRows(tagRows, tagGroups, (row) => toggleTagCollapse(row.id), "match", "matches"),
-  );
-  const plotlineTreeRows = $derived(
-    selectorTreeRows(plotlineRows, plotlineGroups, (row) => togglePlotlineCollapse(row.id), "card"),
   );
 
   // Flatten the research tree's notes (leaves) into a searchable list.
@@ -1069,9 +822,9 @@
   const hasAnyResults = $derived(
     visibleGroups.length > 0 ||
       manuscriptRows.length > 0 ||
-      viewRows.length > 0 ||
-      tagRows.length > 0 ||
-      plotlineRows.length > 0,
+      selectors.viewRows.length > 0 ||
+      selectors.tagRows.length > 0 ||
+      selectors.plotlineRows.length > 0,
   );
 
   // Total result count for the search-bar live counter. Reflects the
@@ -1080,9 +833,9 @@
   const totalVisibleItems = $derived(
     visibleGroups.reduce((acc, g) => acc + g.items.length, 0) +
       manuscriptRows.length +
-      viewRows.length +
-      tagRows.length +
-      plotlineRows.length,
+      selectors.viewRows.length +
+      selectors.tagRows.length +
+      selectors.plotlineRows.length,
   );
 
   // A flat kind list (lore / snippet / research / assistant) as leaf PickTree rows —
@@ -1116,10 +869,13 @@
       out.push({ id: "manuscript", label: "Manuscript", count: manuscriptRows[0]?.sceneCount ?? 0, rows: manuscriptTreeRows });
     if (loreTreeRows.length > 0)
       out.push({ id: "lore", label: "Lore", count: flat.get("lore")?.items.length ?? 0, rows: loreTreeRows });
+    const { plotlineTreeRows, tagTreeRows, viewTreeRows } = selectors;
     if (plotlineTreeRows.length > 0)
-      out.push({ id: "plotlines", label: "Plot", count: plotlineGroups.length, rows: plotlineTreeRows });
-    if (tagTreeRows.length > 0) out.push({ id: "tags", label: "By tag", count: tagGroups.length, rows: tagTreeRows });
-    if (viewTreeRows.length > 0) out.push({ id: "views", label: "Saved views", count: viewGroups.length, rows: viewTreeRows });
+      out.push({ id: "plotlines", label: "Plot", count: selectors.plotlineGroups.length, rows: plotlineTreeRows });
+    if (tagTreeRows.length > 0)
+      out.push({ id: "tags", label: "By tag", count: selectors.tagGroups.length, rows: tagTreeRows });
+    if (viewTreeRows.length > 0)
+      out.push({ id: "views", label: "Saved views", count: selectors.viewGroups.length, rows: viewTreeRows });
     for (const g of visibleGroups) {
       if (g.id === "lore") continue; // placed above, in configurator order
       out.push({ id: g.id, label: g.label, count: g.items.length, rows: flatGroupToRows(g.items) });
@@ -1241,7 +997,7 @@
             >
               {#snippet trailing()}
                 {@const mCount = structure ? sceneCountForRef(structure, ref) : null}
-                {@const vCount = memberCountForRef(selectorGroups, ref)}
+                {@const vCount = memberCountForRef(selectors.selectorGroups, ref)}
                 <span
                   class="ctx-type-pill"
                   class:has-color={!!hex}

@@ -22,10 +22,10 @@
   import { chatWritesProse } from "@/lib/chat/quoteLinks";
   import { QuoteSourceController } from "@/lib/chat/quoteSource.svelte";
   import { PlaceFlagsController } from "@/lib/chat/placeFlags.svelte";
+  import { ChatSessionRecord } from "@/lib/chat/chatSessionRecord.svelte";
   import { revealQuoteBeside } from "@/lib/stores/quoteReveal";
   import { api } from "@/lib/api";
   import { lastReportedTurn, lastTurnInputTruncated } from "@/lib/chat/loreFit";
-  import { journalEntryKey } from "@/lib/chat/journal";
   import { createDeltaCoalescer } from "@/lib/chat/deltaCoalescer";
   import {
     chatPromptPickList,
@@ -46,16 +46,12 @@
   import ChatRawReply from "@/components/editor/body/chat/ChatRawReply.svelte";
   import type {
     AssistantEntrySummary,
-    ChangedPick,
     ChatMessage,
     ChatSession,
-    ChatSessionJournalEntry,
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
     PromptEntrySummary,
-    SaveChatSessionRequest,
-    SnapshotPick,
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -140,10 +136,12 @@
   // Re-read when a turn completes, the chat/structure changes, or the open
   // scene is edited (debounced).
   const quoteSource = new QuoteSourceController();
+  // The persisted session fields (subject, lore gate, used-node picks, title, …).
+  const record = new ChatSessionRecord();
   $effect(() => {
     void chatRunning; void chatHistory.length; void structure;
-    void quoteSource.liveDraft(chatSubject);
-    untrack(() => quoteSource.schedule(chatSubject, structure));
+    void quoteSource.liveDraft(record.subject);
+    untrack(() => quoteSource.schedule(record.subject, structure));
   });
 
   // ADR-0100: Place flags on a finished reply (its own module: this file's size cap).
@@ -191,56 +189,12 @@
   let chatSystemPrompt = $state("");
   let chatPromptEntryId = $state("");
   let chatAssistantId = $state("");
-  // Scene this chat was opened against (e.g. "invoke chat prompt" from a
-  // ADR-0051 S5: the node this chat is about. Sent to the render as `subject`;
-  // a scene subject IS the chat's anchored scene, so the backend derives the
-  // `{{ scene }}` binding from it (the old target_scene_id folded into subject).
-  // "" for freeform / Chats-pane chats.
-  let chatSubject = "";
-  // ADR-0055 §4: the mutation set this brainstorm owns (its `staged_set` edge),
-  // set when a commit stages a timeline change (§4a). Echoed on every save so a
-  // per-turn persist never drops it; seeded into the prompt context on resume
-  // (backend, S3). "" until the chat stages a set.
-  let chatStagedSet = "";
-  // ADR-0057 §2: the execution-derived lore gate. Captured from the lock
-  // render's preview response (whether the prompt actually called
-  // relevant_lore()) and echoed on every save so a per-turn persist never
-  // drops it. Drives whether the backend send path injects any lore at all.
-  let chatLoreEnabled = $state(false);
-  // ADR-0092 Amendment 1 §3: the prompt called no_lore() — no always entries, no
-  // automatic lore. Captured and echoed exactly like chatLoreEnabled; hydrated
-  // from the stored chat so a save never resets a lore-free chat.
-  let chatLoreFree = $state(false);
-  // ADR-0060 §2: node ids the prompt selected via use(node). Captured from the
-  // lock render's preview response and echoed on every save, exactly like
-  // chatLoreEnabled — the backend unions them into its one lore selector.
-  let chatUsedNodeIds: string[] = [];
-  // ADR-0060 §5: per-node volatility priors from use(node, hint), mirrored beside
-  // chatUsedNodeIds through the same capture/echo path.
-  let chatUsedNodeHints: Record<string, string> = {};
-  // ADR-0093 §1: `use(node, snapshot=id)` picks, mirrored beside chatUsedNodeIds/
-  // chatUsedNodeHints through the same capture/echo path.
-  let chatUsedSnapshots: SnapshotPick[] = [];
-  // ADR-0067 S2: the field descriptors the prompt registered via field_contract.
-  // Captured from the lock render's preview response and echoed on every save,
-  // mirrored beside chatUsedNodeIds — the commit reads this back instead of
-  // re-rendering a separate extractor. Reactive (#2513): a chat that writes
-  // the scene's prose links no quotes.
-  let chatFieldContractStored = $state.raw<Record<string, unknown>[]>([]);
-  let activeChatTitle = "Untitled chat";
-  let activeChatPinned = false;
-  let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
-  // #1635: picked lore entries edited since the AI last saw them — refreshed
-  // whenever the Context door opens, so the "· edited" marker reflects any
-  // lore edits made since the last preview.
-  let activeChatChangedPicks: ChangedPick[] = $state([]);
-  let activeChatCacheWriteTimes: Record<string, string> = $state({});
-  // Cost is never held here (#1877): the server records each turn's row and
-  // hands back the chat's total on the event that changed it (`done`, the
-  // save response, the extraction response); `chatSession.cost_usd_total`
-  // is assigned from that and the footer reads it. Only the cache-write
-  // slot stamps still ride the next persist.
-  let pendingTurnCacheWriteSlots: string[] = [];
+  // The persisted session fields (subject, staged set, lore gate, used-node
+  // picks, field contract, title, pinned, journal, cache-write stamps) live in
+  // `record` (lib/chat/chatSessionRecord.svelte.ts). Cost is never held here
+  // (#1877): the server records each turn's row and hands back the chat's total
+  // on the event that changed it; `chatSession.cost_usd_total` is assigned from
+  // that and the footer reads it.
 
   // The composer instance, for the imperative clear on send (#1083).
   let composerRef: { setValue: (v: string) => void; focus: () => void } | null = $state(null);
@@ -273,14 +227,14 @@
       activePromptEntry
         ? inputValuesFromDrafts(effectivePromptInputs(activePromptEntry), chatInputDrafts, selectorRoster)
         : {},
-    getSubject: () => chatSubject,
+    getSubject: () => record.subject,
     getAssistantId: () => chatAssistantId,
     mayCaptureLoreGate: () => !isLocked && !chatRunning && !chatSystemPrompt,
     setLoreEnabled: (v) => {
-      chatLoreEnabled = v;
+      record.loreEnabled = v;
     },
     setLoreFree: (v) => {
-      chatLoreFree = v;
+      record.loreFree = v;
     },
   });
   const NO_XML: Record<string, string> = {};
@@ -335,12 +289,12 @@
     },
     // The set this chat already owns, read at stage time so a re-stage refines it
     // in place (singular edge, §4) instead of minting an orphan.
-    getStagedSetId: () => chatStagedSet,
+    getStagedSetId: () => record.stagedSet,
     // ADR-0055 §4: a first stage points the chat's `staged_set` edge at the new
     // pinned set and persists — the chat owns it durably (resumable via the
     // backend's context seeding, S3).
     onStaged: async (setId) => {
-      chatStagedSet = setId;
+      record.stagedSet = setId;
       await persistActiveChat();
     },
     // #983: a create-mode brainstorm launches before its entry exists, so its
@@ -356,7 +310,7 @@
     // refresh), so the entry's Conversations panel lists the chat — with fresh
     // roster rows — without a reload.
     onCreated: async (entryId, entryTitle) => {
-      chatSubject = entryId;
+      record.subject = entryId;
       // Shape-aware seed (#1485): `entry` is a context_pick on commit prompts,
       // and a bare id draft ships "[]" on the wire — the tolerant reader
       // flipped the controller to revise mode while the template still took
@@ -374,10 +328,10 @@
       // never clobbered. syncNodeTitle pushes the persisted title into the
       // pane's tab + header, which otherwise only hydrate on open.
       const promptTitle = activePromptEntry?.title ?? "";
-      const retitle = !!promptTitle && activeChatTitle === promptTitle;
-      if (retitle) activeChatTitle = `${entryTitle} — ${promptTitle}`;
+      const retitle = !!promptTitle && record.title === promptTitle;
+      if (retitle) record.title = `${entryTitle} — ${promptTitle}`;
       await persistActiveChat();
-      if (retitle && scene?.id) editorPanes.syncNodeTitle(scene.id, activeChatTitle);
+      if (retitle && scene?.id) editorPanes.syncNodeTitle(scene.id, record.title);
       void refreshChatSessions();
       refreshReferenceIndexInBackground();
     },
@@ -423,15 +377,15 @@
   async function refreshChangedPicks(): Promise<void> {
     const chatId = scene?.id;
     if (!chatId) {
-      activeChatChangedPicks = [];
+      record.changedPicks = [];
       return;
     }
     try {
       const res = await api.chatChangedPicks(chatId);
       if (scene?.id !== chatId) return; // a switch raced us
-      activeChatChangedPicks = res.picks ?? [];
+      record.changedPicks = res.picks ?? [];
     } catch {
-      activeChatChangedPicks = []; // door degrades to journal-only, never errors
+      record.changedPicks = []; // door degrades to journal-only, never errors
     }
   }
 
@@ -448,20 +402,7 @@
     estimate.reset();
     chatPromptEntryId = "";
     chatAssistantId = "";
-    chatSubject = "";
-    chatStagedSet = "";
-    chatLoreEnabled = false;
-    chatLoreFree = false;
-    chatUsedNodeIds = [];
-    chatUsedNodeHints = {};
-    chatUsedSnapshots = [];
-    chatFieldContractStored = [];
-    activeChatTitle = "Untitled chat";
-    activeChatPinned = false;
-    activeChatJournal = [];
-    activeChatChangedPicks = [];
-    activeChatCacheWriteTimes = {};
-    pendingTurnCacheWriteSlots = [];
+    record.reset();
     chatInputDrafts = {};
     commit.reset();
   }
@@ -470,23 +411,9 @@
   // hydration shape). Copy-not-shared so subsequent saves don't mutate
   // the fetched session object.
   function applyChatSession(session: ChatSession) {
-    activeChatTitle = session.title || "Untitled chat";
-    activeChatPinned = session.pinned;
-    activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
-    activeChatCacheWriteTimes = { ...(session.cache_write_times ?? {}) };
+    record.hydrate(session);
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
-    chatSubject = session.subject || "";
-    chatStagedSet = session.staged_set || "";
-    chatLoreEnabled = session.lore_enabled ?? false;
-    chatLoreFree = session.lore_free ?? false;
-    chatUsedNodeIds = session.used_node_ids ?? [];
-    chatUsedNodeHints = session.used_node_hints ?? {};
-    // ADR-0093 §1: hydration matters here — the save payload always sends
-    // used_snapshots (see currentChatSessionPayload), so a missing hydrate
-    // would wipe a persisted chat's snapshot picks with [] on the next save.
-    chatUsedSnapshots = session.used_snapshots ?? [];
-    chatFieldContractStored = session.field_contract_stored ?? [];
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -510,10 +437,9 @@
     chatError = null;
     chatInput = "";
     chatRewound = false;
-    pendingTurnCacheWriteSlots = [];
     commit.reset();
     // Restore per-prompt input drafts (#654) — the exact inverse of the
-    // encodeChatInputDrafts persist in currentChatSessionPayload. A non-string
+    // encodeChatInputDrafts persist in record.toPayload. A non-string
     // value (a typed seed the launch path wrote before the first persist) is
     // JSON-encoded back into the widget's string form.
     chatInputDrafts = decodeChatInputDrafts(
@@ -583,7 +509,7 @@
     void chatSessions.openChatFromPromptEntry(
       launchPrompt,
       encodeChatInputDrafts(chatInputDrafts),
-      chatSubject || null,
+      record.subject || null,
       { assistantId: chatAssistantId },
     );
   }
@@ -599,74 +525,6 @@
 
   // ---- send / stream / persist (ported from App.svelte) ----
 
-  function deriveChatTitleFromHistory(): string | null {
-    const firstUser = chatHistory.find((m) => m.role === "user");
-    if (!firstUser) return null;
-    const text = firstUser.content.trim().replace(/\s+/g, " ");
-    if (!text) return null;
-    return text.length > 50 ? text.slice(0, 50).trim() + "…" : text;
-  }
-
-  function currentChatSessionPayload(): SaveChatSessionRequest {
-    let title = activeChatTitle || "Untitled chat";
-    if (title === "Untitled chat") {
-      const derived = deriveChatTitleFromHistory();
-      if (derived) title = derived;
-    }
-    const cache_write_slots =
-      pendingTurnCacheWriteSlots.length > 0 ? [...pendingTurnCacheWriteSlots] : undefined;
-    return {
-      title,
-      prompt_entry_id: chatPromptEntryId,
-      assistant_id: chatAssistantId,
-      system_prompt: chatSystemPrompt,
-      // ADR-0051 S5: echo the subject so per-turn saves never drop it (the scene
-      // anchor rides here too, since a scene subject IS the anchored scene).
-      subject: chatSubject,
-      // ADR-0055 §4: echo the owned mutation set so a per-turn save never drops
-      // the edge (mirrors subject; the backend seeds it into context on resume).
-      staged_set: chatStagedSet,
-      // ADR-0057 §2: echo the lore gate, captured at the lock render. Mirrors
-      // subject/staged_set — the backend preserves it when a save omits it, but
-      // we always send the hydrated value so it never drifts.
-      lore_enabled: chatLoreEnabled,
-      lore_free: chatLoreFree,
-      used_node_ids: chatUsedNodeIds,
-      used_node_hints: chatUsedNodeHints,
-      used_snapshots: chatUsedSnapshots,
-      field_contract_stored: chatFieldContractStored,
-      pinned: activeChatPinned,
-      context_items: [],
-      messages: chatHistory.map((m) => ({
-        role: m.role,
-        content: m.content,
-        thinking: m.thinking ?? "",
-        truncated: !!m.truncated,
-        input_truncated: !!m.input_truncated,
-        stopped: !!m.stopped,
-        usage: m.usage ?? null,
-        cost_usd: m.cost_usd ?? null,
-        // ADR-0076 decision 3: per-turn provenance, echoed through like usage/cost.
-        provider: m.provider ?? null,
-        model: m.model ?? null,
-        latency_ms: m.latency_ms ?? null,
-        // ADR-0086 §5: the lore-budget report, echoed through the same way.
-        lore_fit: m.lore_fit ?? null,
-        // S2: the per-turn journal chips must survive a reload — they are the
-        // transcript's ambient auto-context signal now that the journal strip
-        // is gone (the door carries the roster; the chips carry the moments).
-        journal_added: m.journal_added ?? [],
-      })),
-      // Persist the per-input drafts so a chat round-trips its inputs across a
-      // reload (#654) — previously hardcoded `{}`, which the first post-send
-      // persist wrote over `session.inputs`, dropping the launch-seeded values
-      // (a revise brainstorm's `entry`, a create brainstorm's `entry_type`) to
-      // component state only. `applyChatSession` decodes these back into drafts.
-      inputs: encodeChatInputDrafts(chatInputDrafts),
-      cache_write_slots,
-    };
-  }
-
   async function persistActiveChat(): Promise<void> {
     const chatId = scene?.id;
     if (!chatId) return;
@@ -675,14 +533,17 @@
     // racing this one (e.g. setTitleFromPane's debounced rename, ungated by
     // chatRunning) can't re-send them; restored on failure so a failed save
     // doesn't drop the stamp. Cost no longer rides the save at all (#1877).
-    const payload = currentChatSessionPayload();
-    const consumedSlots = pendingTurnCacheWriteSlots;
-    pendingTurnCacheWriteSlots = [];
+    const payload = record.toPayload({
+      history: chatHistory,
+      promptEntryId: chatPromptEntryId,
+      assistantId: chatAssistantId,
+      systemPrompt: chatSystemPrompt,
+      inputDrafts: chatInputDrafts,
+    });
+    const consumedSlots = record.consumeCacheSlots();
     try {
       const saved = await api.saveNode<ChatSession>(chatId, payload);
-      activeChatTitle = saved.title;
-      activeChatPinned = saved.pinned;
-      activeChatCacheWriteTimes = { ...(saved.cache_write_times ?? {}) };
+      record.applySaved(saved);
       // Refresh our local snapshot of the persisted session — keeps the
       // cost-total footer accurate without re-fetching (its total is the
       // log projection, every server-recorded row included).
@@ -691,9 +552,7 @@
     } catch (e) {
       // The save failed — put the consumed slots back (merging anything accrued
       // meanwhile) so the next persist re-sends them rather than silently losing a turn.
-      if (consumedSlots.length > 0) {
-        pendingTurnCacheWriteSlots = [...new Set([...consumedSlots, ...pendingTurnCacheWriteSlots])];
-      }
+      record.restoreCacheSlots(consumedSlots);
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }
   }
@@ -705,8 +564,8 @@
   let titleSaveTimer: ReturnType<typeof setTimeout> | null = null;
   export function setTitleFromPane(next: string): void {
     if (!loadedChatId) return;
-    if (next === activeChatTitle) return;
-    activeChatTitle = next;
+    if (next === record.title) return;
+    record.title = next;
     if (titleSaveTimer) clearTimeout(titleSaveTimer);
     titleSaveTimer = setTimeout(() => {
       titleSaveTimer = null;
@@ -714,16 +573,6 @@
     }, 500);
   }
 
-
-  function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
-    if (!added.length) return;
-    // Keyed by (id, source), not id: a better-ranked re-mention is a second
-    // journal entry for the same id (ADR-0086 Amendment 1).
-    const existing = new Set(activeChatJournal.map(journalEntryKey));
-    const fresh = added.filter((e) => !existing.has(journalEntryKey(e)));
-    if (!fresh.length) return;
-    activeChatJournal = [...activeChatJournal, ...fresh];
-  }
 
   // Stick-to-bottom (#1611) geometry + snap helpers, shared by the scroll
   // handler, streaming, post-send, chat-open, and the jump-to-latest button.
@@ -796,7 +645,7 @@
           chatHistory[idx].input_truncated = !!ev.input_truncated;
           if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
             chatHistory[idx].journal_added = ev.journal_added;
-            appendToActiveChatJournal(ev.journal_added);
+            record.appendJournal(ev.journal_added);
           }
           if (ev.usage) chatHistory[idx].usage = ev.usage;
           if (typeof ev.cost_usd === "number") chatHistory[idx].cost_usd = ev.cost_usd;
@@ -808,11 +657,7 @@
           if (chatSession && ev.cost_usd_total !== undefined) {
             chatSession = { ...chatSession, cost_usd_total: ev.cost_usd_total };
           }
-          if (ev.usage && ev.usage.cache_write_tokens > 0) {
-            if (!pendingTurnCacheWriteSlots.includes("system")) {
-              pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
-            }
-          }
+          if (ev.usage && ev.usage.cache_write_tokens > 0) record.addCacheSlot("system");
           // ADR-0076 decision 3: stamp provider/model/latency onto the message
           // itself, same as usage/cost above — it renders on the transcript's
           // own meta line now instead of a floating cbv-meta paragraph below it.
@@ -960,19 +805,19 @@
   // inputValuesFromDrafts, Seam 0) and assigns the locked fields.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
     const inputs = inputValuesFromDrafts(effectivePromptInputs(entry), chatInputDrafts, selectorRoster);
-    const result = await lockPromptTemplate(entry, { subject: chatSubject, inputs });
+    const result = await lockPromptTemplate(entry, { subject: record.subject, inputs });
     if (!result.ok) {
       chatError = result.error;
       return false;
     }
     const { lock } = result;
     chatSystemPrompt = lock.systemPrompt;
-    chatLoreEnabled = lock.loreEnabled;
-    chatLoreFree = lock.loreFree;
-    chatUsedNodeIds = lock.usedNodeIds;
-    chatUsedNodeHints = lock.usedNodeHints;
-    chatUsedSnapshots = lock.usedSnapshots;
-    chatFieldContractStored = lock.fieldContractStored;
+    record.loreEnabled = lock.loreEnabled;
+    record.loreFree = lock.loreFree;
+    record.usedNodeIds = lock.usedNodeIds;
+    record.usedNodeHints = lock.usedNodeHints;
+    record.usedSnapshots = lock.usedSnapshots;
+    record.fieldContractStored = lock.fieldContractStored;
     if (lock.initialTurns.length > 0) chatHistory = [...lock.initialTurns];
     return true;
   }
@@ -981,7 +826,7 @@
     chatHistory = [];
     chatError = null;
     // Reset cache-slot stamping so the next persist starts clean.
-    pendingTurnCacheWriteSlots = [];
+    record.consumeCacheSlots();
     // Persist the clear so a reload doesn't resurrect the messages.
     await persistActiveChat();
   };
@@ -1018,7 +863,7 @@
   // calls `void estimate.fetch()`.
 
   // ttlChipsFor (per-slot TTL chips) moved to chat/chatInputs.ts (#99).
-  // It reads ttlTick so chips recompute live, and activeChatCacheWriteTimes
+  // It reads ttlTick so chips recompute live, and record.cacheWriteTimes
   // so they refresh when a new turn stamps a slot.
 
   // ---------- Public methods (called via bind:this from parent) ----------
@@ -1152,7 +997,7 @@
   // locked chat whose inputs form is no longer mounted (S2 review).
   let sendBlockingInputs = $derived(isLocked ? [] : missingRequiredInputs);
   let ttlChips = $derived(
-    ttlChipsFor(activeChatCacheWriteTimes, ttlTick, cacheTermSecondsFor(estimate.estimate)),
+    ttlChipsFor(record.cacheWriteTimes, ttlTick, cacheTermSecondsFor(estimate.estimate)),
   );
   // The session-cost line's number (ADR-0076 decision 6, Amendment 3): the
   // snapshot's total, which every server response that changed it assigns —
@@ -1195,11 +1040,11 @@
       loreFit={doorLoreFit}
       loreLeftOutXml={doorLoreLeftOutXml}
       {fetchLeftOutXml}
-      loreEnabled={chatLoreEnabled}
-      loreFree={chatLoreFree}
+      loreEnabled={record.loreEnabled}
+      loreFree={record.loreFree}
       inputTruncated={lastTurnInputTruncated(chatHistory)}
-      journal={activeChatJournal}
-      changedPicks={activeChatChangedPicks}
+      journal={record.journal}
+      changedPicks={record.changedPicks}
       onOpenDoor={refreshChangedPicks}
       {lockedInputDisplays}
       {titleFor}
@@ -1216,10 +1061,10 @@
       onScroll={recomputePinned}
       showJumpToLatest={!pinnedToBottom}
       onJumpToLatest={() => scrollToBottom()}
-      quoteSource={chatWritesProse(chatFieldContractStored) ? null : quoteSource.plain}
+      quoteSource={chatWritesProse(record.fieldContractStored) ? null : quoteSource.plain}
       onQuoteClick={(quote) => quoteSource.sceneId &&
         void revealQuoteBeside({ sceneId: quoteSource.sceneId, quote, besidePanelId: hostPaneId })}
-      onPlaceFlags={quoteSource.sceneId && !chatWritesProse(chatFieldContractStored)
+      onPlaceFlags={quoteSource.sceneId && !chatWritesProse(record.fieldContractStored)
         ? (index) => void placeFlags.place(index)
         : undefined}
       placingIndex={placeFlags.placingIndex}

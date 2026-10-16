@@ -5,6 +5,7 @@
 
 import type { PlaceTo } from "@/lib/api/plot";
 import type { PlotUndoRecorder } from "@/lib/plot/plotCommands";
+import { chatCascadeLine } from "@/lib/stores/chats";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { deleteDeck } from "@/lib/stores/decks";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -58,13 +59,14 @@ export function deckBoardOps(
         void run();
         return;
       }
+      const chatLine = chatCascadeLine([id]); // #2347
       confirmService.request({
         title: "Delete deck",
         message: `Delete deck ${deck?.title ? `“${deck.title}”` : "this deck"}? ${
           deck?.realized_container
             ? "The chapter stays in the manuscript, with its cards; its child decks move out."
             : "Its cards and decks move out; nothing else is deleted."
-        }`,
+        }${chatLine ? `\n\n${chatLine}` : ""}`,
         confirmLabel: "Delete deck",
         destructive: true,
         onConfirm: run,

@@ -23,6 +23,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { chatCascadeLine, withChatCascade } from "@/lib/stores/chats";
   import { setLoreEntries } from "@/lib/stores/lore";
   import { setPromptEntries } from "@/lib/stores/prompts";
   import { refreshAssistantEntries } from "@/lib/stores/assistants";
@@ -157,13 +158,16 @@
       redirectCount > 0
         ? ` It also removes ${redirectCount} merged tag${redirectCount === 1 ? "" : "s"} that redirect${redirectCount === 1 ? "s" : ""} to it.`
         : "";
+    // #2347: the tag's own chats, plus those of the merged tags it takes with it.
+    const redirectIds = tags.filter((t) => t.id !== tag.id && canonicalIdIn(tagByIdMap, t.id) === tag.id).map((t) => t.id);
+    const chatLine = chatCascadeLine([tag.id, ...redirectIds]);
     confirmService.request({
       title: "Delete tag",
-      message: `Delete "${tag.title}"? ${referenced}${redirects}`,
+      message: `Delete "${tag.title}"? ${referenced}${redirects}${chatLine ? `\n\n${chatLine}` : ""}`,
       confirmLabel: "Delete tag",
       destructive: true,
       onConfirm: async () => {
-        await api.deleteTagEntry(tag.id);
+        await withChatCascade(() => api.deleteTagEntry(tag.id));
         await refreshAfterTagChange();
       },
     });

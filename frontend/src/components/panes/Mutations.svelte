@@ -17,6 +17,7 @@
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { isInherited } from "@/lib/utils/provenance";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { chatCascadeLine, withChatCascade } from "@/lib/stores/chats";
   import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import { loreEntriesStore } from "@/lib/stores/lore";
   import {
@@ -133,7 +134,7 @@
   async function doRemove(id: string) {
     error = "";
     try {
-      setMutationSetEntries((await api.deleteMutationSetEntry(id)).entries);
+      setMutationSetEntries((await withChatCascade(() => api.deleteMutationSetEntry(id))).entries);
     } catch (err) {
       error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
       await refreshMutationSetEntries().catch(() => {});
@@ -149,9 +150,10 @@
       return;
     }
     const sceneCount = new Set(entry.anchors.map((anchor) => anchor.scene_id)).size;
+    const chatLine = chatCascadeLine([entry.id]); // #2347
     confirmService.request({
       title: "Delete Mutation Set",
-      message: `"${mutationSetLabel(entry)}" is used in ${sceneCount} scene(s); deleting it leaves those pills missing.`,
+      message: `"${mutationSetLabel(entry)}" is used in ${sceneCount} scene(s); deleting it leaves those pills missing.${chatLine ? `\n\n${chatLine}` : ""}`,
       confirmLabel: "Delete",
       destructive: true,
       onConfirm: () => doRemove(entry.id),

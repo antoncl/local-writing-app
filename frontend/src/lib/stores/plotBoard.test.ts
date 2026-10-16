@@ -57,6 +57,7 @@ const projection = (): PlotBoardProjection => ({
 // assertion here concerns the card roster.
 beforeEach(() => {
   vi.spyOn(api, "listCards").mockResolvedValue({ entries: [] });
+  vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] }); // the delete's chat reconcile (#2347)
 });
 
 afterEach(() => {

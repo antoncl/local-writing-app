@@ -137,6 +137,7 @@
     { key: "writing", label: "Writing" },
     { key: "schema", label: "Schema & types" },
     { key: "research", label: "Research" },
+    { key: "revising", label: "Revising" },
   ];
 
   // The app menu (≡) is the invocation surface for verbs (ADR-0047): the

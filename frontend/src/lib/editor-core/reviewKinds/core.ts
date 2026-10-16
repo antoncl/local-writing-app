@@ -32,10 +32,17 @@ export interface ReviewKind {
   reject(view: EditorView): void;
 }
 
+/** A stored item carries its kind, so one review can hold edits and notes
+ *  together (ADR-0100 decision 5); the kind supplies its decoration, card, keys
+ *  and validity check. */
+export type ReviewEntry = ReviewItem & { kind: ReviewKind };
+
+/** An item as a run hands it over, before it gets an id. */
+export type FlagInput = Omit<ReviewItem, "id"> & { kind: ReviewKind };
+
 export type ReviewState = {
-  /** The kind of the open review; null when none is. */
-  review: ReviewKind | null;
-  items: ReviewItem[];
+  /** The open review's items; empty when no review is open. */
+  items: ReviewEntry[];
   /** How many items were accepted since the list was installed. */
   accepted: number;
   /** How many were kept as TODOs (ADR-0099), likewise. */
@@ -51,18 +58,18 @@ export type ReviewState = {
 export type ReviewOutcome = "accepted" | "rejected" | "kept";
 
 export type ReviewMeta =
-  | { type: "install"; review: ReviewKind; items: Omit<ReviewItem, "id">[] }
+  | { type: "install"; items: FlagInput[] }
   | { type: "resolve"; ids: number[]; outcome: ReviewOutcome }
   | { type: "current"; id: number }
   | { type: "layout"; wide: boolean };
 
 export const pluginKey = new PluginKey<ReviewState>("line-edit-suggestions");
-export const EMPTY: ReviewState = { review: null, items: [], accepted: 0, kept: 0, currentId: null, wide: false };
+export const EMPTY: ReviewState = { items: [], accepted: 0, kept: 0, currentId: null, wide: false };
 
 export const reviewState = (state: EditorState): ReviewState => pluginKey.getState(state) ?? EMPTY;
 
 /** The current item, or undefined when none is pending. */
-export function currentItem(state: EditorState): ReviewItem | undefined {
+export function currentItem(state: EditorState): ReviewEntry | undefined {
   const { items, currentId } = reviewState(state);
   return items.find((i) => i.id === currentId);
 }
@@ -72,7 +79,7 @@ export const rangeText = (state: EditorState, from: number, to: number) =>
   state.doc.textBetween(from, to, "\n", "￼");
 
 /** The item with `id` as the open review holds it now (positions mapped). */
-export const liveItem = (state: EditorState, id: number): ReviewItem | undefined =>
+export const liveItem = (state: EditorState, id: number): ReviewEntry | undefined =>
   reviewState(state).items.find((i) => i.id === id);
 
 /** Resolve one item as kept: its TODO is made, the document is not touched. */
@@ -86,16 +93,22 @@ export function nextByPosition(items: ReviewItem[], pos: number): number | null 
   return (items.find((i) => i.from >= pos) ?? items[0])?.id ?? null;
 }
 
-/** Install `items` under `review`. `collapseTo`: put the caret there (the end of
- *  the reviewed range), so the selection highlight doesn't sit over the passage
- *  under review. Then bring the first item and its card into view (#2478). */
+/** Install `items`, all of one `review` kind. */
 export function installReview(
   view: EditorView,
   review: ReviewKind,
   items: Omit<ReviewItem, "id">[],
   collapseTo?: number,
 ): void {
-  const tr: Transaction = view.state.tr.setMeta(pluginKey, { type: "install", review, items } satisfies ReviewMeta);
+  installFlags(view, items.map((i) => ({ ...i, kind: review })), collapseTo);
+}
+
+/** Install a list whose items each carry their own kind (a mixed review).
+ *  `collapseTo`: put the caret there (the end of the reviewed range), so the
+ *  selection highlight doesn't sit over the passage under review. Then bring the
+ *  first item and its card into view (#2478). */
+export function installFlags(view: EditorView, items: FlagInput[], collapseTo?: number): void {
+  const tr: Transaction = view.state.tr.setMeta(pluginKey, { type: "install", items } satisfies ReviewMeta);
   if (collapseTo !== undefined) {
     tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(collapseTo, tr.doc.content.size))));
   }
@@ -113,9 +126,8 @@ export function installReview(
  *  block card under a very tall paragraph - the item wins. */
 export function revealCurrent(view: EditorView): void {
   const item = currentItem(view.state);
-  const review = reviewState(view.state).review;
-  if (!item || !review) return;
-  const span = view.dom.querySelector<HTMLElement>(`[${review.idAttr}="${item.id}"]`);
+  if (!item) return;
+  const span = view.dom.querySelector<HTMLElement>(`[${item.kind.idAttr}="${item.id}"]`);
   const scroller = view.dom.closest<HTMLElement>(".editor-wrap");
   if (!scroller) {
     span?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -156,4 +168,11 @@ export function stepReview(view: EditorView, dir: 1 | -1): void {
   const at = items.findIndex((i) => i.id === currentId);
   setCurrentItem(view, items[(at + dir + items.length) % items.length].id);
   revealCurrent(view);
+}
+
+/** Reject every item, whatever its kind: neither kind touches the document on reject. */
+export function rejectAllFlags(view: EditorView): void {
+  const ids = reviewState(view.state).items.map((i) => i.id);
+  if (ids.length === 0) return;
+  view.dispatch(view.state.tr.setMeta(pluginKey, { type: "resolve", ids, outcome: "rejected" } satisfies ReviewMeta));
 }

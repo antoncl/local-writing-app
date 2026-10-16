@@ -961,6 +961,7 @@ button.row-action-add.active {
   text-underline-offset: 3px;
   border-radius: 2px;
   cursor: pointer;
+  white-space: pre-wrap; /* shows an edit's paragraph breaks */
 }
 .editor-body .line-edit-current {
   background: var(--accent-soft);

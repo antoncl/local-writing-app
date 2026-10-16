@@ -32,12 +32,26 @@ const SCENE: Scene = {
 describe("reloadGetterFor — route the baseline reload by kind (#1977)", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("returns null for synthetic panes that have no reloadable document file", () => {
-    // These four are in the DocumentRef union but have no per-kind getter; before
-    // the fix each fell through `?? api.getScene` and 404'd on the scenes endpoint.
-    for (const type of ["chat", "assistant", "project", "view"]) {
-      expect(reloadGetterFor(type)).toBeNull();
-    }
+  it("returns null for a chat pane, which has no reloadable document file", () => {
+    // Chat is in the DocumentRef union but has no getter; before the fix it fell
+    // through `?? api.getScene` and 404'd on the scenes endpoint.
+    expect(reloadGetterFor("chat")).toBeNull();
+  });
+
+  it("routes assistant / view / project through their own endpoints (#1979)", async () => {
+    const getAssistant = vi.spyOn(api, "getAssistantEntry").mockResolvedValue({ id: "assistant_1" } as never);
+    const getView = vi.spyOn(api, "getView").mockResolvedValue({ id: "view_1" } as never);
+    const getProject = vi.spyOn(api, "getProjectNode").mockResolvedValue({ id: "project_1", title: "P", body: "" } as never);
+    const getScene = vi.spyOn(api, "getScene").mockResolvedValue(SCENE);
+    await reloadGetterFor("assistant")!("assistant_1");
+    await reloadGetterFor("view")!("view_1");
+    const project = await reloadGetterFor("project")!("");
+    expect(getAssistant).toHaveBeenCalledWith("assistant_1");
+    expect(getView).toHaveBeenCalledWith("view_1");
+    expect(getProject).toHaveBeenCalledTimes(1);
+    // The project getter keeps the Scene-compatible shape the pane was opened with.
+    expect(project).toMatchObject({ id: "project_1", status: "", source_layer_id: "" });
+    expect(getScene).not.toHaveBeenCalled();
   });
 
   it("routes the scene-backed kinds through api.getScene", async () => {
@@ -98,6 +112,34 @@ describe("refreshOpenEditorPaneBaselines — routes each pane by kind and id (#1
     // longer rejects the whole Promise.all batch and starves it.
     expect(getScene).toHaveBeenCalledWith("scene_1");
     expect(getScene).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-baselines open assistant, project and view panes from their own getters (#1979)", async () => {
+    const assistant = (title: string) => ({ id: "assistant_1", title, revision: "r1", entry_type: "assistant:assistant", metadata: {} });
+    const project = (title: string) => ({ id: "project_1", title, body: "", revision: "r1", entry_type: "project:project", metadata: {}, computed_metadata: {} });
+    const view = (title: string) => ({ id: "view_1", title, revision: "r1", entry_type: "view:view", spec: {} });
+    const getAssistant = vi.spyOn(api, "getAssistantEntry").mockResolvedValue(assistant("Old") as never);
+    const getProject = vi.spyOn(api, "getProjectNode").mockResolvedValue(project("Old") as never);
+    const getView = vi.spyOn(api, "getView").mockResolvedValue(view("Old") as never);
+    const getScene = vi.spyOn(api, "getScene").mockResolvedValue(SCENE);
+    await editorPanes.openAssistant("assistant_1");
+    editorPanes.addEditorPane();
+    await editorPanes.openProjectNode();
+    editorPanes.addEditorPane();
+    await editorPanes.openView("view_1");
+
+    getAssistant.mockResolvedValue(assistant("New") as never);
+    getProject.mockResolvedValue(project("New") as never);
+    getView.mockResolvedValue(view("New") as never);
+    await editorPanes.refreshOpenEditorPaneBaselines();
+
+    for (const type of ["assistant", "project", "view"]) {
+      const pane = editorPanes.panes.find((p) => p.document?.type === type);
+      // The baseline moved (the refresh doesn't touch the draft title, so a
+      // changed title reads dirty — same as every other kind).
+      expect(pane?.scene?.title, type).toBe("New");
+    }
+    expect(getScene).not.toHaveBeenCalled();
   });
 
   it("re-baselines a structure_node (Act/Chapter) pane by its scene_id, never its node_ id", async () => {

@@ -28,6 +28,8 @@ import {
   type DraftFields,
   type EditorPaneState,
 } from "@/lib/editor-core/editorPaneModel";
+import type { AssistantEntry } from "@/lib/assistantTypes";
+import type { ViewNode } from "@/lib/viewTypes";
 import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, DeckEntry, TagEntry, ResearchNote, EntryMetadata } from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
@@ -37,7 +39,7 @@ import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEn
 // the post-save reload path and the reconcile ladder's rung-1 re-fetch (#1621)
 // share one map — and now the generic reconcile entry point (ADR-0085 §5,
 // editorPaneReconcile.ts).
-export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | DeckEntry | TagEntry | ResearchNote;
+export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry | DeckEntry | TagEntry | ResearchNote | AssistantEntry | ViewNode;
 
 // Getters take the pane too (not just the id): the lore getter reads the
 // pane's `authoringLayerId` so a reload — the post-409 reconcile re-fetch, the
@@ -52,14 +54,23 @@ export const RELOAD_GETTERS: Record<string, (id: string, pane?: EditorPaneState)
   plot_deck: (id) => api.getDeck(id),
   tag: (id) => api.getTagEntry(id),
   research: (id) => api.getResearchNote(id),
+  assistant: (id) => api.getAssistantEntry(id),
+  view: (id) => api.getView(id),
+  // The project node is a singleton (the id is ignored — GET /project/node). It
+  // re-wraps in the same Scene-compatible shape openProjectNode seeds the pane
+  // with, so a re-baseline doesn't drop `status` / the source-layer stubs.
+  project: async () => {
+    const node = await api.getProjectNode();
+    return { ...node, status: "", source_layer_id: "", source_layer_label: "" } as unknown as Scene;
+  },
 };
 
 // Document types whose server baseline is a Scene reached via /api/scenes: real
 // manuscript scenes, and the Act/Chapter `structure_node`s that round-trip through
 // the scene endpoints (editorPaneOpen.openStructureNode). RELOAD_GETTERS above
 // covers every kind with its own endpoint. A type in NEITHER set has no reload
-// getter wired here — chat (a scene-shaped stub with no document file), plus
-// assistant/project/view — so it is SKIPPED rather than mis-fetched as a scene.
+// getter wired here — chat (a scene-shaped stub with no document file) — so it is
+// SKIPPED rather than mis-fetched as a scene.
 const SCENE_BACKED_DOCUMENT_TYPES = new Set(["manuscript", "structure_node"]);
 
 // The server getter for an open pane's `document.type`, or null when the type has

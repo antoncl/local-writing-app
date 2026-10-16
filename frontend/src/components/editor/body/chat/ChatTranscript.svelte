@@ -23,6 +23,7 @@
   } from "@/lib/chat/loreFit";
   import { HISTORY_FIT_HINT, droppedRoundsSegment } from "@/lib/chat/historyFit";
   import { journalEntryKey } from "@/lib/chat/journal";
+  import { INPUT_TRUNCATED_NOTICE } from "@/lib/chat/loreFit";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { linkQuotes } from "@/lib/chat/quoteLinks";
   import type { ChatMessage } from "@/lib/types";
@@ -173,6 +174,11 @@
         <!-- ADR-0076 decision 5: reuses the truncation-banner idiom — a
              deliberate Stop, not an error, so the partial reply is kept. -->
         <div class="cbv-truncated">Stopped early — partial reply kept.</div>
+      {/if}
+      {#if message.input_truncated}
+        <!-- #2207: its own banner, not part of the chain above — a reply can be
+             both cut off at the end and have lost the start of its prompt. -->
+        <div class="cbv-truncated" data-testid="cbv-input-truncated">{INPUT_TRUNCATED_NOTICE}</div>
       {/if}
       {#if message.journal_added && message.journal_added.length > 0}
         <div class="cbv-journal-added" title="Lore auto-detected from this turn.">

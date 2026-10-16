@@ -51,6 +51,8 @@ class ChatResult:
     # downstream from the descriptor — the dispatch layer doesn't know
     # about pricing.
     usage: UsageMetrics | None = None
+    # Ollama read materially less prompt than was sent (#2207).
+    input_truncated: bool = False
 
 
 def _policy_allows(policy: AIPolicy, provider: str) -> tuple[bool, str | None]:
@@ -258,6 +260,7 @@ def chat(
         ok=True,
         stop_reason=outcome.stop_reason,
         usage=usage,
+        input_truncated=outcome.input_truncated,
     )
 
 
@@ -317,6 +320,8 @@ class StreamDone:
     # via stream_options.include_usage). Cost is computed downstream from
     # the descriptor — the dispatch layer doesn't know about pricing.
     usage: UsageMetrics | None = None
+    # Ollama read materially less prompt than was sent (#2207).
+    input_truncated: bool = False
 
 
 @dataclass
@@ -358,6 +363,7 @@ def chat_stream(
     started = time.perf_counter()
     stop_reason: str | None = None
     usage: UsageMetrics | None = None
+    input_truncated = False
     try:
         profile = profile_for(provider_name, settings)
         _ensure_provider_key(provider_name, profile.configured_key())
@@ -367,6 +373,7 @@ def chat_stream(
             elif isinstance(ev, StreamFinal):
                 stop_reason = ev.stop_reason
                 usage = ev.usage
+                input_truncated = ev.input_truncated
     except ProviderError as exc:
         yield StreamError(provider=provider_name, model=call.model,
                           latency_ms=int((time.perf_counter() - started) * 1000),
@@ -383,5 +390,5 @@ def chat_stream(
         provider=provider_name, model=call.model,
         latency_ms=int((time.perf_counter() - started) * 1000),
         stop_reason=stop_reason, truncated=truncated,
-        usage=usage,
+        usage=usage, input_truncated=input_truncated,
     )

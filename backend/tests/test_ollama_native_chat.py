@@ -26,7 +26,7 @@ from app.services.ai.profiles.base import (
     StreamFinal,
     StreamThinking,
 )
-from app.services.ai.profiles.ollama import OllamaProfile, _ceil_bucket
+from app.services.ai.profiles.ollama import OllamaProfile, _ceil_bucket, input_truncated
 
 # A model whose GGUF metadata reports a 128k trained context.
 _SHOW_128K = {
@@ -459,3 +459,102 @@ def test_every_chat_asks_ollama_to_keep_the_model_loaded(route) -> None:
     OllamaProfile("http://box:11434").chat(call)
     list(OllamaProfile("http://box:11434").chat_stream(call))
     assert [b["keep_alive"] for b in router.bodies] == ["30m", "30m"]
+
+
+# -- input truncation (#2207) --------------------------------------------------
+
+
+def _long_call(**over) -> ChatCall:
+    """A call whose cl100k estimate is ~3000 tokens ("word " is one token)."""
+    return _call(messages=[{"role": "user", "content": "word " * 3000}], **over)
+
+
+def test_input_truncated_helper_thresholds() -> None:
+    assert input_truncated(1000, 849) is True
+    assert input_truncated(1000, 850) is False  # at the ratio: not "below"
+    assert input_truncated(1000, 1000) is False
+    assert input_truncated(1000, 1050) is False
+    # No proof without a count.
+    assert input_truncated(1000, None) is False
+    assert input_truncated(1000, 0) is False
+
+
+def test_chat_flags_input_truncated_from_a_low_prompt_eval_count(route) -> None:
+    route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}, "prompt_eval_count": 1000},
+        )
+    )
+    assert OllamaProfile("http://box:11434").chat(_long_call()).input_truncated is True
+
+
+def test_chat_does_not_flag_a_normal_prompt_eval_count(route) -> None:
+    route(
+        _Router(
+            show=_SHOW_128K,
+            chat_json={"message": {"content": "hi"}, "prompt_eval_count": 3050},
+        )
+    )
+    assert OllamaProfile("http://box:11434").chat(_long_call()).input_truncated is False
+
+
+def test_stream_flags_input_truncated_from_a_low_prompt_eval_count(route) -> None:
+    frames = [
+        {"message": {"content": "hi"}, "done": False},
+        {"message": {"content": ""}, "done": True, "prompt_eval_count": 1027},
+    ]
+    route(_Router(show=_SHOW_128K, chat_frames=frames))
+    events = list(OllamaProfile("http://box:11434").chat_stream(_long_call()))
+    final = [e for e in events if isinstance(e, StreamFinal)][0]
+    assert final.input_truncated is True
+
+
+def test_stream_does_not_flag_a_normal_or_missing_prompt_eval_count(route) -> None:
+    for done in ({"prompt_eval_count": 3050}, {}):
+        frames = [
+            {"message": {"content": "hi"}, "done": False},
+            {"message": {"content": ""}, "done": True, **done},
+        ]
+        route(_Router(show=_SHOW_128K, chat_frames=frames))
+        events = list(OllamaProfile("http://box:11434").chat_stream(_long_call()))
+        final = [e for e in events if isinstance(e, StreamFinal)][0]
+        assert final.input_truncated is False
+
+
+def test_http_400_with_a_prompt_over_the_window_says_it_did_not_fit(route) -> None:
+    route(
+        _Router(
+            show=_show(2048),
+            chat_status=400,
+            chat_json={"error": "input length exceeds context"},
+        )
+    )
+    with pytest.raises(ProviderError, match=r"didn't fit the model's 2048-token") as info:
+        OllamaProfile("http://box:11434").chat(_long_call())
+    assert info.value.detail is not None
+    assert "input length exceeds context" in info.value.detail
+
+    route(
+        _Router(
+            show=_show(2048),
+            chat_status=400,
+            chat_json={"error": "input length exceeds context"},
+        )
+    )
+    with pytest.raises(ProviderError, match="didn't fit"):
+        list(OllamaProfile("http://box:11434").chat_stream(_long_call()))
+
+
+def test_http_400_that_is_not_a_too_big_prompt_is_unchanged(route) -> None:
+    # The prompt (~2 tokens) is far below the 2048 window, so this 400 is
+    # something else and keeps the daemon's own text.
+    route(
+        _Router(
+            show=_show(2048),
+            chat_status=400,
+            chat_json={"error": "invalid options.num_ctx"},
+        )
+    )
+    with pytest.raises(ProviderError, match="invalid options.num_ctx"):
+        OllamaProfile("http://box:11434").chat(_call())

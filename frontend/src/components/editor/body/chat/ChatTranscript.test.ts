@@ -202,6 +202,31 @@ describe("ChatTranscript", () => {
     expect(screen.queryByText("Response cut off — hit max tokens.")).not.toBeInTheDocument();
   });
 
+  // #2207: its own banner, independent of the truncated/stopped chain.
+  it("renders the input-truncated banner only for an input_truncated message", () => {
+    const plain = [{ role: "assistant", content: "ok" }] as ChatMessage[];
+    const { unmount } = render(ChatTranscript, { chatHistory: plain, chatRunning: false });
+    expect(screen.queryByTestId("cbv-input-truncated")).not.toBeInTheDocument();
+    unmount();
+
+    const cut = [
+      { role: "assistant", content: "ok", input_truncated: true },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: cut, chatRunning: false });
+    expect(screen.getByTestId("cbv-input-truncated").textContent).toContain(
+      "cut the start of this prompt",
+    );
+  });
+
+  it("shows the input-truncated banner alongside the max-tokens banner", () => {
+    const both = [
+      { role: "assistant", content: "ok", truncated: true, input_truncated: true },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: both, chatRunning: false });
+    expect(screen.getByText("Response cut off — hit max tokens.")).toBeInTheDocument();
+    expect(screen.getByTestId("cbv-input-truncated")).toBeInTheDocument();
+  });
+
   // Stick-to-bottom (#1611): the jump-to-latest button is presentational
   // here — ChatBodyView owns the pin/near-bottom logic and just flips
   // `showJumpToLatest`.

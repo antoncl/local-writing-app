@@ -19,6 +19,7 @@
   import { relativeTime } from "@/lib/utils/relativeTime";
   import {
     DECLARED_OVER_HINT,
+    INPUT_TRUNCATED_NOTICE,
     LEFT_OUT_HINT,
     NOT_SENT_GLYPH,
     REACH_HINT,
@@ -68,6 +69,8 @@
     loreEnabled: boolean;
     // ADR-0092 Amendment 1 §3: the prompt called `no_lore()`.
     loreFree?: boolean;
+    // #2207: the last assistant turn's prompt was cut by the model's window.
+    inputTruncated?: boolean;
     lockedInputDisplays: { name: string; label: string; value: string }[];
     journal: ChatSessionJournalEntry[];
     // #1635: picked lore edited since the AI last saw it — listed in the
@@ -89,6 +92,7 @@
     chatPreviewMessages,
     loreEnabled,
     loreFree = false,
+    inputTruncated = false,
     lockedInputDisplays,
     journal,
     changedPicks,
@@ -212,6 +216,11 @@
   {#if current.kind === "root"}
     <!-- Root: a menu of section rows, in fixed order, each shown only when it
          has content — the tier rows are what used to be whole-tier <details>. -->
+    {#if inputTruncated}
+      <!-- #2207: the last reply's prompt was cut at the front by the model's
+           window — a broken send, so the warning register (not a budget hint). -->
+      <div class="ctx-warn" data-testid="ctx-input-truncated">{INPUT_TRUNCATED_NOTICE}</div>
+    {/if}
     {#if systemBlock || (chatSystemPrompt && chatSystemPrompt.trim()) || (chatPreviewMessages && chatPreviewMessages.length > 0) || chatPromptEntryId}
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "system" })}>
         <span class="ctx-row-label">System</span>
@@ -585,6 +594,21 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-2);
+  }
+  .ctx-warn {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    margin-bottom: var(--sp-2);
+    border: 1px solid var(--star-border);
+    border-radius: var(--r-md);
+    background: var(--star-soft);
+    font-size: var(--fs-sm);
+    color: var(--star);
+  }
+  .ctx-warn::before {
+    content: "⚠";
   }
   .ctx-not-sent {
     margin-right: var(--sp-1);

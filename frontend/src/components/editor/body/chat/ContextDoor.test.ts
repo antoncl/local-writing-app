@@ -105,6 +105,16 @@ describe("ContextDoor", () => {
     expect(screen.queryByText("lore-enabled")).not.toBeInTheDocument();
   });
 
+  it("#2207: the input-truncated warning row shows only when inputTruncated is set", () => {
+    const { unmount } = render(ContextDoor, { ...baseProps, inputTruncated: true });
+    expect(screen.getByTestId("ctx-input-truncated").textContent).toContain(
+      "cut the start of this prompt",
+    );
+    unmount();
+    render(ContextDoor, { ...baseProps });
+    expect(screen.queryByTestId("ctx-input-truncated")).not.toBeInTheDocument();
+  });
+
   it("#2300: once locked, shows the locked system text, not a differing live preview render", async () => {
     const LIVE = "LIVE-PREVIEW-DRIFTED";
     const liveBlock: PreviewCacheBlock = { label: "system", role: "system", tokens: 10, text: LIVE };

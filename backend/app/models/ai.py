@@ -589,6 +589,9 @@ class AIChatResponse(BaseModel):
     error: str | None = None
     stop_reason: str | None = None
     truncated: bool = False
+    # #2207: Ollama read materially less prompt than was sent (its window cut
+    # the start). Always False for other providers.
+    input_truncated: bool = False
     # Lore entries newly auto-detected on THIS turn (for the audit UI chip
     # strip). Empty when no detections fired. Snapshots — frontend doesn't
     # need to look up titles separately.
@@ -728,6 +731,9 @@ class ChatSessionMessage(BaseModel):
     content: str
     thinking: str = ""
     truncated: bool = False
+    # #2207: the model's window cut the start of this turn's prompt. Additive
+    # optional — older chats read False.
+    input_truncated: bool = False
     # Lore entries that the implicit-context expander auto-detected on the
     # turn this assistant message belongs to. Captured for the audit UI so
     # reopening the chat preserves the "added when you said X" trail.

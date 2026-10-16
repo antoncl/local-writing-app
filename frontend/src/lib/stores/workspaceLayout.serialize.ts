@@ -148,16 +148,16 @@ export const PRESETS: Record<PresetName, () => Split> = {
       group(G_EDITOR, []),
       group(G_SIDE, ["lore"]),
     ], [0.24, 0.54, 0.22]),
-  // Working through a scene with its conversations (ADR-0100 §10): the outline
-  // over the chats on the left, a wide editor so a scene and its chat sit side
-  // by side (a quote link or Place flags splits the scene out beside the chat),
-  // and TODOs on the right, where kept flags land.
+  // Working through a scene with its conversations (ADR-0100 §10), as Anton
+  // arranged it: Draft and Lore on the left; the editor and a wide right group
+  // (TODO, where kept flags land; Search; Chats) as equal halves, so a chat and
+  // its scene sit side by side.
   revising: () =>
     split("root", "row", [
-      split("s-left", "col", [group(G_DRAFT, ["outline"]), group(G_SIDE, ["chats", "lore"])], [0.55, 0.45]),
+      group(G_DRAFT, ["outline", "lore"]),
       group(G_EDITOR, []),
-      group(G_TOOLS, ["todo", "search"]),
-    ], [0.18, 0.64, 0.18]),
+      group(G_TOOLS, ["todo", "search", "chats"]),
+    ], [0.2, 0.4, 0.4]),
 };
 
 export function defaultLayout(): Split {

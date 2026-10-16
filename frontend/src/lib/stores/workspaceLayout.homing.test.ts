@@ -243,12 +243,14 @@ describe("detached Details rail is ephemeral, never rehydrated (#1258)", () => {
 describe("the Revising preset (ADR-0100 §10)", () => {
   beforeEach(() => workspaceLayout.reset());
 
-  it("puts the outline and chats left, an empty editor centre, TODOs right", () => {
+  it("puts Draft and Lore left, an empty editor centre, TODO / Search / Chats right", () => {
     workspaceLayout.applyPreset("revising");
-    expect(workspaceLayout.groupOf("chats")?.id).toBe(G_SIDE);
-    expect(workspaceLayout.groupOf("outline")?.id).not.toBe(G_EDITOR);
-    expect(workspaceLayout.groupOf("todo")?.id).toBeTruthy();
-    expect(workspaceLayout.groupOf("todo")?.id).not.toBe(G_EDITOR);
+    const left = workspaceLayout.groupOf("outline")?.id;
+    const right = workspaceLayout.groupOf("todo")?.id;
+    expect(workspaceLayout.groupOf("lore")?.id).toBe(left);
+    expect(workspaceLayout.groupOf("search")?.id).toBe(right);
+    expect(workspaceLayout.groupOf("chats")?.id).toBe(right);
+    expect(new Set([left, right, G_EDITOR]).size).toBe(3);
     // Every preset keeps the editor group, so open documents re-home into it.
     expect(workspaceLayout.allGroups().some((g) => g.id === G_EDITOR)).toBe(true);
     expect(workspaceLayout.activePreset).toBe("revising");

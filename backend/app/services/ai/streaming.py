@@ -56,6 +56,7 @@ def _done_line(
         "latency_ms": ev.latency_ms,
         "stop_reason": ev.stop_reason,
         "truncated": ev.truncated,
+        "input_truncated": ev.input_truncated,
         "policy": policy,
         **extra_done,
     }

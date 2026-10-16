@@ -318,6 +318,27 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertTrue(body["truncated"])
         self.assertEqual(body["stop_reason"], "max_tokens")
 
+    def test_input_truncated_flag_reaches_the_response(self) -> None:
+        self._allow_cloud()
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        for flagged in (True, False):
+            with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+                 patch(
+                    _ANTHROPIC_CHAT,
+                    return_value=ChatOutcome(
+                        "reply", "end_turn", SimpleNamespace(), input_truncated=flagged
+                    ),
+                ):
+                response = self.client.post(
+                    "/api/ai/chat",
+                    json={
+                        "provider": "anthropic",
+                        "model": "claude-haiku-4-5-20251001",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                )
+            self.assertIs(response.json()["input_truncated"], flagged)
+
     def test_truncated_false_on_normal_stop(self) -> None:
         self._allow_cloud()
         loaded = _set_machine_keys(anthropic="sk-ant-test")
@@ -606,6 +627,31 @@ class ChatStreamEndpointTests(unittest.TestCase):
         done = next(e for e in events if e["type"] == "done")
         self.assertTrue(done["truncated"])
         self.assertEqual(done["stop_reason"], "max_tokens")
+        self.assertFalse(done["input_truncated"])
+
+    def test_chat_stream_done_carries_input_truncated(self) -> None:
+        from app.services.ai import providers as ai_providers
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+
+        def fake_stream(call):
+            yield ai_providers.StreamDelta(text="partial")
+            yield ai_providers.StreamFinal(stop_reason="end_turn", input_truncated=True)
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(_ANTHROPIC_STREAM, side_effect=fake_stream):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "go"}],
+                },
+            )
+        done = next(e for e in self._parse_ndjson(response.text) if e["type"] == "done")
+        self.assertTrue(done["input_truncated"])
 
 
 class ChatEndpointJournalTests(unittest.TestCase):

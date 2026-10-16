@@ -86,6 +86,8 @@
     // ADR-0092 Amendment 1 §3: the bound prompt called `no_lore()` — the Context
     // door annotates the System row "lore-free".
     loreFree?: boolean;
+    // #2207: the last assistant turn's prompt was cut by the model's window.
+    inputTruncated?: boolean;
     // The chat's auto-detected context journal (ADR-0075) — the Context door's
     // "Auto-added this conversation" section; the transcript already stamps
     // per-turn `journal_added` chips, so this is the running roster.
@@ -128,6 +130,7 @@
     fetchLeftOutXml = async () => null,
     loreEnabled,
     loreFree = false,
+    inputTruncated = false,
     journal,
     changedPicks,
     onOpenDoor,
@@ -412,6 +415,7 @@
           {chatPreviewMessages}
           {loreEnabled}
           {loreFree}
+          {inputTruncated}
           {lockedInputDisplays}
           {journal}
           {changedPicks}

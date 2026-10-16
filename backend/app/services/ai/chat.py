@@ -628,6 +628,7 @@ async def run_chat_turn(
         error=result.error,
         stop_reason=result.stop_reason,
         truncated=truncated,
+        input_truncated=result.input_truncated,
         journal_added=prepared.journal_added,
         usage=usage_wire,
         cost_usd=cost_usd,

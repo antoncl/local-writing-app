@@ -37,6 +37,7 @@ def _slow_fake_chat(seen: dict):
         return SimpleNamespace(
             content="ok", stop_reason="stop", provider="ollama", model="llama3.2",
             latency_ms=1, ok=True, error=None, usage=None,
+            input_truncated=False,
         )
 
     return _fake_chat

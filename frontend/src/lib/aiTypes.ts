@@ -266,6 +266,8 @@ export type ChatMessage = {
   // Optional on the wire — the backend ignores extras on send.
   thinking?: string;
   truncated?: boolean;
+  // #2207: the model's window cut the start of this turn's prompt.
+  input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
@@ -358,6 +360,7 @@ export type AIChatResponse = {
   error?: string | null;
   stop_reason?: string | null;
   truncated: boolean;
+  input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
   // V2 telemetry. Null on failure or when provider didn't return usage.
   usage?: ChatUsage | null;
@@ -527,6 +530,8 @@ export type ChatSessionMessage = {
   content: string;
   thinking?: string;
   truncated?: boolean;
+  // #2207: additive-optional — older chats lack it.
+  input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;

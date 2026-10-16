@@ -51,6 +51,7 @@ def _run(request: AIChatRequest, *, budget: int | None, lore_mode: str, system_b
         return SimpleNamespace(
             content="ok", stop_reason="stop", provider="ollama", model="llama3.2",
             latency_ms=1, ok=True, error=None, usage=None,
+            input_truncated=False,
         )
 
     async def _fake_cost(*a, **k):

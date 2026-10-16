@@ -91,14 +91,6 @@ Standard Jinja filters (`join`, `length`, `default`, …) work as usual.
 | `{% do … %}` | Evaluates an expression for its side effect and emits nothing (Jinja's `ext.do`) — the construct for the side-effecting helpers: `{% do use(node) %}` records a lore pick, `{% do field_contract.store(f) %}` registers a field. |
 | `{% include "Snippet title" %}` | Inlines a `prompt:snippet` node by title (e.g. `Project settings`). |
 
-## Deprecated
-
-Still works, still documented, removed at 1.0. The editor's completion does not offer these names; rendering one adds a warning.
-
-| Call | Use instead |
-| --- | --- |
-| `use_lore()` | `auto_lore()` — the same call under its real name: it turns automatic lore on and prints nothing. |
-
 ## Retired
 
 `base(x)` → `original(x)` · `entry_as_of(x, s)` → `entry(x, at=s)` · `effective(x, f, s)` → `entry(x, at=s).f` · `field_catalog` → `fields` · `entry_type_label` → `type_name` · `scenes_before` → `story_so_far` · `character_thread` → `character_turns` · `plain_json` / `tojson` → `\| json` · `input` → `inputs` · `novel` → `project` · `relevant_lore(…, partition=…)` and `{% cache_break %}` → removed (the backend selects and tiers lore; caching is a provider-neutral volatility ordering the author never touches).

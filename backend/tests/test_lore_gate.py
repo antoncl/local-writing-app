@@ -1,7 +1,6 @@
 """ADR-0057 §2, renamed by ADR-0092 §7.2: the execution-derived lore gate.
 
-The gate is captured from whether `auto_lore()` (or its deprecated alias
-`use_lore()`) actually ran during a chat's lock render (not a static
+The gate is captured from whether `auto_lore()` actually ran during a chat's lock render (not a static
 text-scan, not a user knob) and persisted as the chat's `lore_enabled`. These
 tests cover the two ends of that mechanism:
 
@@ -11,10 +10,6 @@ tests cover the two ends of that mechanism:
   - `ChatSession.lore_enabled` round-trips through save/read, and a save that
     omits it (a per-turn write) preserves the captured value rather than
     clobbering it to the default.
-
-`use_lore()` is kept until 1.0 as an alias: it sets the same slot as
-`auto_lore()` and additionally emits `USE_LORE_DEPRECATION_NOTICE` into
-`rendered.warnings`, once per render no matter how many times it is called.
 
 ADR-0092 Amendment 1 adds `no_lore()`: a prompt-level "lore-free" declaration
 (`rendered.lore_free`, persisted as `ChatSession.lore_free`). It wins over
@@ -34,7 +29,6 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import CreateChatSessionRequest, SaveChatSessionRequest
-from app.services.ai.helpers import USE_LORE_DEPRECATION_NOTICE
 from app.services.ai.preview import PreviewRequest, build_preview
 
 _SYS = '{% role "system" %}'
@@ -68,7 +62,7 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         return rendered
 
     def test_lore_invoked_true_when_helper_called(self) -> None:
-        rendered = self._render(f"{_SYS}Lore:\n{{{{ use_lore() }}}}{_END}")
+        rendered = self._render(f"{_SYS}Lore:\n{{{{ auto_lore() }}}}{_END}")
         self.assertTrue(rendered.lore_invoked)
 
     def test_lore_invoked_false_when_helper_absent(self) -> None:
@@ -81,20 +75,20 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         # system block renders to nothing) — but the prompt still *called* it, so
         # the chat is lore-enabled and lore added later will flow in. Invocation,
         # not a non-empty result, is the gate.
-        rendered = self._render(f"{_SYS}{{{{ use_lore() }}}}{_END}")
+        rendered = self._render(f"{_SYS}{{{{ auto_lore() }}}}{_END}")
         self.assertTrue(rendered.lore_invoked)
 
     def test_helper_behind_an_unfired_conditional_does_not_flag(self) -> None:
         # The reachability point (ADR-0057 anti-goals): a static text-scan would
         # wrongly flag this; execution does not, because the branch never runs.
         rendered = self._render(
-            f"{_SYS}{{% if false %}}{{{{ use_lore() }}}}{{% endif %}}X{_END}"
+            f"{_SYS}{{% if false %}}{{{{ auto_lore() }}}}{{% endif %}}X{_END}"
         )
         self.assertFalse(rendered.lore_invoked)
 
     def test_use_alone_does_not_set_the_slot(self) -> None:
         # ADR-0092 §7.1: `use()` places a pick but never sets the automatic-lore
-        # slot — only `auto_lore()` (or its alias `use_lore()`) does. A template
+        # slot — only `auto_lore()` does. A template
         # calling `use()` alone must come back with the gate off and the pick
         # recorded.
         from app.models import CreateLoreEntryRequest
@@ -112,20 +106,6 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         self.assertTrue(rendered.lore_invoked)
         self.assertEqual(rendered.warnings, [])
 
-    def test_use_lore_alias_sets_slot_and_emits_deprecation_warning(self) -> None:
-        # ADR-0092 §7.2: the deprecated alias sets the same slot as
-        # `auto_lore()` and additionally warns, exactly once.
-        rendered = self._render(f"{_SYS}{{{{ use_lore() }}}}{_END}")
-        self.assertTrue(rendered.lore_invoked)
-        self.assertEqual(rendered.warnings, [USE_LORE_DEPRECATION_NOTICE])
-
-    def test_use_lore_alias_called_thrice_emits_warning_once(self) -> None:
-        # One notice per render, no matter how many times the alias is called.
-        rendered = self._render(
-            f"{_SYS}{{{{ use_lore() }}}}{{{{ use_lore() }}}}{{{{ use_lore() }}}}{_END}"
-        )
-        self.assertTrue(rendered.lore_invoked)
-        self.assertEqual(rendered.warnings, [USE_LORE_DEPRECATION_NOTICE])
 
 
 class NoLoreTests(unittest.TestCase):

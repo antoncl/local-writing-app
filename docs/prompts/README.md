@@ -34,7 +34,7 @@ This is the user-facing framing — internal docs still use the technical terms 
 
 The AI integration was scoped to fix two specific complaints with Novelcrafter:
 
-1. **Don't bomb the context window.** Lore inclusion is a retrieval problem, not a "dump everything" pass. The reference graph is the retrieval index. A template only *selects* nodes — `use(node)` picks one, `auto_lore()` (was `use_lore()`) enables the scene's implicit lore — and the backend does the retrieval, dedup, placement, and caching. The template emits nothing for a selection.
+1. **Don't bomb the context window.** Lore inclusion is a retrieval problem, not a "dump everything" pass. The reference graph is the retrieval index. A template only *selects* nodes — `use(node)` picks one, `auto_lore()` enables the scene's implicit lore — and the backend does the retrieval, dedup, placement, and caching. The template emits nothing for a selection.
 2. **Stable prefix, dynamic suffix.** The backend orders the envelope by volatility — rarely-changing content first, per-call material last — so iterative edits to one lore entry don't invalidate the stable prefix above it. Authors never place cache breakpoints; the ordering is provider-neutral and each adapter maps it to its own caching primitive.
 3. **Local-first.** Every provider runs through the same envelope. Ollama is a first-class provider; Anthropic's prompt caching is exploited where supported and treated as a no-op elsewhere.
 

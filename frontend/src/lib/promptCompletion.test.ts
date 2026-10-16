@@ -62,18 +62,6 @@ describe("makePromptCompletionSource", () => {
     expect(result).not.toContain("role");
   });
 
-  it("ADR-0092 §7.2: manifest carries use_lore as deprecated, never offered", () => {
-    // The generated manifest documents the deprecated alias for completeness,
-    // but no completion list — expression, filter, or tag — should ever offer it.
-    const symbols = (promptVocabData as { symbols: { name: string; kind: string }[] }).symbols;
-    expect(symbols).toContainEqual(expect.objectContaining({ name: "use_lore", kind: "deprecated" }));
-    const expression = labels(run("{{ us"));
-    expect(expression).toContain("auto_lore");
-    expect(expression).not.toContain("use_lore");
-    expect(labels(run("{{ value | us"))).not.toContain("use_lore");
-    expect(labels(run("{% us"))).not.toContain("use_lore");
-  });
-
   it("completes declared input names after `inputs.`", () => {
     const result = run("{{ inputs.", { inputs: [input("character"), input("tone")] });
     expect(labels(result)).toEqual(["character", "tone"]);

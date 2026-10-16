@@ -30,6 +30,7 @@ function tag(id: string, title: string, entryType = "tag:tag", mergedInto: strin
 beforeEach(() => {
   metadataSchemaStore.set(SCHEMA);
   vi.spyOn(api, "listTagEntries").mockResolvedValue({ tags: [] });
+  vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] }); // the delete's chat reconcile (#2347)
   vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
   // R5's refresh set — a merge/delete re-syncs these too, so a mount test
   // that drives either one must mock them (the network guard fails a real

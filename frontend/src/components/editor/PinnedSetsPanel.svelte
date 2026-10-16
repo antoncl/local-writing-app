@@ -27,6 +27,7 @@
   import { activeSetsFor, pinnedSetsFor } from "@/lib/views/pinnedSets";
   import { formatAnchorPlaces, mutationSetLabel } from "@/lib/editor-core/mutationNodes";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { chatCascadeLine, withChatCascade } from "@/lib/stores/chats";
   import { resolveColor } from "@/lib/utils/colors";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -96,9 +97,10 @@
   // conversation's work product (its `staged_set`), which the delete purges —
   // so confirm first, one click on × must not silently discard it.
   function requestRemoveStaged(set: MutationSetEntrySummary): void {
+    const chatLine = chatCascadeLine([set.id]); // #2347
     confirmService.request({
       title: "Delete Mutation Set",
-      message: `Delete "${mutationSetLabel(set)}"? It isn't placed in any scene; a conversation that staged it will lose it.`,
+      message: `Delete "${mutationSetLabel(set)}"? It isn't placed in any scene; a conversation that staged it will lose it.${chatLine ? `\n\n${chatLine}` : ""}`,
       confirmLabel: "Delete",
       destructive: true,
       onConfirm: () => removeStaged(set.id),
@@ -108,7 +110,7 @@
   async function removeStaged(id: string): Promise<void> {
     error = "";
     try {
-      setMutationSetEntries((await api.deleteMutationSetEntry(id)).entries);
+      setMutationSetEntries((await withChatCascade(() => api.deleteMutationSetEntry(id))).entries);
     } catch (err) {
       error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
       await refreshMutationSetEntries().catch(() => {});

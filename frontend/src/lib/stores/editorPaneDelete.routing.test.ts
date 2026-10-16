@@ -408,6 +408,10 @@ describe("editorPaneDelete: an entry delete names and closes the chats about it 
 
   it("closes the cascaded chat's open tab without saving it, and leaves other chats open", async () => {
     const saveNode = vi.spyOn(api, "saveNode");
+    // The roster after the cascade: only the chat NOT about the entry survives.
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({
+      sessions: [{ id: "chat_other", title: "Something else", subject: "lore_other" }] as never,
+    });
     await editorPanes.requestDeleteScene("pane_1");
     await requested.onConfirm();
     const open = editorPanes.panes.map((p) => p.id);

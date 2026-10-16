@@ -8,6 +8,7 @@
 import { derived, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshPlotBoard, refreshAfterMutation, openPlotBoardPane } from "@/lib/stores/plotBoard";
+import { withChatCascade } from "@/lib/stores/chats";
 import { refreshCharacterArcs } from "@/lib/stores/characterArcs";
 import { deckEntriesStore } from "@/lib/stores/decks";
 import type { CharacterArcEntry, PlotlineEntry, PlotlineSummary } from "@/lib/types";
@@ -60,7 +61,7 @@ export function setPlotlines(entries: PlotlineSummary[]): void {
 // (the backend blanks the cards' now-dangling plotline ref). The editor-pane delete
 // path (editorPaneDelete) is separate.
 export async function deletePlotline(id: string): Promise<void> {
-  setPlotlines((await api.deletePlotline(id)).entries);
+  setPlotlines((await withChatCascade(() => api.deletePlotline(id))).entries);
   await refreshPlotBoard();
 }
 

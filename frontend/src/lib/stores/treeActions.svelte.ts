@@ -34,7 +34,7 @@ import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { plotlineEntriesStore, refreshPlotlines } from "@/lib/stores/plotlines";
 import { deckEntriesStore, refreshDecks } from "@/lib/stores/decks";
 import { refreshTodos } from "@/lib/stores/todos";
-import { refreshChatSessions } from "@/lib/stores/chats";
+import { chatCascadeLine, withChatCascade } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { resolveAdoptedTagFields } from "@/lib/stores/tagNodes";
 import {
@@ -327,6 +327,9 @@ class TreeActions {
       message += `\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} content that will be deleted — those links will break:`;
     }
 
+    const chatLine = chatCascadeLine([...collectNodeIdSet(node), ...collectSceneIdSet(node)]);
+    if (chatLine) message += `\n\n${chatLine}`;
+
     confirmService.request({
       title: `Delete ${typeName}`,
       message,
@@ -360,7 +363,9 @@ class TreeActions {
         }
       });
     }
-    const next = await config.api.delete(node.id);
+    // #2347: the delete cascades to chats about any node in the subtree; their tabs
+    // close here, after the panes above (their flush hit a still-existing file).
+    const next = await withChatCascade(() => config.api.delete(node.id));
     config.applyStructure(next);
     if (config.afterDelete) {
       await config.afterDelete();
@@ -391,12 +396,8 @@ class TreeActions {
       leaf: { singular: "scene", plural: "scenes" },
       container: { singular: "sub-container", plural: "sub-containers" },
     },
-    afterDelete: () => {
-      // A deleted scene may have cascade-deleted its attached chats (#1078); drop
-      // them from the Chats pane (#1087).
-      void refreshChatSessions();
-      return refreshTodos();
-    },
+    // Chats the delete cascaded to are reconciled in #performTreeDelete (#2347).
+    afterDelete: () => refreshTodos(),
     afterRename: (nodeId, title) => editorPanes.syncRename(nodeId, title),
     supportsDrag: true,
     showStatusStripe: true,
@@ -428,8 +429,6 @@ class TreeActions {
       leaf: { singular: "note", plural: "notes" },
       container: { singular: "topic", plural: "topics" },
     },
-    // A deleted note may have cascade-deleted attached chats (#1078/#1087).
-    afterDelete: () => refreshChatSessions(),
     supportsDrag: true,
     showStatusStripe: false,
     containerHasEditor: false,

@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.spyOn(api, "listCards").mockResolvedValue({ entries: [] });
   vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
   vi.spyOn(api, "listDecks").mockResolvedValue({ entries: [] });
+  vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] }); // the delete's chat reconcile (#2347)
 });
 afterEach(() => vi.restoreAllMocks());
 

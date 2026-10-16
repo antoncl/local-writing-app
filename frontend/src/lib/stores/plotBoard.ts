@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { type CardTextChoice, type PlaceRequest, type PlaceTo, type StoryAnchor, textChoiceConflict } from "@/lib/api/plot";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { refreshStructure, setStructure, structureStore } from "@/lib/stores/structure";
+import { withChatCascade } from "@/lib/stores/chats";
 import { refreshCards } from "@/lib/stores/plotCards";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
@@ -156,7 +157,7 @@ export async function createCard(title: string, id?: string, to?: PlaceTo): Prom
 // `refresh` is false only inside a batched undo (a seed-undo deletes N cards) — the
 // caller does ONE trailing refresh instead of N (the refetch-storm fix, #909).
 export async function deleteCard(cardId: string, refresh = true): Promise<void> {
-  await api.deleteCard(cardId);
+  await withChatCascade(() => api.deleteCard(cardId)); // #2347: chats about the card go too
   if (refresh) await refreshAfterMutation();
 }
 
@@ -350,7 +351,7 @@ export async function readSceneSummary(sceneId: string): Promise<string> {
 // Delete a manuscript container (a deck's realize-undo — the container was made for it).
 // Updates the structure store (it leaves the tree) and the board (its box goes).
 export async function deleteContainerNode(containerId: string): Promise<void> {
-  setStructure(await api.deleteStructureNode(containerId));
+  setStructure(await withChatCascade(() => api.deleteStructureNode(containerId)));
   await refreshAfterMutation();
 }
 
@@ -365,7 +366,7 @@ export function containerHoldsNodes(containerId: string): boolean {
 // separate detach needed. Updates the manuscript structure store (the scene leaves
 // the tree, mirroring editorPaneDelete) AND the board (the card projects homeless).
 export async function deleteScene(sceneId: string): Promise<void> {
-  setStructure(await api.deleteScene(sceneId));
+  setStructure(await withChatCascade(() => api.deleteScene(sceneId)));
   await refreshAfterMutation();
 }
 

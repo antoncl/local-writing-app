@@ -19,6 +19,7 @@ function handle() {
     parkSnapshot: vi.fn(),
     revealMutationMarker: vi.fn(),
     revealFirstMention: vi.fn(),
+    installFlags: vi.fn(),
   };
 }
 
@@ -84,5 +85,17 @@ describe("pane intents wait for the pane's handle", () => {
     vi.advanceTimersByTime(250);
     expect(h.revealFirstMention).toHaveBeenCalledTimes(1);
     expect(h.revealFirstMention).toHaveBeenCalledWith(["Marek Vell", "the Captain"]);
+  });
+
+  it("installs conversation flags once the pane and its handle both exist (ADR-0100)", () => {
+    const flags = { edits: [], notes: [] };
+    editorPanes.installFlagsInOpenPane("scene_1", flags);
+    vi.advanceTimersByTime(250);
+    editorPanes.panes = [{ ...createEmptyEditorPane("p1"), document: { type: "manuscript", id: "scene_1" } }];
+    const h = handle();
+    editorPanes.editorPaneComponents = { p1: h as never };
+    vi.advanceTimersByTime(250);
+    expect(h.installFlags).toHaveBeenCalledTimes(1);
+    expect(h.installFlags).toHaveBeenCalledWith(flags);
   });
 });

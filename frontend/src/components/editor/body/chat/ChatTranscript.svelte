@@ -42,6 +42,11 @@
      *  becomes a link. Null when the chat isn't about a loaded scene. */
     quoteSource?: string | null;
     onQuoteClick?: (quote: string) => void;
+    /** ADR-0100: turn a finished assistant reply (by index) into flags on the
+     *  subject scene. Absent = no Place flags button. */
+    onPlaceFlags?: (index: number) => void;
+    /** The reply being placed (shows "Placing…" and disables the others). */
+    placingIndex?: number | null;
   }
 
   let {
@@ -54,6 +59,8 @@
     onJumpToLatest,
     quoteSource = null,
     onQuoteClick,
+    onPlaceFlags,
+    placingIndex = null,
   }: Props = $props();
 
   let katexReady = $state(false);
@@ -203,6 +210,18 @@
           {/each}
         </div>
       {/if}
+      {#if onPlaceFlags && message.role === "assistant" && message.content && !(chatRunning && i === chatHistory.length - 1)}
+        <div class="cbv-turn-meta cbv-place-flags">
+          <button
+            type="button"
+            class="cbv-place-flags-btn"
+            data-testid="place-flags"
+            title="Turn this reply's suggestions into edits and notes on the scene"
+            disabled={placingIndex !== null}
+            onclick={() => onPlaceFlags(i)}
+          >{placingIndex === i ? "Placing…" : "Place flags"}</button>
+        </div>
+      {/if}
     </div>
   {/each}
 </div>
@@ -321,4 +340,10 @@
     display: flex; align-items: center; gap: 12px; padding: 0 2px;
     font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-3);
   }
+  .cbv-place-flags-btn {
+    background: transparent; border: none; padding: 2px 4px; border-radius: 4px;
+    font: inherit; color: var(--text-2); cursor: pointer;
+  }
+  .cbv-place-flags-btn:hover:not(:disabled) { background: var(--inset); color: var(--text); }
+  .cbv-place-flags-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>

@@ -961,7 +961,12 @@ button.row-action-add.active {
   text-underline-offset: 3px;
   border-radius: 2px;
   cursor: pointer;
-  white-space: pre-wrap; /* shows an edit's paragraph breaks */
+}
+/* Shows an edit's paragraph breaks (ADR-0100 §6). The attribute outranks
+   ProseMirror's own `.ProseMirror [contenteditable="false"] { white-space:
+   normal }`, which otherwise wins on the widget (verified in the browser). */
+.editor-body .line-edit-new[contenteditable="false"] {
+  white-space: pre-wrap;
 }
 .editor-body .line-edit-current {
   background: var(--accent-soft);

@@ -4,6 +4,7 @@
   // roots stay direct children of NodeEditor's `.editor-panel` grid, so its
   // `> :global(*)` column pinning still reaches them.
   import FootDock from "@/components/editor/FootDock.svelte";
+  import FlagReviewBar from "@/components/editor/body/FlagReviewBar.svelte";
   import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
   import LineNoteReviewBar from "@/components/editor/body/LineNoteReviewBar.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
@@ -48,7 +49,13 @@
 
 <!-- Line edit review (#2460): a pane footer row, NOT inside the prose scroll frame, so it never covers text.
      A lore check's notes (ADR-0098) take the same row; one review is open per editor. -->
-{#if lineEditReview?.lineNotes}
+{#if lineEditReview?.flags}
+  <FlagReviewBar
+    flags={lineEditReview.flags}
+    onAcceptAllEdits={() => lineEditReview?.acceptAllFlagEdits()}
+    onRejectAll={() => lineEditReview?.rejectAllFlags()}
+  />
+{:else if lineEditReview?.lineNotes}
   <LineNoteReviewBar
     lineNotes={lineEditReview.lineNotes}
     meta={lineEditReview.meta}

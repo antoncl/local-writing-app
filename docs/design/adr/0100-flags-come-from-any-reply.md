@@ -1,6 +1,6 @@
 # ADR-0100: Flags come from any reply, not from an output mode
 
-**Status:** Living draft (2026-10-16) — #2517. Slices built: #2519 (S1). Text by Claude from a conversation with Anton about a *Scene / doctor* reply that held both notes and an edit with nowhere to put them; revised against a cold implementing thread.
+**Status:** Living draft (2026-10-16) — #2517. Slices built: #2519 (S1), #2520 (S2), #2522 (S3). Text by Claude from a conversation with Anton about a *Scene / doctor* reply that held both notes and an edit with nowhere to put them; revised against a cold implementing thread.
 **Context verified against `36b7894c` (2026-10-16), the code before the feature.**
 
 ### How this ADR is kept
@@ -42,7 +42,7 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 
 5. **One review holds both kinds.** The kind moves from the review to the item: each item carries its kind, which supplies its decoration, card, key and validity check.
    - Items are kept in position order (an install sorts them, since a mixed list arrives one kind after the other) and step across both kinds; the cards' ‹ › step through all of them.
-   - One combined bar when a review holds both kinds; a selection run's review, holding one kind, keeps its bar as today. The bar comes with S2, the first thing that installs a mixed review.
+   - Flags from a conversation get one combined bar ("Flag i of n", *Accept all edits* while any edit remains, *Reject all*); a selection run's review keeps its own bar as today.
    - **Accept all** applies the edits only; **Reject all** rejects the edits and dismisses the notes. Keep (ADR-0099 §3) works on both.
    - **Retry** is hidden for flags placed from a conversation: it re-runs a selection prompt, which isn't what made them.
    - The review closes when no item of **either** kind remains.
@@ -85,12 +85,12 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 
 ## Consequences
 
-- A stored review item carries its kind; the kind's per-item parts are dispatched per item, and stepping crosses both kinds (S1, built). The combined bar and the run that closes a mixed review only when both kinds are gone come with S2.
+- A stored review item carries its kind; the kind's per-item parts are dispatched per item, and stepping crosses both kinds (S1, built). The combined bar, and the run that closes a mixed review only when both kinds are gone (S2, built).
 - Accept and the edit widget handle a `replace` with paragraph breaks (S1, built).
 - One backend endpoint for the extraction turn; `_read_notes` gains `entry_required`; a name-to-entry lookup is shared with follow-ups; a new trace kind (S2).
 - **Place flags** on assistant replies in scene conversations; its wiring lives in its own module (`ChatBodyView.svelte` is at 1450 of 1500 lines), with the transcript taking the action per message; the scene pane's controller gains an entry point that installs flags from outside the pane; opening the scene beside the chat is shared with quote reveal (S2).
 - A built-in *Revising* layout preset (S3).
 - Planned slices, each its own PR:
   - **S1 — one review, both kinds; edits that add paragraphs.** *Done when:* a test installs edits and notes together and steps, accepts, keeps, dismisses and Accept-alls across them, and the review closes only when both are gone; an edit whose `replace` has two paragraphs inserts two paragraphs; every selection run behaves as before. *Not:* any conversation change.
-  - **S2 — Place flags in scene conversations.** *Done when:* an end-to-end test on a fixture scene conversation presses Place flags on a reply that proposes a two-paragraph insertion and remarks on two passages, and the scene opens beside the chat with two notes and one edit; Keep turns a note into a TODO; Accept inserts the paragraphs. And in the browser, on *The Water Line*: *Scene / doctor*'s diagnosis reply places its notes on the quoted passages and the Route B sketch as an edit. *Not:* lore entry conversations, automatic placement, streaming, or a change to any prompt.
+  - **S2 — Place flags in scene conversations.** *Done when:* the route test runs the extraction turn against a mocked model (both kinds, entry resolution, retry, the transcript cut and the cue); component tests cover the button, the chat-side controller and the mixed review in a real editor; and in the browser, on a scratch project with the extraction answered by a canned reply, Place flags opens the scene on its Body with one edit and two notes in one review, Accept inserts the new paragraph, and Keep turns each note into a TODO. (The app has no chat end-to-end harness; its e2e suite is a smoke test.) Still to do by Anton, with a real model: *Scene / doctor* on *The Water Line*. *Not:* lore entry conversations, automatic placement, streaming, or a change to any prompt.
   - **S3 — the *Revising* layout.** *Done when:* the layout menu offers *Revising* beside the other built-ins, and applying it shows the outline, the editor with room for a scene and its conversation side by side, and TODOs. *Not:* any change to the user's saved presets.

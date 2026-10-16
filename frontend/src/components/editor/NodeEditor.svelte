@@ -24,6 +24,7 @@
   import EditorRailContent from "@/components/editor/EditorRailContent.svelte";
   import { createSectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import type { SceneFlags } from "@/lib/editor-core/conversationFlags";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
@@ -618,6 +619,11 @@
 
   export function revealFirstMention(names: string[]) {
     void inBody(() => bodyHost?.revealFirstMention(names));
+  }
+
+  // Flags placed from a conversation (ADR-0100) land in the prose body.
+  export function installFlags(flags: SceneFlags) {
+    void inBody(() => bodyHost?.installFlags(flags));
   }
 
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge

@@ -15,6 +15,7 @@ import type {
   AICostSummary,
   CreateAIInvocationRequest,
 } from "@/lib/types";
+import type { FlagExtraction } from "@/lib/aiTypes";
 import { request, streamNdjson } from "./core";
 
 export const aiApi = {
@@ -51,6 +52,19 @@ export const aiApi = {
     return request<OllamaHostHealth>("/ai/ollama/health", {
       method: "POST",
       body: JSON.stringify({ host }),
+    });
+  },
+  // ADR-0100: one extraction turn turns a chosen reply into flags (edits + notes)
+  // against the scene's current text. The backend records the cost on the chat.
+  extractFlags(body: {
+    messages: { role: string; content: string }[];
+    assistant_id: string | null;
+    chat_id: string;
+    scene_text: string;
+  }) {
+    return request<FlagExtraction>("/ai/flags/extract", {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   },
   // Force a refetch of the live price catalogue (machine-global) and clear

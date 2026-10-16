@@ -17,8 +17,10 @@ export function editKeepNote(reason: string, replace: string): string {
   return reason ? `${reason} — ${proposed}` : proposed;
 }
 
-/** A lore-check note's TODO text: the problem and the entry it is about. */
-export const noteKeepNote = (problem: string, entryName: string): string => `${problem} (${entryName})`;
+/** A note's TODO text: the problem and the entry it is about (a remark from a
+ *  conversation has none, ADR-0100 §7: the problem alone). */
+export const noteKeepNote = (problem: string, entryName: string): string =>
+  entryName ? `${problem} (${entryName})` : problem;
 
 /** What the caller lends: the embedded-mark write (null when it could not be
  *  made) and the file-TODO write (throws when it failed). */

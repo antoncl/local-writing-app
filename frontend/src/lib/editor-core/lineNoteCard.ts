@@ -34,6 +34,8 @@ export function buildLineNoteCard(
   text.dataset.testid = "line-note-card-problem";
   text.textContent = problem;
 
+  // A remark from a conversation has no entry (ADR-0100 §7): no entry line, no
+  // Open entry, so Keep is the first action.
   const entry = document.createElement("div");
   entry.className = "lnc-entry";
   entry.dataset.testid = "line-note-card-entry";
@@ -41,13 +43,17 @@ export function buildLineNoteCard(
 
   const row = document.createElement("div");
   row.className = "lec-actions";
+  if (entryName) {
+    row.append(
+      button("line-note-card-open", "lec-accept", "Open entry", "Open the entry this note is about", "Open entry", actions.openEntry),
+    );
+  }
   row.append(
-    button("line-note-card-open", "lec-accept", "Open entry", "Open the entry this note is about", "Open entry", actions.openEntry),
     button("line-note-card-keep", "lec-step", "Keep this note as a TODO", KEEP_TITLE, "Keep", actions.keep),
     button("line-note-card-dismiss", "lec-step", "Dismiss this note", "Dismiss this note (Alt+Backspace)", "Dismiss", actions.dismiss),
     button("line-note-card-prev", "lec-step", "Previous note", "Previous note (Alt+Up)", "‹", actions.prev),
     button("line-note-card-next", "lec-step", "Next note", "Next note (Alt+Down)", "›", actions.next),
   );
-  card.append(text, entry, row);
+  card.append(text, ...(entryName ? [entry] : []), row);
   return card;
 }

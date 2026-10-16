@@ -121,7 +121,7 @@ function cloneNode(node: LayoutNode): LayoutNode {
 
 // --- Built-in presets -----------------------------------------------------
 
-export type PresetName = "writing" | "schema" | "research";
+export type PresetName = "writing" | "schema" | "research" | "revising";
 
 // The starting "writing" arrangement: Draft on the left, editor in the centre,
 // Lore/Research over TODO/Search on the right. The other presets re-anchor the
@@ -148,6 +148,16 @@ export const PRESETS: Record<PresetName, () => Split> = {
       group(G_EDITOR, []),
       group(G_SIDE, ["lore"]),
     ], [0.24, 0.54, 0.22]),
+  // Working through a scene with its conversations (ADR-0100 §10): the outline
+  // over the chats on the left, a wide editor so a scene and its chat sit side
+  // by side (a quote link or Place flags splits the scene out beside the chat),
+  // and TODOs on the right, where kept flags land.
+  revising: () =>
+    split("root", "row", [
+      split("s-left", "col", [group(G_DRAFT, ["outline"]), group(G_SIDE, ["chats", "lore"])], [0.55, 0.45]),
+      group(G_EDITOR, []),
+      group(G_TOOLS, ["todo", "search"]),
+    ], [0.18, 0.64, 0.18]),
 };
 
 export function defaultLayout(): Split {

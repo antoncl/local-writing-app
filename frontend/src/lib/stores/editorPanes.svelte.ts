@@ -371,7 +371,7 @@ class EditorPanesController {
     //    id — and GET /api/scenes/<node_…> 404s. Every other kind has
     //    document.id === scene.id, so keying/fetching off scene.id is a no-op there.
     //  - The getter is chosen by the pane's declared kind. A kind with no reload
-    //    getter (chat, plus assistant/project/view) is skipped — never mis-fetched
+    //    getter (chat) is skipped — never mis-fetched
     //    as a scene, whose 404 would also reject this whole Promise.all and starve
     //    the panes that CAN refresh (#1977).
     //  - The dedupe key folds in `authoringLayerId` (#2189): a lore pane reads
@@ -396,7 +396,9 @@ class EditorPanesController {
       if (!pane.scene || !pane.document) return pane;
       const refreshedDocument = refreshedByKey.get(`${pane.document.type}:${pane.scene.id}:${pane.authoringLayerId ?? ""}`);
       if (!refreshedDocument) return pane;
-      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedDocument.metadata) : refreshedDocument.metadata;
+      // `?? {}`: a view carries no fields, so its fetched document has no `metadata`.
+      const freshMetadata = refreshedDocument.metadata ?? {};
+      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(freshMetadata) : freshMetadata;
       nextReloads[pane.id] = {
         token: this.nextMetadataReloadToken,
         metadata: cloneMetadata(draftMetadata),

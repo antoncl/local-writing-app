@@ -673,6 +673,27 @@ describe("a node target (ADR-0088 lore surface)", () => {
     expect(strip.parked).toBe(null);
   });
 
+  it("a rejected capture surfaces the backend message and leaves the strip where it was (#1996)", async () => {
+    const strip = await parkedNode();
+    await strip.park("snap_1");
+    listNodeSnapshots.mockClear();
+    captureNodeSnapshot.mockRejectedValue(new Error("There is no override at this layer to snapshot."));
+
+    await strip.capture();
+
+    expect(strip.notice).toBe("There is no override at this layer to snapshot.");
+    // Not moved: still parked, nothing re-listed, and the button is usable again.
+    expect(strip.parked).toBe("snap_1");
+    expect(listNodeSnapshots).not.toHaveBeenCalled();
+    expect(strip.busy).toBe(false);
+
+    // The next successful capture clears it.
+    captureNodeSnapshot.mockResolvedValue(SNAPSHOT);
+    await strip.capture();
+    expect(strip.notice).toBe(null);
+    expect(strip.parked).toBe(null);
+  });
+
   it("restores through the node route and forwards the re-folded entry", async () => {
     const strip = await parkedNode("book");
     await strip.park("snap_1");

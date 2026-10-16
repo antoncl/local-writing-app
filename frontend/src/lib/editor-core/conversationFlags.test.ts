@@ -148,6 +148,15 @@ describe("AiSuggestionController.installConversationFlags", () => {
     expect(notices).toEqual(["None of the 1 flags could be found in the scene."]);
   });
 
+  it("leaves an open review alone when none of the new flags can be placed", () => {
+    const { editor, ctrl } = setup();
+    ctrl.installConversationFlags(FLAGS);
+    const before = reviewState(editor.state).items.length;
+    ctrl.installConversationFlags({ edits: [{ find: "nope", replace: "x", reason: "r" }], notes: [] });
+    expect(reviewState(editor.state).items).toHaveLength(before);
+    expect(ctrl.flags?.remaining).toBe(before);
+  });
+
   it("refuses to start a prompt run while a flags run is open", async () => {
     const { ctrl, notices } = setup();
     ctrl.installConversationFlags(FLAGS);

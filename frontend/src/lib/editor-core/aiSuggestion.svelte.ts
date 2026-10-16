@@ -900,17 +900,19 @@ export class AiSuggestionController {
   installConversationFlags(flags: SceneFlags): void {
     const editor = this.#deps.getEditor();
     if (!editor || editor.isDestroyed) return;
-    this.#stopWatchingLineEdits?.();
-    this.#stopWatchingLineEdits = null;
-    rejectAllFlags(editor.view);
-    this.#closeLineEdits();
-    this.meta = null;
+    // Place first: an open review is only replaced when there is something to
+    // put in its place (placing reads the document, it doesn't change it).
     const { edits, notes, dropped, total } = placeSceneFlags(editor.state.doc, flags);
     const notice = flagsNotice(dropped, total);
     if (edits.length + notes.length === 0) {
       if (notice) this.#deps.onNotice?.(notice);
       return;
     }
+    this.#stopWatchingLineEdits?.();
+    this.#stopWatchingLineEdits = null;
+    rejectAllFlags(editor.view);
+    this.#closeLineEdits();
+    this.meta = null;
     const names = flagEntryNames(flags);
     const editKind = editsKind({
       keep: (view, edit) => void this.#keepFlag(view, edit.id, edit.from, edit.to, edit.find, editKeepNote(edit.reason, edit.replace)),

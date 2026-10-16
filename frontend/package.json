@@ -22,7 +22,7 @@
     "@xyflow/svelte": "^1.6.1",
     "codemirror": "^6.0.1",
     "dompurify": "^3.4.11",
-    "katex": "^0.17.0",
+    "katex": "^0.19.0",
     "marked": "^15.0.6",
     "svelte": "^5.16.0",
     "turndown": "^7.2.0",

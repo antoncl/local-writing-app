@@ -239,3 +239,25 @@ describe("detached Details rail is ephemeral, never rehydrated (#1258)", () => {
     expect(tabs).toContain("lore");
   });
 });
+
+describe("the Revising preset (ADR-0100 §10)", () => {
+  beforeEach(() => workspaceLayout.reset());
+
+  it("puts the outline and chats left, an empty editor centre, TODOs right", () => {
+    workspaceLayout.applyPreset("revising");
+    expect(workspaceLayout.groupOf("chats")?.id).toBe(G_SIDE);
+    expect(workspaceLayout.groupOf("outline")?.id).not.toBe(G_EDITOR);
+    expect(workspaceLayout.groupOf("todo")?.id).toBeTruthy();
+    expect(workspaceLayout.groupOf("todo")?.id).not.toBe(G_EDITOR);
+    // Every preset keeps the editor group, so open documents re-home into it.
+    expect(workspaceLayout.allGroups().some((g) => g.id === G_EDITOR)).toBe(true);
+    expect(workspaceLayout.activePreset).toBe("revising");
+  });
+
+  it("survives a serialize round-trip", () => {
+    workspaceLayout.applyPreset("revising");
+    const restored = deserialize(JSON.stringify(serialize(workspaceLayout.root, G_EDITOR, "revising")));
+    expect(restored).not.toBeNull();
+    expect(flattenPanels(restored!.root)).toEqual(flattenPanels(workspaceLayout.root));
+  });
+});

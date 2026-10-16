@@ -119,4 +119,10 @@ describe("line edits as a word diff", () => {
     }
     expect(editRunsCache.size).toBe(2);
   });
+
+  it("shows the going word before the coming one (older text first, #2533)", () => {
+    const editor = setup([{ find: "cat sat", replace: "dog sat", reason: "r" }]);
+    const marks = all(editor, ".r-now, .r-was").map((n) => n.textContent);
+    expect(marks).toEqual(["cat", "dog"]);
+  });
 });

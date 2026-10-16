@@ -6,6 +6,7 @@ import { Fragment, Slice } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, type EditorView } from "@tiptap/pm/view";
 import type { DiffRun } from "@/lib/types";
+import { olderFirst } from "@/lib/utils/diffRuns";
 import { diffRuns } from "@/lib/utils/snapshotDiff";
 import type { PlacedEdit } from "../lineEdits";
 import { buildLineEditCard } from "../lineEditCard";
@@ -48,7 +49,9 @@ function editRuns(find: string, replace: string): DiffRun[] {
   let runs = editRunsCache.get(key);
   if (!runs) {
     // The replacement is the other version (cool), the passage the page's (warm).
-    runs = diffRuns(replace, find);
+    // The passage is the older text, so its going words come before the coming
+    // ones ("on in", not "in on") — older text first (#2533).
+    runs = olderFirst(diffRuns(replace, find), "now");
     // The offsets walk `find`, so its runs must spell it exactly. The engine is
     // markdown-aware; should it ever not reproduce the texts, mark the whole
     // passage and the whole replacement rather than drift onto the wrong words.

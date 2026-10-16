@@ -19,6 +19,36 @@
 import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
 import type { DiffRun, DiffView } from "@/lib/types";
 
+/**
+ * Older text first, newer text second (#2533). `diffRuns(was, now)` emits a
+ * changed region's `was` runs before its `now` runs, which reads past → present
+ * when `was` is the past (a snapshot). Where `was` is the FUTURE — a proposal,
+ * a line edit's replacement — that put the new text before the text it would
+ * replace. A review whose older side is `now` passes its runs through here:
+ * within each changed region the `now` runs come first. Only the order moves;
+ * each side keeps its own runs in order, so grouping, adopting and both
+ * reassemblies are unchanged.
+ */
+export function olderFirst(runs: DiffRun[], older: "was" | "now"): DiffRun[] {
+  if (older === "was") return runs;
+  const out: DiffRun[] = [];
+  let region: DiffRun[] = [];
+  const flush = () => {
+    out.push(...region.filter((r) => r.kind === "now"), ...region.filter((r) => r.kind === "was"));
+    region = [];
+  };
+  for (const run of runs) {
+    if (run.kind === "equal") {
+      flush();
+      out.push(run);
+    } else {
+      region.push(run);
+    }
+  }
+  flush();
+  return out;
+}
+
 /** Which runs a view state shows. `equal` is in every one. */
 function shows(view: DiffView, kind: DiffRun["kind"]): boolean {
   return kind === "equal" || view === "both" || view === kind;

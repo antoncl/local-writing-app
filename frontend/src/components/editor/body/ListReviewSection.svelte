@@ -122,8 +122,9 @@
           label={`${label} order`}
           {view}
           runs={[
-            { kind: "was", text: orderMarkdown(oTitles), stacked: true },
+            // The current order first, the proposed after it (#2533).
             { kind: "now", text: orderMarkdown(lTitles), stacked: true },
+            { kind: "was", text: orderMarkdown(oTitles), stacked: true },
           ]}
           onSettle={(adopted) => onSettleUnit("order", adopted)}
         />

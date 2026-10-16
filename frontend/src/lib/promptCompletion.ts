@@ -21,8 +21,8 @@ import { pickerMembership } from "@/lib/utils/pickerSources";
 
 // ADR-0092 §7.2: "deprecated" is a real manifest kind (the Deprecated table),
 // but it is never offered — the option lists below filter to explicit kinds,
-// so a deprecated symbol (e.g. `use_lore`) type-checks here without ever
-// reaching a completion list.
+// so a deprecated symbol type-checks here without ever reaching a
+// completion list.
 type VocabKind = "variable" | "helper" | "filter" | "tag" | "deprecated";
 type VocabSymbol = { name: string; kind: VocabKind; signature: string; summary: string };
 

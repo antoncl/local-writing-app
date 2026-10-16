@@ -278,8 +278,6 @@ The story so far:
 
 ## `use(node, "stable"|"volatile")` and `auto_lore()`
 
-*`auto_lore()` was `use_lore()`* — the old name still works (a deprecated alias removed at 1.0, ADR-0092 §7.2), but rendering it now emits a warning; rename it in your own prompts.
-
 These **select** context; they do not emit it. The template's job is to name what the model should know about — `use(node)` picks one specific node, `auto_lore()` enables the scene's implicit lore (the reference-graph retrieval). The backend then does the work: it selects, dedups, places, tiers, and caches the chosen nodes. **Both return an empty string** — nothing lands in the template output where you call them.
 
 **Signature**

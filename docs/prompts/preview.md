@@ -60,10 +60,10 @@
 | Field | Meaning |
 | --- | --- |
 | `messages` | Role-tagged messages, each broken into content blocks. A block is **just text** — the author does not mark caching, so blocks carry no cache flag. |
-| `warnings` | Author errors that didn't block rendering (unknown role names, nested roles), and the deprecation notice for `use_lore()`. |
+| `warnings` | Author errors that didn't block rendering (unknown role names, nested roles),. |
 | `char_count` / `estimated_tokens` | Size of the rendered prompt. `estimated_tokens` sums `cache_blocks`, so it includes the backend-placed lore. |
 | `cache_blocks` | The **send-path composition**, in volatility order — the cache strip. Each block has a `label` (`system`, `stable lore`, `volatile lore`, or a role), a `role`, a `tier` (`"stable"`, `"volatile"`, or `null` for an uncached conversation turn), a `tokens` count, and its `text`. This is where the tiered lore the backend selected appears (made visible again), badged by tier. See [The cache strip](#the-cache-strip). |
-| `lore_enabled` | `true` when the template called `auto_lore()` (or its deprecated alias `use_lore()`). A prompt that only calls `use()` reports `false` and still carries its picks in `cache_blocks`. |
+| `lore_enabled` | `true` when the template called `auto_lore()`. A prompt that only calls `use()` reports `false` and still carries its picks in `cache_blocks`. |
 | `used_node_ids` / `used_node_hints` | Ids the template selected with `use()`, and any `use(node, "stable"\|"volatile")` cache-tier hints. |
 | `session_id` | Echo of the supplied session id (or `null`). |
 | `rendered` | `true` if rendering succeeded. |

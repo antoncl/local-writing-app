@@ -221,7 +221,7 @@ from the uncached user message into the correctly-tiered system blocks.
 - **Templates stop emitting lore.** `roleplay.md` and `revise-entry.md` keep a
   gate-only call (so `lore_enabled` is still captured at the lock render) but no
   longer paste lore text into the prompt. Idiom: **a small, clearly-named gate
-  helper** (e.g. `auto_lore()`, was `use_lore()` — ADR-0092 §7.2) is preferred over the obscure `{% set _ =
+  helper** (e.g. `auto_lore()` — ADR-0092 §7.2) is preferred over the obscure `{% set _ =
   relevant_lore() %}` side-effect trick or a silently-empty `{{ relevant_lore()
   }}`; the name documents intent ("this prompt uses lore; the app injects it").
 - **The send path starts using the session baseline that already exists but is

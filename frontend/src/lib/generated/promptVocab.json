@@ -228,12 +228,6 @@
       "kind": "tag",
       "signature": "{% role \"system\"|\"user\"|\"assistant\" %}…{% endrole %}",
       "summary": "Marks the wrapped content's message role. An override: un-roled prose is homed to the base type's default role (usually `system`), so a prose-only prompt just works."
-    },
-    {
-      "name": "use_lore",
-      "kind": "deprecated",
-      "signature": "use_lore()",
-      "summary": "`auto_lore()` — the same call under its real name: it turns automatic lore on and prints nothing."
     }
   ]
 }

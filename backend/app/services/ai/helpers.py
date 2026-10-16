@@ -62,15 +62,6 @@ _UNSET = object()
 VALID_CONTEXT_POLICIES = {"always", "auto", "manual_only", "never"}
 DEFAULT_CONTEXT_POLICY = "auto"
 
-# ADR-0092 §7.2: `use_lore()` is the deprecated alias for `auto_lore()`, kept
-# until 1.0 (#2154). Every render that calls the alias emits this notice once
-# (however many times it is called) into `RenderedTemplate.warnings`, via the
-# per-render slot the preview's `_annotate_rendered_from_env` reads back.
-# Module-level so tests can pin the exact text.
-USE_LORE_DEPRECATION_NOTICE = (
-    "`use_lore()` is now `auto_lore()`; rename it — the old name is removed at 1.0"
-)
-
 # ADR-0093 §1: `use(node, snapshot=id)` records one warnings entry (deduped)
 # instead of a pair when the call can't resolve to exactly one entry.
 USE_SNAPSHOT_NEEDS_ONE_ENTRY = (
@@ -488,10 +479,8 @@ def _register_stop(env: SandboxedEnvironment) -> None:
     env.globals["stop"] = _stop
 
 
-def _register_lore_gate(
-    env: SandboxedEnvironment, lore_invoked_slot: list[bool], deprecation_notices: list[str]
-) -> None:
-    """Register `auto_lore()`, its deprecated alias `use_lore()`, and `no_lore()`
+def _register_lore_gate(env: SandboxedEnvironment, lore_invoked_slot: list[bool]) -> None:
+    """Register `auto_lore()` and `no_lore()`
     — split out of `register_helpers` (#1544-style) so that function's own
     statement count stays under the complexity gate.
 
@@ -511,17 +500,6 @@ def _register_lore_gate(
         return ""
 
     env.globals["auto_lore"] = _auto_lore
-
-    # ADR-0092 §7.2: `use_lore()` is the deprecated alias, kept until 1.0 — the
-    # removal checklist is #2154 on the 1.0.0 milestone. It sets the
-    # same slot as `auto_lore()` and appends the one-time deprecation notice.
-    def _use_lore() -> str:
-        _auto_lore()
-        if USE_LORE_DEPRECATION_NOTICE not in deprecation_notices:
-            deprecation_notices.append(USE_LORE_DEPRECATION_NOTICE)
-        return ""
-
-    env.globals["use_lore"] = _use_lore
 
     # ADR-0092 Amendment 1 §3: `no_lore()` declares the prompt lore-free — the
     # *always* entries are not placed and automatic lore is off. Like
@@ -694,7 +672,7 @@ def register_helpers(
         return _mutations_index_slot[0]
 
     # ADR-0057 §2, narrowed by ADR-0092 §7.1: the execution-derived AUTOMATIC-lore
-    # gate. Only `auto_lore()` (and its deprecated alias `use_lore()`, §7.2) sets
+    # gate. Only `auto_lore()` sets
     # this per-render slot — `use()` places a pick without touching it (§7.1
     # withdraws ADR-0060 §2's "using a node means the chat is lore-enabled");
     # the caller (build_preview) reads it back after
@@ -705,12 +683,6 @@ def register_helpers(
     # per-render, so it never leaks across renders.
     lore_invoked_slot: list[bool] = [False]
     env.lore_invoked = lore_invoked_slot  # type: ignore[attr-defined]
-
-    # ADR-0092 §7.2: a render-time slot the preview reads back into
-    # `rendered.warnings` — one deprecation notice per render, deduped, no
-    # matter how many times a deprecated alias is called.
-    deprecation_notices: list[str] = []
-    env.deprecation_notices = deprecation_notices  # type: ignore[attr-defined]
 
     # ADR-0067 S1: the field contract accumulator. A prompt registers the fields
     # it commits to producing via `{% do field_contract.store(f) %}` and renders
@@ -735,7 +707,7 @@ def register_helpers(
         lambda value: adjacent_scene(project, schema, _coerce_entry_ref(project, schema, value), 1)
     )
 
-    _register_lore_gate(env, lore_invoked_slot, deprecation_notices)
+    _register_lore_gate(env, lore_invoked_slot)
     _register_lore_as_of(env)
     _register_scene_mutations(env, project, schema, _mutations_index)
     _register_todos(env, project)

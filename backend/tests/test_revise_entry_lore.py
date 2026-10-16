@@ -74,14 +74,11 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         # even though nothing is rendered inline.
         _, env = self._render({"entry": "", "entry_type": "lore:character"})
         self.assertTrue(env.lore_invoked[0])
-        # ADR-0092 §7.2: the real name is quiet — no deprecation notice.
-        self.assertEqual(env.deprecation_notices, [])
 
     def test_revise_render_flips_the_lore_gate(self) -> None:
         subject = self._make_note("Alderman Vane", body="A city councilman.")
         _, env = self._render({"entry": subject, "entry_type": ""})
         self.assertTrue(env.lore_invoked[0])
-        self.assertEqual(env.deprecation_notices, [])
 
     def test_render_emits_no_lore_inline_even_with_an_always_note(self) -> None:
         # The regression guard: an always-policy world note must NOT be baked into
@@ -167,8 +164,7 @@ class FollowAChangeLoreGateTests(unittest.TestCase):
     than a literal "gate is off" assertion — and, since ADR-0092 §7.1, the
     gate really IS off: `use(e)` (kept, to deliver the dependent) places a
     pick without touching the automatic-lore slot — `helpers._use` no longer
-    sets `lore_invoked`; only `helpers._auto_lore` (and its deprecated alias
-    `helpers._use_lore`) does. So `chat.lore_enabled` ends up False for this
+    sets `lore_invoked`; only `helpers._auto_lore` does. So `chat.lore_enabled` ends up False for this
     built-in, and its `use(e)` dependent plus the "Relevant lore" include's
     explicit picks (which also stopped setting the slot, §7.1) are placed as
     declared-only picks, automatic lore off. What #2143 removed was the

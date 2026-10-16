@@ -716,7 +716,7 @@ def _annotate_rendered_from_env(
     Split out of `build_preview` (#1544) so that function's own statement count stays
     under the complexity gate."""
     # ADR-0092 §7.1: carry the execution-derived AUTOMATIC-lore gate off the env
-    # (set by `auto_lore()`, or its deprecated alias `use_lore()`, §7.2) onto the
+    # (set by `auto_lore()`) onto the
     # rendered result, so the preview route can surface it and the chat can
     # persist `lore_enabled`. The default `[False]` covers an env that never
     # registered the helper.
@@ -754,10 +754,6 @@ def _annotate_rendered_from_env(
     # can persist `field_contract_stored` and the commit reads it back instead
     # of re-rendering a separate extractor.
     rendered.field_contract_stored = list(getattr(getattr(env, "field_contract", None), "stored", None) or [])
-    # ADR-0092 §7.2: carry any deprecation notices (e.g. `use_lore()`'s) off the
-    # env onto the rendered result's warnings, so they ride `warnings` wherever
-    # it already shows — the meta line, the inputs dialog, the editor preview.
-    rendered.warnings.extend(getattr(env, "deprecation_notices", []) or [])
     # ADR-0093 §1: carry any render-time warnings (e.g. an unresolved snapshot
     # pick) off the env onto the rendered result's warnings.
     rendered.warnings.extend(getattr(env, "render_warnings", []) or [])

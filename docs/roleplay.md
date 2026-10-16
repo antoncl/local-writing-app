@@ -89,7 +89,7 @@ You are playing {{ char.title }}.
 {{ character_turns(scene, inputs.character) }}
 ```
 
-`auto_lore()` (was `use_lore()`) flips the lore gate — the backend places the relevant lore itself, tiered stable/volatile for caching. `story_so_far(scene)` supplies the preceding-scenes narrative context.
+`auto_lore()` flips the lore gate — the backend places the relevant lore itself, tiered stable/volatile for caching. `story_so_far(scene)` supplies the preceding-scenes narrative context.
 
 ## Caching
 

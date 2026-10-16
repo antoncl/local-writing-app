@@ -166,14 +166,14 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertFalse(response.json()["lore_enabled"])
 
     def test_preview_uses_helpers(self) -> None:
-        # `pov()` renders inline; `use_lore()` selects lore for the backend to
+        # `pov()` renders inline; `auto_lore()` selects lore for the backend to
         # place and emits nothing (ADR-0060 §2 — no inline lore emission).
         response = self.client.post(
             "/api/ai/preview",
             json={
                 "template_source": (
                     '{% role "user" %}POV: {{ pov(scene).title }}\n'
-                    "{{ use_lore() }}{% endrole %}"
+                    "{{ auto_lore() }}{% endrole %}"
                 ),
                 "target_scene_id": self.scene_id,
             },
@@ -181,7 +181,7 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertIn("POV: Honor Harrington", text)
-        # use_lore() emits nothing — lore is backend-placed, not inline.
+        # auto_lore() emits nothing — lore is backend-placed, not inline.
         self.assertNotIn("Captain of the Fearless", text)
 
     def test_preview_can_include_prompt_snippet(self) -> None:
@@ -484,7 +484,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "user" %}{{ use_lore() }}{% endrole %}',
+                "template_source": '{% role "user" %}{{ auto_lore() }}{% endrole %}',
                 "target_scene_id": self.scene_id,
                 "session_id": "test-session",
                 "commit": True,
@@ -744,21 +744,6 @@ class PreviewEndpointTests(unittest.TestCase):
         warnings = response.json()["warnings"]
         self.assertTrue(any("Unknown role" in w for w in warnings), warnings)
 
-    def test_use_lore_alias_warns_on_the_wire(self) -> None:
-        # ADR-0092 §7.2: the deprecated alias's notice rides `warnings` all the
-        # way to the preview response.
-        from app.services.ai.helpers import USE_LORE_DEPRECATION_NOTICE
-
-        response = self.client.post(
-            "/api/ai/preview",
-            json={
-                "template_source": '{% role "system" %}{{ use_lore() }}{% endrole %}',
-                "target_scene_id": self.scene_id,
-            },
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn(USE_LORE_DEPRECATION_NOTICE, response.json()["warnings"])
-
     def test_auto_lore_emits_no_warning_on_the_wire(self) -> None:
         # The real name is quiet.
         response = self.client.post(
@@ -796,7 +781,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -809,7 +794,7 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
 
     def test_pick_only_preview_carries_the_picks_and_reports_lore_enabled_false(self) -> None:
-        # ADR-0092 §7.1: a prompt that only calls `use()` (no `use_lore()`)
+        # ADR-0092 §7.1: a prompt that only calls `use()` (no `auto_lore()`)
         # mirrors the send's pick-only placement — the preview's `lore_enabled`
         # is false, but `cache_blocks` still carries the pick's tier row and
         # `lore_fit` reports it kept with nothing left out.
@@ -840,7 +825,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -874,7 +859,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -942,7 +927,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -989,7 +974,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": "",
             },
         )
@@ -1029,7 +1014,7 @@ class PreviewEndpointTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -1070,7 +1055,7 @@ class PreviewEndpointTests(unittest.TestCase):
                 metadata=scene.metadata,
             ),
         )
-        template = '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}'
+        template = '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}'
         # Before any assistant exists: the resolver's defaults, everything fits.
         unbudgeted = self.client.post(
             "/api/ai/preview",
@@ -1133,7 +1118,7 @@ class PreviewEndpointTests(unittest.TestCase):
                 },
             ),
         )
-        template = '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}'
+        template = '{% role "system" %}Write the scene.{% endrole %}{{ auto_lore() }}'
         response = self.client.post(
             "/api/ai/preview",
             json={

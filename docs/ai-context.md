@@ -168,8 +168,7 @@ These lines cover it. None of them prints anything where you write it.
 A picked card arrives with its synopsis; a picked scene arrives with its full
 prose, so pick scenes sparingly.
 
-`auto_lore()` was called `use_lore()`; the old name still works until 1.0 but
-adds a warning to every estimate, so rename it when you see one. A prompt that
+A prompt that
 calls neither sends its picks and the always-included entries; one that calls
 `no_lore()` sends only its picks. If a prompt calls both, `no_lore()` wins and
 the estimate warns. Chats started without a prompt send no lore. Details of the calls are in [Writing prompts](#guide:writing-prompts)

@@ -49,23 +49,34 @@ LINE_NOTES_TRUNCATED_ERROR = (
 LINE_NOTES_UNREADABLE_ERROR = "The model's reply wasn't a readable list of notes."
 
 
-def _read_notes(raw: str) -> tuple[list[LineNote], int] | None:
-    """`(notes, skipped)` read from ``raw``, or ``None`` when it isn't a readable
-    note list (no JSON object, or no ``notes`` array). Unusable items are skipped
-    and counted rather than failing the list: not an object, or a
-    non-string/empty ``quote``, ``problem`` or ``entry``."""
-    obj = load_json_object(raw)
-    items = obj.get("notes") if obj is not None else None
-    if not isinstance(items, list):
-        return None
+def note_items(items: list, *, entry_required: bool) -> list[LineNote]:
+    """The usable notes among ``items``: skipped when not an object, or a
+    non-string/empty ``quote``, ``problem`` or (when ``entry_required``)
+    ``entry``. Without ``entry_required`` an absent or non-string ``entry``
+    reads as ``""`` (ADR-0100)."""
     notes: list[LineNote] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         quote, problem, entry = item.get("quote"), item.get("problem"), item.get("entry")
-        if not all(isinstance(v, str) and v for v in (quote, problem, entry)):
+        if not entry_required and not isinstance(entry, str):
+            entry = ""
+        required = (quote, problem, entry) if entry_required else (quote, problem)
+        if not all(isinstance(v, str) and v for v in required):
             continue
         notes.append(LineNote(quote=quote, problem=problem, entry=entry))
+    return notes
+
+
+def _read_notes(raw: str, *, entry_required: bool = True) -> tuple[list[LineNote], int] | None:
+    """`(notes, skipped)` read from ``raw``, or ``None`` when it isn't a readable
+    note list (no JSON object, or no ``notes`` array). Unusable items are skipped
+    and counted rather than failing the list (see `note_items`)."""
+    obj = load_json_object(raw)
+    items = obj.get("notes") if obj is not None else None
+    if not isinstance(items, list):
+        return None
+    notes = note_items(items, entry_required=entry_required)
     return notes, len(items) - len(notes)
 
 

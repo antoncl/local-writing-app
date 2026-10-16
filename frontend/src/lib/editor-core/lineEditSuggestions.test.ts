@@ -50,17 +50,17 @@ const setupSelected = () => ({ editor: setup(true) });
 const docText = (editor: Editor) => editor.state.doc.textContent;
 
 describe("LineEditSuggestions", () => {
-  it("install leaves the document alone and decorates the old text and the new-text widget", () => {
+  it("install leaves the document alone and decorates the passages and the new-words widget", () => {
     const editor = setup();
     expect(docText(editor)).toBe(TEXT);
     expect(lineEditState(editor.state).edits).toHaveLength(2);
     const dom = editor.view.dom;
-    const old = dom.querySelectorAll(".line-edit-old");
+    const old = dom.querySelectorAll(".line-edit");
     expect(old).toHaveLength(2);
     expect(old[0].getAttribute("title")).toBe("livelier");
-    // one new-text span (the pure cut has none); the only buttons are the current edit's card
-    expect(dom.querySelectorAll(".line-edit-new")).toHaveLength(1);
-    expect(dom.querySelector(".line-edit-new")?.textContent).toBe("dog");
+    // one new-words span (the pure cut has none); the only buttons are the current edit's card
+    expect(dom.querySelectorAll(".r-was")).toHaveLength(1);
+    expect(dom.querySelector(".r-was")?.textContent).toBe("dog");
     expect(dom.querySelectorAll("button")).toHaveLength(5);
     expect(dom.querySelectorAll("button")).toHaveLength(dom.querySelectorAll(".line-edit-card button").length);
   });
@@ -144,14 +144,14 @@ describe("LineEditSuggestions", () => {
       expect(down.defaultPrevented).toBe(true);
     });
 
-    it("wide mode puts the same card at the edit itself, right after its new text; one card either way", () => {
+    it("wide mode puts the same card at the edit itself, right after its passage; one card either way", () => {
       const editor = setup();
       setLineEditCardWide(editor.view, true);
       const found = cards(editor);
       expect(found).toHaveLength(1);
       const card = found[0] as HTMLElement;
       expect(card.classList.contains("line-edit-card-wide")).toBe(true);
-      expect((card.previousSibling as HTMLElement).className).toContain("line-edit-new");
+      expect((card.previousSibling as HTMLElement).className).toContain("line-edit-current");
       expect(reasonOf(editor)).toBe("livelier");
       setLineEditCardWide(editor.view, false);
       expect(cards(editor)).toHaveLength(1);
@@ -166,27 +166,26 @@ describe("LineEditSuggestions", () => {
     expect(to).toBe(editor.state.doc.content.size - 1);
   });
 
-  it("the first edit is current, and the current one carries the stronger class on both parts", () => {
+  it("the first edit is current, and only the current passage carries the outline class", () => {
     const editor = setup();
     const [first, second] = lineEditState(editor.state).edits;
     expect(lineEditState(editor.state).currentId).toBe(first.id);
     const dom = editor.view.dom;
-    expect(dom.querySelectorAll(".line-edit-old.line-edit-current")).toHaveLength(1);
-    expect(dom.querySelector(".line-edit-new")?.classList.contains("line-edit-current")).toBe(true);
+    expect(dom.querySelectorAll(".line-edit.line-edit-current")).toHaveLength(1);
+    expect(dom.querySelector(".line-edit.line-edit-current")?.textContent).toBe("cat");
     setCurrentLineEdit(editor.view, second.id);
-    expect(dom.querySelector(".line-edit-new")?.classList.contains("line-edit-current")).toBe(false);
-    expect(dom.querySelector(".line-edit-old.line-edit-current")?.textContent).toBe(" on the mat");
+    expect(dom.querySelector(".line-edit.line-edit-current")?.textContent).toBe(" on the mat");
   });
 
-  it("clicking the old text or the new text makes that edit current", () => {
+  it("clicking the passage or the new words makes that edit current", () => {
     const editor = setup();
     const [first, second] = lineEditState(editor.state).edits;
     setCurrentLineEdit(editor.view, second.id);
-    editor.view.dom.querySelector(".line-edit-new")!.dispatchEvent(
+    editor.view.dom.querySelector(".r-was")!.dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
     );
     expect(lineEditState(editor.state).currentId).toBe(first.id);
-    const oldSecond = editor.view.dom.querySelectorAll(".line-edit-old")[1] as HTMLElement;
+    const oldSecond = editor.view.dom.querySelectorAll(".line-edit")[1] as HTMLElement;
     editor.view.someProp("handleClick", (f) => f(editor.view, 0, { target: oldSecond } as unknown as MouseEvent));
     expect(lineEditState(editor.state).currentId).toBe(second.id);
   });

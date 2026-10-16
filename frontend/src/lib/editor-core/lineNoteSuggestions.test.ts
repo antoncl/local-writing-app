@@ -79,7 +79,7 @@ describe("LineNoteSuggestions (notes kind)", () => {
     const quotes = dom.querySelectorAll(".line-note-quote");
     expect(quotes).toHaveLength(2);
     expect(quotes[0].getAttribute("title")).toBe("Mira has no cat");
-    expect(dom.querySelectorAll(".line-edit-old, .line-edit-new")).toHaveLength(0);
+    expect(dom.querySelectorAll(".line-edit, .r-now, .r-was")).toHaveLength(0);
     expect(dom.querySelectorAll(".line-note-current")).toHaveLength(1);
     expect(editor.state.doc.textContent).toBe(TEXT);
   });

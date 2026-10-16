@@ -17,16 +17,11 @@ if TYPE_CHECKING:
     from app.services.project_service import ProjectService
 
 
-def resolve_follow_ups(
-    project: ProjectService, raw: list[dict[str, str]], committed_id: str | None
-) -> tuple[list[FollowUp], int]:
-    """``raw`` (parsed ``{"entry", "change", "why"}`` items) resolved against the
-    lore roster's titles and aliases (``list_lore_entries`` — the same names the
-    ADR-0091 mention scan uses), case- and whitespace-insensitively. Returns the
-    resolved follow-ups and how many items were dropped: no match, a name two
-    entries share, the committed entry itself, or a repeat of (entry, change)."""
-    if not raw:
-        return [], 0
+def lore_names(project: ProjectService) -> tuple[dict[str, set[str]], dict[str, str]]:
+    """The lore roster's names: entry ids by normalised title/alias
+    (``list_lore_entries`` — the same names the ADR-0091 mention scan uses), and
+    each entry's title by id (the id when it has none). Shared by follow-ups and
+    the flag extraction's note entries (ADR-0100)."""
     ids_by_name: dict[str, set[str]] = {}
     titles: dict[str, str] = {}
     for entry in project.list_lore_entries().entries:
@@ -38,6 +33,20 @@ def resolve_follow_ups(
         for name in names:
             if name.strip():
                 ids_by_name.setdefault(normalise_name(name), set()).add(entry.id)
+    return ids_by_name, titles
+
+
+def resolve_follow_ups(
+    project: ProjectService, raw: list[dict[str, str]], committed_id: str | None
+) -> tuple[list[FollowUp], int]:
+    """``raw`` (parsed ``{"entry", "change", "why"}`` items) resolved against the
+    lore roster's titles and aliases (`lore_names`), case- and
+    whitespace-insensitively. Returns the
+    resolved follow-ups and how many items were dropped: no match, a name two
+    entries share, the committed entry itself, or a repeat of (entry, change)."""
+    if not raw:
+        return [], 0
+    ids_by_name, titles = lore_names(project)
     resolved: list[FollowUp] = []
     seen: set[tuple[str, str]] = set()
     dropped = 0

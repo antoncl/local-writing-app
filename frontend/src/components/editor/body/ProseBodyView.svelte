@@ -43,6 +43,7 @@
   import { LineEditSuggestions } from "@/lib/editor-core/lineEditSuggestions";
   import { SearchMatchHighlight, type SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
+  import type { SceneFlags } from "@/lib/editor-core/conversationFlags";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import { editorCallback } from "@/lib/editor-core/editorCallback";
@@ -437,6 +438,7 @@
     updateSelectionMenu();
     publishImplicitContext();
     reveals.apply(loadedSceneId, editor, editorElement ?? null);
+    applyPendingFlags();
     // Restore the remembered scroll (#2013) on a real open only, once the
     // just-set content has laid out. A frame with no height (the node reopened
     // on a list tab, so this host is hidden) holds the offset for the
@@ -460,6 +462,7 @@
     editor?.commands.clearContent(false);
     loadedSceneId = null;
     reveals.clear();
+    pendingFlags = null;
     liveWordCount = 0;
     syncEditorEmpty();
   }
@@ -521,6 +524,23 @@
 
   export function revealFirstMention(names: string[]): void {
     queueReveal((id) => reveals.queueReview(id, { names }));
+  }
+
+  // Flags placed from a conversation (ADR-0100): queued the same way, since
+  // `loadScene` resets the AI controller - they must land AFTER the load.
+  let pendingFlags: { sceneId: string; flags: SceneFlags } | null = null;
+
+  function applyPendingFlags(): void {
+    const pending = pendingFlags;
+    if (!pending || loadedSceneId !== pending.sceneId) return;
+    pendingFlags = null;
+    aiSuggestion.installConversationFlags(pending.flags);
+  }
+
+  export function installFlags(flags: SceneFlags): void {
+    if (!scene) return;
+    pendingFlags = { sceneId: scene.id, flags };
+    applyPendingFlags();
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {

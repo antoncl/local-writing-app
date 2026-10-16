@@ -1166,6 +1166,43 @@ class EntryPatchExtraction(BaseModel):
     raw_reply: str | None = None
 
 
+class ExtractFlagsRequest(BaseModel):
+    """POST /api/ai/flags/extract body — ADR-0100 §3. `messages` is the
+    transcript ENDING at the assistant reply the writer chose (the client cuts
+    it); `scene_text` is the scene's current plain text, the only text the
+    flags may quote."""
+
+    messages: list[ChatMessage] = Field(default_factory=list)
+    assistant_id: str | None = None
+    chat_id: str = Field(min_length=1)
+    scene_text: str
+
+
+class FlagNote(BaseModel):
+    """A note read from a conversation reply (ADR-0100). `entry_id` /
+    `entry_name` are set only when the model's `entry` resolved to exactly one
+    lore entry; otherwise the note is a plain remark."""
+
+    quote: str
+    problem: str
+    entry_id: str | None = None
+    entry_name: str | None = None
+
+
+class FlagExtraction(BaseModel):
+    """Result of the flag extraction turn (ADR-0100 §3): the reply's edits and
+    notes, with the turn's `cost_usd` / `usage` and the chat's new total
+    (`cost_usd_total`, as a commit's is). `ok` false carries an `error`."""
+
+    ok: bool = True
+    error: str | None = None
+    edits: list[LineEdit] = Field(default_factory=list)
+    notes: list[FlagNote] = Field(default_factory=list)
+    cost_usd: float | None = None
+    usage: ChatUsage | None = None
+    cost_usd_total: float | None = None
+
+
 class CreateAIInvocationRequest(BaseModel):
     """POST /api/ai/invocations body. Server assigns id + ts; everything
     else flows from the prior generate response and the accept context.

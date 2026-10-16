@@ -32,6 +32,8 @@ from app.models import (
     EntryPatchExtraction,
     ExtractEntryDraftRequest,
     ExtractEntryPatchRequest,
+    ExtractFlagsRequest,
+    FlagExtraction,
     OllamaHostHealth,
     OllamaHostHealthRequest,
     PreviewContentBlock,
@@ -56,6 +58,7 @@ from app.services.ai.chat import (
     run_chat_turn,
 )
 from app.services.ai.extraction import run_entry_patch_extraction
+from app.services.ai.flag_extraction import run_flag_extraction
 from app.services.ai.history_budget import apply_history_window
 from app.services.ai.line_edits import (
     LINE_EDITS_RESPONSE_SCHEMA,
@@ -934,3 +937,12 @@ async def extract_entry_draft(
         return await run_entry_patch_extraction(
             project, entry_type=request.entry_type, creating=True, request=request
         )
+
+
+@router.post("/api/ai/flags/extract", response_model=FlagExtraction)
+async def extract_flags(project: CurrentProject, request: ExtractFlagsRequest) -> FlagExtraction:
+    """Turn a conversation reply into flags (ADR-0100 §3): one extraction turn
+    that continues the chat and reads the reply's edits and notes. Read-only —
+    the client places them on the scene."""
+    with translate_errors():
+        return await run_flag_extraction(project, request)

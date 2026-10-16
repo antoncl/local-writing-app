@@ -41,7 +41,8 @@ const asNote = (item: unknown) => item as LineNoteSuggestion;
 
 /** A kind bound to one run's links. */
 export function notesKind(links: LineNoteLinks): ReviewKind {
-  const nameOf = (note: LineNoteSuggestion) => links.entryName(note.entry) || note.entry;
+  // A note with no entry (a remark from a conversation) has no name to fall back to.
+  const nameOf = (note: LineNoteSuggestion) => (note.entry ? links.entryName(note.entry) || note.entry : "");
   return {
     name: "notes",
     idAttr: "data-line-note-id",

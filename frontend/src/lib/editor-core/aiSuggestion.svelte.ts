@@ -47,16 +47,22 @@ import {
   currentLineNote,
   dismissAllLineNotes,
   dismissCurrentLineNote,
+  editsKind,
+  installFlags,
   installLineEdits,
   installLineNotes,
   keepReviewItem,
   lineEditState,
   lineNoteState,
+  rejectAllFlags,
   rejectAllLineEdits,
   rejectCurrentLineEdit,
   stepLineEdit,
   stepLineNote,
 } from "@/lib/editor-core/lineEditSuggestions";
+import { notesKind } from "@/lib/editor-core/reviewKinds/notes";
+import { reviewState, stepReview } from "@/lib/editor-core/reviewKinds/core";
+import { flagEntryNames, flagsNotice, placeSceneFlags, type SceneFlags } from "@/lib/editor-core/conversationFlags";
 import { editKeepNote, keepFlag, noteKeepNote, type KeepWriters } from "@/lib/editor-core/keepFlag";
 import { fetchLineNotes, noteNotice, type NotesDone } from "@/lib/editor-core/aiLineNotes";
 import {
@@ -131,6 +137,10 @@ export class AiSuggestionController {
   // one's 1-based place, and the lore entries the check ran against. Null when no
   // note list is open. Only one review (edits OR notes) is open per editor.
   lineNotes: { remaining: number; index: number; checkedAgainst: CheckedEntry[] } | null = $state(null);
+  // Flags placed from a conversation (ADR-0100): one review over both kinds, with
+  // its own combined bar. Independent of lineEdits / lineNotes, which stay null.
+  // `edits` = how many of the remaining are edits (Accept all shows only then).
+  flags: { remaining: number; index: number; edits: number } | null = $state(null);
 
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
@@ -469,6 +479,10 @@ export class AiSuggestionController {
     }
     if (this.lineNotes) {
       this.#deps.onNotice?.("Finish reviewing the notes first — dismiss them or Dismiss all.");
+      return;
+    }
+    if (this.flags) {
+      this.#deps.onNotice?.("Finish reviewing the flags first — resolve them or Reject all.");
       return;
     }
     if (this.suggestionId) {
@@ -877,6 +891,90 @@ export class AiSuggestionController {
     this.#lineEditRange = null;
     this.lineEdits = null;
     this.lineNotes = null;
+    this.flags = null;
+  }
+
+  // ---------- Flags placed from a conversation (ADR-0100) ----------
+  // Called from outside the pane (the chat's Place flags) once the scene has
+  // loaded. An open review of either sort closes first, as a new run replaces it.
+  installConversationFlags(flags: SceneFlags): void {
+    const editor = this.#deps.getEditor();
+    if (!editor || editor.isDestroyed) return;
+    // Place first: an open review is only replaced when there is something to
+    // put in its place (placing reads the document, it doesn't change it).
+    const { edits, notes, dropped, total } = placeSceneFlags(editor.state.doc, flags);
+    const notice = flagsNotice(dropped, total);
+    if (edits.length + notes.length === 0) {
+      if (notice) this.#deps.onNotice?.(notice);
+      return;
+    }
+    this.#stopWatchingLineEdits?.();
+    this.#stopWatchingLineEdits = null;
+    rejectAllFlags(editor.view);
+    this.#closeLineEdits();
+    this.meta = null;
+    const names = flagEntryNames(flags);
+    const editKind = editsKind({
+      keep: (view, edit) => void this.#keepFlag(view, edit.id, edit.from, edit.to, edit.find, editKeepNote(edit.reason, edit.replace)),
+    });
+    const noteKind = notesKind({
+      openEntry: (id) => this.#deps.onOpenEntry?.(id),
+      entryName: (id) => names.get(id) ?? "",
+      keep: (view, note) =>
+        void this.#keepFlag(view, note.id, note.from, note.to, note.quote, noteKeepNote(note.problem, names.get(note.entry) ?? "")),
+    });
+    installFlags(editor.view, [
+      ...edits.map((e) => ({ ...e, kind: editKind })),
+      ...notes.map((n) => ({ ...n, kind: noteKind })),
+    ]);
+    this.#syncFlags(editor);
+    this.#watchFlags(editor);
+    if (notice) this.#deps.onNotice?.(notice);
+  }
+
+  // Follow the open review like #watchLineEdits, over items of either kind: keep
+  // the count current and close the run when none is left. Cost was recorded by
+  // the backend on the chat, so there is no telemetry to write here.
+  #watchFlags(editor: Editor): void {
+    const onTransaction = editorCallback(() => {
+      if (reviewState(editor.state).items.length > 0) {
+        this.#syncFlags(editor);
+        return;
+      }
+      this.#closeLineEdits();
+    });
+    editor.on("transaction", onTransaction);
+    this.#stopWatchingLineEdits = () => editor.off("transaction", onTransaction);
+  }
+
+  #syncFlags(editor: Editor): void {
+    const { items, currentId } = reviewState(editor.state);
+    const at = items.findIndex((i) => i.id === currentId);
+    if (at < 0) return;
+    const next = { remaining: items.length, index: at + 1, edits: items.filter((i) => i.kind.name === "edits").length };
+    const old = this.flags;
+    if (old && old.remaining === next.remaining && old.index === next.index && old.edits === next.edits) return;
+    this.flags = next;
+  }
+
+  acceptAllFlagEdits(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.flags) acceptAllLineEdits(editor.view);
+  }
+
+  rejectAllFlags(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.flags) rejectAllFlags(editor.view);
+  }
+
+  nextFlag(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.flags) stepReview(editor.view, 1);
+  }
+
+  prevFlag(): void {
+    const editor = this.#deps.getEditor();
+    if (editor && this.flags) stepReview(editor.view, -1);
   }
 
   acceptAllLineEdits(): void {

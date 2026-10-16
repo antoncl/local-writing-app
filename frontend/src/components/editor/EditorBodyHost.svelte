@@ -32,6 +32,7 @@
   import ReviewItemsPanel from "@/components/editor/ReviewItemsPanel.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+  import type { SceneFlags } from "@/lib/editor-core/conversationFlags";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { keyedListKeyMember, keyedShapeFor } from "@/lib/editor-core/keyedList";
@@ -368,6 +369,12 @@
 
   export function revealFirstMention(names: string[]): void {
     proseBodyView?.revealFirstMention(names);
+  }
+
+  // Flags placed from a conversation (ADR-0100): prose body only, like the
+  // reveals above.
+  export function installFlags(flags: SceneFlags): void {
+    proseBodyView?.installFlags(flags);
   }
 
   // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge

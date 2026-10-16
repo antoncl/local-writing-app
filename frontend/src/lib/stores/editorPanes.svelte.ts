@@ -70,6 +70,7 @@ import {
   reconcileNodeFromServer as runReconcileNodeFromServer,
 } from "./editorPaneReconcile";
 import type { SearchReveal } from "@/lib/editor-core/searchMatchHighlight";
+import type { SceneFlags } from "@/lib/editor-core/conversationFlags";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -159,6 +160,8 @@ interface EditorPaneComponentHandle {
   // mention by name.
   revealMutationMarker: (markerId: string) => void;
   revealFirstMention: (names: string[]) => void;
+  // ADR-0100: flags a conversation reply was turned into, placed on the scene.
+  installFlags: (flags: SceneFlags) => void;
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
@@ -1341,6 +1344,10 @@ class EditorPanesController {
 
   revealFirstMentionInOpenPane(sceneId: string, names: string[]): void {
     this.#withPaneHandle(sceneId, (handle) => handle.revealFirstMention(names));
+  }
+
+  installFlagsInOpenPane(sceneId: string, flags: SceneFlags): void {
+    this.#withPaneHandle(sceneId, (handle) => handle.installFlags(flags));
   }
 
   // An intent aimed at a pane the same gesture is still creating (ADR-0090

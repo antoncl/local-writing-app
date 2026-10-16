@@ -344,4 +344,47 @@ describe("ChatTranscript", () => {
       expect(container.querySelector("[data-quote]")).toBeNull();
     });
   });
+
+  // ADR-0100: Place flags on finished assistant replies.
+  describe("Place flags", () => {
+    const turns = [
+      { role: "user", content: "Check the scene" },
+      { role: "assistant", content: "First reply" },
+      { role: "user", content: "More" },
+      { role: "assistant", content: "Second reply" },
+    ] as ChatMessage[];
+
+    it("shows on every finished assistant reply with content, never on user turns, and reports the index", async () => {
+      const onPlaceFlags = vi.fn();
+      render(ChatTranscript, { chatHistory: turns, chatRunning: false, onPlaceFlags });
+      const buttons = screen.getAllByTestId("place-flags");
+      expect(buttons).toHaveLength(2);
+      await fireEvent.click(buttons[0]);
+      expect(onPlaceFlags).toHaveBeenLastCalledWith(1);
+      await fireEvent.click(buttons[1]);
+      expect(onPlaceFlags).toHaveBeenLastCalledWith(3);
+    });
+
+    it("is absent on the streaming tail and on an empty reply", () => {
+      const history = [...turns.slice(0, 3), { role: "assistant", content: "Streaming…" }] as ChatMessage[];
+      render(ChatTranscript, { chatHistory: history, chatRunning: true, onPlaceFlags: vi.fn() });
+      expect(screen.getAllByTestId("place-flags")).toHaveLength(1);
+      const empty = [...turns.slice(0, 3), { role: "assistant", content: "" }] as ChatMessage[];
+      const { container } = render(ChatTranscript, { chatHistory: empty, chatRunning: false, onPlaceFlags: vi.fn() });
+      expect(container.querySelectorAll("[data-testid=place-flags]")).toHaveLength(1);
+    });
+
+    it("renders nothing without onPlaceFlags", () => {
+      render(ChatTranscript, { chatHistory: turns, chatRunning: false });
+      expect(screen.queryByTestId("place-flags")).not.toBeInTheDocument();
+    });
+
+    it("labels the one in flight and disables them all", () => {
+      render(ChatTranscript, { chatHistory: turns, chatRunning: false, onPlaceFlags: vi.fn(), placingIndex: 1 });
+      const buttons = screen.getAllByTestId("place-flags") as HTMLButtonElement[];
+      expect(buttons[0].textContent).toBe("Placing…");
+      expect(buttons[1].textContent).toBe("Place flags");
+      expect(buttons.every((b) => b.disabled)).toBe(true);
+    });
+  });
 });

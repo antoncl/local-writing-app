@@ -21,6 +21,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { chatWritesProse } from "@/lib/chat/quoteLinks";
   import { QuoteSourceController } from "@/lib/chat/quoteSource.svelte";
+  import { PlaceFlagsController } from "@/lib/chat/placeFlags.svelte";
   import { revealQuoteBeside } from "@/lib/stores/quoteReveal";
   import { api } from "@/lib/api";
   import { lastReportedTurn } from "@/lib/chat/loreFit";
@@ -145,6 +146,15 @@
     untrack(() => quoteSource.schedule(chatSubject, structure));
   });
 
+  // ADR-0100: Place flags on a finished reply (its own module: this file's size cap).
+  const placeFlags = new PlaceFlagsController({
+    getChat: () => ({ chatId: scene?.id ?? null, assistantId: chatAssistantId || null, history: chatHistory }),
+    getScene: () => ({ sceneId: quoteSource.sceneId, plain: quoteSource.plain }),
+    hostPaneId: () => hostPaneId,
+    setCostTotal: (total) => {
+      if (chatSession) chatSession = { ...chatSession, cost_usd_total: total };
+    },
+  });
 
   let chatSession: ChatSession | null = $state(null);
   let loading = $state(false);
@@ -1205,6 +1215,10 @@
       quoteSource={chatWritesProse(chatFieldContractStored) ? null : quoteSource.plain}
       onQuoteClick={(quote) => quoteSource.sceneId &&
         void revealQuoteBeside({ sceneId: quoteSource.sceneId, quote, besidePanelId: hostPaneId })}
+      onPlaceFlags={quoteSource.sceneId && !chatWritesProse(chatFieldContractStored)
+        ? (index) => void placeFlags.place(index)
+        : undefined}
+      placingIndex={placeFlags.placingIndex}
     />
 
     {#if !isLocked && strippedInputs.some((i) => !i.hidden)}
@@ -1227,6 +1241,9 @@
     {/if}
     {#if chatNotice}
       <p class="cbv-notice">{chatNotice}</p>
+    {/if}
+    {#if placeFlags.notice}
+      <p class="cbv-notice">{placeFlags.notice}</p>
     {/if}
     {#if chatRawReply}
       <ChatRawReply text={chatRawReply} />

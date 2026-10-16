@@ -410,6 +410,26 @@ export type LineNote = {
   entry: string;
 };
 
+// One note extracted from a conversation reply (ADR-0100): the entry is optional
+// (a remark, not a lore contradiction) and arrives with its resolved name.
+export type FlagNote = {
+  quote: string;
+  problem: string;
+  entry_id: string | null;
+  entry_name: string | null;
+};
+
+// The extraction turn's result (ADR-0100 §3). Cost is recorded on the chat by the
+// backend; `cost_usd_total` is the chat's new running total.
+export type FlagExtraction = {
+  ok: boolean;
+  error: string | null;
+  edits: LineEdit[];
+  notes: FlagNote[];
+  cost_usd: number | null;
+  cost_usd_total?: number | null;
+};
+
 // A lore entry the check was run against, with its display name.
 export type CheckedEntry = {
   id: string;

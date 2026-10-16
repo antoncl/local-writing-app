@@ -330,6 +330,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
         parkSnapshot: vi.fn(),
         revealMutationMarker: vi.fn(),
         revealFirstMention: vi.fn(),
+        installFlags: vi.fn(),
       },
     };
     return tryMergeProse;
@@ -463,6 +464,7 @@ describe("flushReviewCommit — changed-on-disk recovery (#1965)", () => {
         parkSnapshot: vi.fn(),
         revealMutationMarker: vi.fn(),
         revealFirstMention: vi.fn(),
+        installFlags: vi.fn(),
       },
     };
   }

@@ -51,6 +51,11 @@ def parse_line_edits(raw: str) -> list[LineEdit] | None:
     items = obj.get("edits") if obj is not None else None
     if not isinstance(items, list):
         return None
+    return edit_items(items)
+
+
+def edit_items(items: list) -> list[LineEdit]:
+    """The usable edits among ``items`` (the item rules of `parse_line_edits`)."""
     edits: list[LineEdit] = []
     for item in items:
         if not isinstance(item, dict):

@@ -442,7 +442,7 @@ starts nothing; each slice gets its own issue and an explicit go.
 
 ## Amendment 1 — The Section selects the tab; body and the derived collections are fields (2026-09-21)
 
-**Status: proposed (2026-09-21).** Raised by Anton after dogfooding the shipped metadata rework.
+**Status: accepted (2026-09-21, PR #2098).** Raised by Anton after dogfooding the shipped metadata rework.
 Verified against `b4f2aca0` (2026-09-21).
 
 ### The problem

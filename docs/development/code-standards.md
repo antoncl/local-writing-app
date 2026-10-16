@@ -98,34 +98,30 @@ fixing.
 "these are pre-existing" aside — call them out and propose a fix or a tech-debt
 issue.
 
-## No pre-1.0 migrations
+## Storage changes owe a migration
 
-During the 0.x line, a change that alters the on-disk YAML shape (field rename,
-wrapper removal, new required key, changed parse grammar) implements **only the
-new shape**. Don't add a `field_a or field_b` fallback in the reader, don't add a
-step to `services/migrations.py`, and don't bump `project_schema_version`.
+Since 0.9.5 the project format is a stable contract: a change that alters the
+on-disk shape (field rename, wrapper removal, new required key, changed parse
+grammar) ships **with a migration** in `services/migrations.py` and a
+`CURRENT_VERSION` bump. Pick the step shape that fits — `RootMigration` (one
+project folder), `DocumentMigration` (one document at a time), or
+`ChainMigration` (needs the inherited chain) — per ADR-0071. Don't paper over an
+old shape with a `field_a or field_b` fallback in the reader instead: the
+migration is the one place the old shape is known.
 
-**Why.** Paying migration complexity on every pre-1.0 change isn't worth it while
-the format is still moving; test projects are disposable and get recreated when a
-format change breaks them. The migration commitment begins at **1.0.0** — the
-first version that owes a stable storage contract. From 1.0.0 onward, write
-proper migrations for any further change. (The long-term migration design is a
-separate concern that activates then.)
+**Why.** Writers' projects are real data, and 1.0 promises they survive
+upgrades. A migration converts each project once, backs it up first
+(`.migration-backups/`), and leaves every reader free of legacy branches.
+(Through 0.9.0 the rule was the opposite — implement only the new shape, recreate
+test projects — because the format was still moving. That ended at 0.9.5.)
 
-**Two obligations that come with the policy:**
+**Two obligations that come with it:**
 
-- **Warn before shipping a breaking change.** Any 0.x change that renames or
-  removes a required key, adds a required key with no in-code default, changes an
-  on-disk `*.yaml` shape, or changes how an existing field is parsed will make old
-  projects fail or silently lose data on next load. Say so plainly when finalizing
-  the change — which files/structures are affected and what breaks — so the author
-  can plan a test-project reset. If a *live* (non-test) project would lose data,
-  the warning isn't enough: pause and confirm before shipping. "Test projects are
-  disposable" is not "data loss is acceptable."
-- **Machine-level data is not recreated with a project.** Recreating a test
-  project only resets data inside the project folder. Assistants and `config.yaml`
-  live under `%APPDATA%/local-writing-app/` (machine-level, shared across every
-  project) and have no recreate trigger short of deleting that folder. A breaking
-  re-key that touches a machine-level shape leaves stale files silently
-  mis-rendering, and a fresh project won't fix them — either normalize on read for
-  those paths specifically, or tell the user to clear the machine-level folder.
+- **Pause before risking real data.** If a change could lose data a migration
+  can't faithfully carry over, say so plainly when finalizing it — which
+  files/structures are affected and what is lost — and confirm before shipping.
+- **Machine-level data is not migrated with a project.** Assistants and
+  `config.yaml` live under `%APPDATA%/local-writing-app/` (machine-level, shared
+  across every project); project migrations never touch them. A re-key that
+  touches a machine-level shape needs its own handling — normalize on read for
+  those paths specifically, or migrate them separately.

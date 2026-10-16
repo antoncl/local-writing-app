@@ -54,8 +54,9 @@ tree, and both a broad `git add` and `pre-commit`'s stash have destroyed
 concurrent work there. → `docs/development/worktrees.md`
 
 - **The one carve-out:** work depending on *unmerged* work forks the
-  dependency's branch, explicitly, and says so in the PR. **One work lane** —
-  sequence dependent work rather than running it in parallel.
+  dependency's branch, explicitly, and says so in the PR. **Lanes:** file-disjoint
+  work may run in parallel, each lane in its own worktree; dependent work is
+  sequenced, never run in parallel.
 - **Everything lands via a PR.** The `master gates` ruleset requires four checks
   (`backend`, `backend-windows`, `frontend`, `e2e`) on a branch **up to date with
   master**, and blocks direct and force pushes. No fast path for a one-line fix.
@@ -116,7 +117,7 @@ setup, and the exemption ratchet: → `docs/development/quality-gates.md`
   exemption is genuinely right, say so explicitly in the PR.
 - **Never report "green" without opening the run.** `gh pr checks` can show a
   green table for an earlier commit.
-- **File-size guard**: warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
+- **File-size guard**: warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts/.tsx/.css`.
 - **Style-token guard**: hex/rgb literals and non-token `font-size` in frontend
   style code fail (`docs/design/design-language.md` §5).
 - **`MEMORY.md` ratchets** — it is loaded on every request, so it may shrink and
@@ -124,9 +125,9 @@ setup, and the exemption ratchet: → `docs/development/quality-gates.md`
   index to one pointer line per memo and the content in the memo.
 
 **Where do I stop splitting? Match the target shapes, don't guess:**
-- a new **endpoint** = thin route in `main.py` → logic in a `services/<area>.py`
-  mixin (composed onto `ProjectService` via MRO) → models in `models.py`. No
-  business logic in `main.py`.
+- a new **endpoint** = thin route in a `routers/<area>.py` module → logic in a
+  `services/<area>.py` mixin (composed onto `ProjectService` via MRO) → models in
+  the `models/` package. No business logic in a router.
 - a new **pane / list UI** = compose `NodeList` + `NodeRow` with a scoped
   `<style>`; domain state lives in a `lib/stores/*.svelte.ts` rune controller,
   not the component. A bespoke list that won't reduce to those widgets is the
@@ -167,24 +168,31 @@ a Node kind; resist making any new thing "special enough to need its own
 subsystem" (`memory/feedback_chat_as_node_validation.md`).
 
 ### Backend layout (`backend/app/`)
-- `main.py` — the FastAPI app and ~90 HTTP routes (thin; delegates to services).
-- `models.py` — Pydantic request/response models (large, central).
+- `main.py` — app assembly only (~160 LOC): builds the FastAPI app, mounts the
+  routers and the built frontend.
+- `routers/` — the HTTP routes, one thin module per area (12: `ai`, `entries`,
+  `lore`, `project`, `scenes`, `plot`, …); they delegate to services.
+- `models/` — the Pydantic request/response models, one module per area.
 - `services/project_service.py` — `ProjectService`: project CRUD, scenes, schema,
-  search, structure. Cohesive slices live in mixins under `services/project/`
-  (`chats`, `lore`, `prompts`, `assistants`, `node_index`, `tree_structure`),
-  composed via MRO. The import path
+  search, structure. Cohesive slices live in ~90 mixins under `services/project/`
+  (`chats`, `lore`, `prompts`, `assistants`, `node_index`, …), composed via MRO;
+  the tree walker is `services/tree_structure.py`. The import path
   `app.services.project_service.ProjectService` stays stable.
 - `services/ai/` — provider abstraction. `profiles/` holds per-provider profiles
   (anthropic/openai/openrouter/ollama) + a `registry` and baked-in
   capability/price data; `templates.py` (Jinja2 prompts), `context_expander.py`,
   `sessions.py`, `tokens.py`, `preview.py`.
-- `services/migrations.py` — **pre-1.0: do not write migrations or defensive
-  reads** for storage-format changes; test projects are recreated
-  (`docs/development/code-standards.md` §No pre-1.0 migrations).
+- `services/migrations.py` — the migration ladder (ADR-0071). **Every
+  storage-shape change ships a migration** and a `CURRENT_VERSION` bump, not a
+  defensive read (`docs/development/code-standards.md` §Storage changes owe a
+  migration).
 
 ### Frontend layout (`frontend/src/`)
-Flat directory of ~36 `.svelte` components plus `.ts` helpers. `App.svelte` is
-the large root shell. `api.ts` is the single HTTP client to the backend. Core
+`App.svelte` is the root shell; every other component lives under
+`components/{chrome,dialogs,editor,panes,schema,widgets,workspace}/`, and domain
+state in `lib/stores/*.svelte.ts`. `lib/api.ts` composes the single HTTP client
+(`api`) from the per-domain modules in `lib/api/` (network primitives in
+`lib/api/core.ts`; all network I/O goes through it — gate-enforced). Core
 reusable widgets: `NodeRow`, `NodeList`, `NodeEditor` (+ body views
 `ProseBodyView`/`CodeBodyView`/`ChatBodyView`). **Read
 `memory/decisions_ui_widget_taxonomy.md` before adding any list/row/color
@@ -225,8 +233,9 @@ on every subsequent step of the session.
   independent searches in parallel.
 - **Read directly when you already know the target** file+line, or for a
   single-fact lookup. Don't delegate what's faster to just read.
-- **Read narrowly.** `App.svelte` (~4900 LOC) and `project_service.py` (~4500)
-  cost thousands of tokens on every later step if read whole. Use
+- **Read narrowly.** Files near the 1500-line cap (`evaluateView.ts`,
+  `models/entries.py`, `editorPanes.svelte.ts`, …) cost thousands of tokens on
+  every later step if read whole. Use
   `offset`/`limit`, or `Grep` for the line first.
 - **Subagents return summaries, not editable context.** To edit, pull the
   specific region in with `Read` and edit that.

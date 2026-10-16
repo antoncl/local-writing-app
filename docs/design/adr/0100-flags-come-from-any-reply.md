@@ -57,7 +57,7 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 
 9. **The selection prompts are unchanged.** `inline_edits` and `inline_notes` stay one-shot handlers with their JSON-only reply formats — the case of a reply that is nothing but flags, on a selection. No new output handler, no new disposition: the prompt list doesn't change.
 
-10. **A built-in *Revising* layout.** Working through flags is a scene beside its conversation, so the workspace ships a built-in layout preset for it, beside *writing*, *schema* and *research* (`PRESETS`, `frontend/src/lib/stores/workspaceLayout.serialize.ts`): the editor in the centre with room for the scene and its conversation side by side, the manuscript outline at the left, TODOs at the right (where kept flags land). It is built from Anton's own "Revisioning" preset, which lives in his browser's storage; its exact arrangement is his to confirm.
+10. **A built-in *Revising* layout.** Working through flags is a scene beside its conversation, so the workspace ships a built-in layout preset for it, beside *writing*, *schema* and *research* (`PRESETS`, `frontend/src/lib/stores/workspaceLayout.serialize.ts`), as Anton arranges his own: Draft and Lore on the left; the editor and a wide right group holding TODO (where kept flags land), Search and Chats, as equal halves. A fresh preset's right group holds no document, so the first quote link or Place flags splits the scene out beside the chat; once moved to the right group it stays.
 
 ## Rejected alternatives
 
@@ -81,7 +81,6 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 ## Open
 
 - The action's label and where it sits on a reply.
-- The *Revising* preset's exact arrangement (decision 10), against Anton's "Revisioning".
 
 ## Consequences
 

@@ -1,6 +1,6 @@
 # ADR-0100: Flags come from any reply, not from an output mode
 
-**Status:** Living draft (2026-10-16) — #2517. Text by Claude from a conversation with Anton about a *Scene / doctor* reply that held both notes and an edit with nowhere to put them; revised against a cold implementing thread.
+**Status:** Living draft (2026-10-16) — #2517. Slices built: #2519 (S1). Text by Claude from a conversation with Anton about a *Scene / doctor* reply that held both notes and an edit with nowhere to put them; revised against a cold implementing thread.
 **Context verified against `36b7894c` (2026-10-16), the code before the feature.**
 
 ### How this ADR is kept
@@ -41,15 +41,15 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 4. **Placed in the scene's pane, across the whole scene.** The flags go to the scene pane's `AiSuggestionController`, which places them against the **live** document when they arrive, with the existing placers over the whole body (`0` to the document's end) — no new placer. The scene opens beside the conversation when it isn't open; that opening is factored out of `revealQuoteBeside` and shared by both. Flags that can't be placed are counted in one notice ("2 of 9 flags couldn't be found in the scene").
 
 5. **One review holds both kinds.** The kind moves from the review to the item: each item carries its kind, which supplies its decoration, card, key and validity check.
-   - Items step in position order across both kinds; the cards' ‹ › step through all of them.
-   - One combined bar when a review holds both kinds; a selection run's review, holding one kind, keeps its bar as today.
+   - Items are kept in position order (an install sorts them, since a mixed list arrives one kind after the other) and step across both kinds; the cards' ‹ › step through all of them.
+   - One combined bar when a review holds both kinds; a selection run's review, holding one kind, keeps its bar as today. The bar comes with S2, the first thing that installs a mixed review.
    - **Accept all** applies the edits only; **Reject all** rejects the edits and dismisses the notes. Keep (ADR-0099 §3) works on both.
    - **Retry** is hidden for flags placed from a conversation: it re-runs a selection prompt, which isn't what made them.
    - The review closes when no item of **either** kind remains.
    - An edit and a note may cover the same words; accepting the edit drops the note, since its quote no longer holds — as typing over any flag does today.
    - Placing flags while a review is open closes that review first — its items, watchers and bar — and opens the new one, as a new selection run replaces the old.
 
-6. **An edit's replacement may hold paragraphs.** A `replace` containing a blank line is applied as paragraphs: Accept splits the passage's paragraph at the edit and inserts the new paragraphs, and the proposed-text widget shows the breaks. This holds for every edit, from a selection run too; the selection runs' reply format is unchanged.
+6. **An edit's replacement may hold paragraphs.** A `replace` containing a blank line is applied as paragraphs: Accept splits the passage's paragraph at the edit and inserts the new paragraphs, and the proposed-text widget shows the breaks. A `replace` of only blank lines is a cut. This holds for every edit, from a selection run too; the selection runs' reply format is unchanged.
 
 7. **A note without an entry** shows no entry line and no *Open entry*; Keep is its first action, and its TODO text is the `problem` alone. The notes bar's *Checked against* is hidden for flags from a conversation.
 
@@ -85,8 +85,8 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 
 ## Consequences
 
-- `ReviewItem` carries its kind; the kind's per-item parts are dispatched per item, and the stepper, bar and watchers handle a mixed list (S1).
-- Accept and the edit widget handle a `replace` with paragraph breaks (S1).
+- A stored review item carries its kind; the kind's per-item parts are dispatched per item, and stepping crosses both kinds (S1, built). The combined bar and the run that closes a mixed review only when both kinds are gone come with S2.
+- Accept and the edit widget handle a `replace` with paragraph breaks (S1, built).
 - One backend endpoint for the extraction turn; `_read_notes` gains `entry_required`; a name-to-entry lookup is shared with follow-ups; a new trace kind (S2).
 - **Place flags** on assistant replies in scene conversations; its wiring lives in its own module (`ChatBodyView.svelte` is at 1450 of 1500 lines), with the transcript taking the action per message; the scene pane's controller gains an entry point that installs flags from outside the pane; opening the scene beside the chat is shared with quote reveal (S2).
 - A built-in *Revising* layout preset (S3).

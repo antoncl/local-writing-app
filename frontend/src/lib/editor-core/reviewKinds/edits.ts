@@ -1,6 +1,7 @@
 /** The review kind for a model's line edits (#2460): each edit shows its old text
  *  struck through (muted) and the new text right after it, underlined; accepting
  *  writes the replacement, rejecting leaves the text alone. */
+import { Fragment, Slice } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, type EditorView } from "@tiptap/pm/view";
 import type { PlacedEdit } from "../lineEdits";
@@ -87,7 +88,7 @@ export const editsKind = (callbacks: LineEditCallbacks): ReviewKind => ({
       accept: () => acceptCurrentLineEdit(view),
       keep: () => {
         const edit = liveItem(view.state, item.id);
-        if (edit) callbacks.keep(view, edit as LineEditSuggestion);
+        if (edit) callbacks.keep(view, edit as unknown as LineEditSuggestion);
       },
       reject: () => rejectCurrentLineEdit(view),
     }),
@@ -96,11 +97,13 @@ export const editsKind = (callbacks: LineEditCallbacks): ReviewKind => ({
   reject: (view) => rejectCurrentLineEdit(view),
 });
 
-/** The open edit list, or an empty one when the open review is not edits. */
+/** The edits of the open review (empty when it holds none). `currentId` is the
+ *  current item only when that is an edit. */
 export function lineEditState(state: EditorState): LineEditState {
   const s = reviewState(state);
-  if (s.review?.name !== "edits") return { edits: [], accepted: 0, kept: 0, currentId: null, wide: s.wide };
-  return { edits: s.items as LineEditSuggestion[], accepted: s.accepted, kept: s.kept, currentId: s.currentId, wide: s.wide };
+  const edits = s.items.filter((i) => i.kind.name === "edits") as unknown as LineEditSuggestion[];
+  const currentId = edits.some((e) => e.id === s.currentId) ? s.currentId : null;
+  return { edits, accepted: s.accepted, kept: s.kept, currentId, wide: s.wide };
 }
 
 /** The current edit, or undefined when none is pending. */
@@ -118,10 +121,11 @@ export const installLineEdits = (
 
 export const setCurrentLineEdit = setCurrentItem;
 
-/** Make the next (+1) or previous (-1) edit by position current, wrapping, and scroll to it. */
-export function stepLineEdit(view: EditorView, dir: 1 | -1): void {
-  if (reviewState(view.state).review?.name === "edits") stepReview(view, dir);
-}
+/** Make the next (+1) or previous (-1) item by position current, wrapping, and
+ *  scroll to it - across both kinds when the review holds both. */
+export const stepLineEdit = stepReview;
+
+const BLANK_LINE = /\n[ \t]*\n/;
 
 function resolve(view: EditorView, ids: number[], outcome: ReviewOutcome): void {
   const { edits } = lineEditState(view.state);
@@ -138,7 +142,18 @@ function resolve(view: EditorView, ids: number[], outcome: ReviewOutcome): void 
       }
       const $from = tr.doc.resolve(edit.from);
       const marks = $from.marksAcross(tr.doc.resolve(edit.to)) ?? $from.marks();
-      tr.replaceWith(edit.from, edit.to, view.state.schema.text(edit.replace, marks));
+      const { schema } = view.state;
+      if (BLANK_LINE.test(edit.replace)) {
+        // Paragraphs (ADR-0100 decision 6): an open slice merges the first part into
+        // the passage's paragraph and the last with the text after it.
+        const parts = edit.replace.split(BLANK_LINE).map((p) => p.replace(/^\n+|\n+$/g, "")).filter(Boolean);
+        const paras = parts.map((p) => schema.nodes.paragraph.create(null, schema.text(p, marks)));
+        // Only blank lines: nothing to insert, so it is a cut.
+        if (paras.length === 0) tr.delete(edit.from, edit.to);
+        else tr.replace(edit.from, edit.to, new Slice(Fragment.from(paras), 1, 1));
+        continue;
+      }
+      tr.replaceWith(edit.from, edit.to, schema.text(edit.replace, marks));
     }
   }
   tr.setMeta(pluginKey, { type: "resolve", ids, outcome } satisfies ReviewMeta);

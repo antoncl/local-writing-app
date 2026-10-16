@@ -13,7 +13,6 @@ import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import {
   EMPTY,
-  type ReviewItem,
   type ReviewMeta,
   type ReviewState,
   nextByPosition,
@@ -45,7 +44,7 @@ export {
   type LineEditState,
   type LineEditSuggestion,
 } from "./reviewKinds/edits";
-export { keepReviewItem, liveItem } from "./reviewKinds/core";
+export { installFlags, keepReviewItem, liveItem, rejectAllFlags } from "./reviewKinds/core";
 export {
   LINE_NOTE_CURRENT_CLASS,
   LINE_NOTE_QUOTE_CLASS,
@@ -128,18 +127,19 @@ export const LineEditSuggestions = Extension.create({
             const meta = tr.getMeta(pluginKey) as ReviewMeta | undefined;
             if (meta?.type === "layout") return { ...old, wide: meta.wide };
             if (meta?.type === "install") {
-              const items = meta.items.map((e) => ({ ...e, id: nextId++ }));
-              return { review: meta.review, items, accepted: 0, kept: 0, currentId: nextByPosition(items, 0), wide: old.wide };
+              // By position: stepping walks the list, and a mixed review (ADR-0100)
+              // arrives one kind after the other.
+              const items = [...meta.items].sort((a, b) => a.from - b.from).map((e) => ({ ...e, id: nextId++ }));
+              return { items, accepted: 0, kept: 0, currentId: nextByPosition(items, 0), wide: old.wide };
             }
-            const { review } = old;
-            if (!review || old.items.length === 0) return old;
+            if (old.items.length === 0) return old;
             let items = old.items;
             if (tr.docChanged) {
               items = items.flatMap((item) => {
                 const from = tr.mapping.map(item.from, 1);
                 const to = tr.mapping.map(item.to, -1);
                 // Deleted, or edited inside: the model's quote no longer holds.
-                if (to <= from || rangeText(newState, from, to) !== review.quoted(item)) return [];
+                if (to <= from || rangeText(newState, from, to) !== item.kind.quoted(item)) return [];
                 return [{ ...item, from, to }];
               });
             }
@@ -159,7 +159,7 @@ export const LineEditSuggestions = Extension.create({
               const was = old.items.find((e) => e.id === old.currentId);
               currentId = nextByPosition(items, was ? tr.mapping.map(was.from, 1) : 0);
             }
-            return { review, items, accepted, kept, currentId, wide: old.wide };
+            return { items, accepted, kept, currentId, wide: old.wide };
           },
         },
         view: (view) => ({ destroy: observeCardRoom(view) }),
@@ -167,25 +167,30 @@ export const LineEditSuggestions = Extension.create({
           // A click on an item's quoted text selects it (the edit's new-text
           // widget handles its own mousedown).
           handleClick: (view, _pos, event) => {
-            const { review } = reviewState(view.state);
-            if (!review) return false;
+            const { items } = reviewState(view.state);
             const target = event.target as HTMLElement | null;
-            const id = Number(target?.closest?.(`[${review.idAttr}]`)?.getAttribute(review.idAttr));
-            if (id > 0) setCurrentItem(view, id);
+            for (const attr of new Set(items.map((i) => i.kind.idAttr))) {
+              const id = Number(target?.closest?.(`[${attr}]`)?.getAttribute(attr));
+              if (id > 0) {
+                setCurrentItem(view, id);
+                break;
+              }
+            }
             return false;
           },
           // Alt+Down / Alt+Up step, Alt+Enter accepts (edits only), Alt+Backspace
           // rejects / dismisses the current item - only while a review is open, so
           // the keys are free otherwise.
           handleKeyDown: (view, event) => {
-            const { review, items } = reviewState(view.state);
-            if (!review || items.length === 0) return false;
+            const { items, currentId } = reviewState(view.state);
+            if (items.length === 0) return false;
+            const cur = items.find((i) => i.id === currentId);
             if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
             const act =
               event.key === "ArrowDown" ? () => stepReview(view, 1)
               : event.key === "ArrowUp" ? () => stepReview(view, -1)
-              : event.key === "Enter" && review.accept ? () => review.accept?.(view)
-              : event.key === "Backspace" ? () => review.reject(view)
+              : event.key === "Enter" && cur?.kind.accept ? () => cur.kind.accept?.(view)
+              : event.key === "Backspace" && cur ? () => cur.kind.reject(view)
               : null;
             if (!act) return false;
             event.preventDefault();
@@ -193,11 +198,11 @@ export const LineEditSuggestions = Extension.create({
             return true;
           },
           decorations: (state) => {
-            const { review, items, currentId, wide } = reviewState(state);
-            if (!review || items.length === 0) return DecorationSet.empty;
+            const { items, currentId, wide } = reviewState(state);
+            if (items.length === 0) return DecorationSet.empty;
             const decos: Decoration[] = [];
-            for (const item of items) decos.push(...review.decorate(item, item.id === currentId));
-            const cur: ReviewItem | undefined = items.find((e) => e.id === currentId);
+            for (const item of items) decos.push(...item.kind.decorate(item, item.id === currentId));
+            const cur = items.find((e) => e.id === currentId);
             if (cur) {
               // Wide: at the item, so the margin card shares its line. Narrow: at the
               // end of the paragraph, so the block card sits below it. Side 2 keeps it
@@ -211,9 +216,9 @@ export const LineEditSuggestions = Extension.create({
               const margin = wide && !inCell;
               const at = margin ? cur.to : $to.end();
               decos.push(
-                Decoration.widget(at, (view) => review.card(cur, margin, view), {
+                Decoration.widget(at, (view) => cur.kind.card(cur, margin, view), {
                   side: 2,
-                  key: `line-edit-card-${review.name}-${cur.id}-${at}-${margin}-${review.cardKey(cur)}`,
+                  key: `line-edit-card-${cur.kind.name}-${cur.id}-${at}-${margin}-${cur.kind.cardKey(cur)}`,
                   stopEvent: () => true,
                 }),
               );

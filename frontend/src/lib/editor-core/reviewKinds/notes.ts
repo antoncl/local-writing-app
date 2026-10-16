@@ -62,7 +62,7 @@ export function notesKind(links: LineNoteLinks): ReviewKind {
         openEntry: () => links.openEntry(note.entry),
         keep: () => {
           const live = liveItem(view.state, note.id);
-          if (live) links.keep?.(view, live as LineNoteSuggestion);
+          if (live) links.keep?.(view, live as unknown as LineNoteSuggestion);
         },
         dismiss: () => dismissCurrentLineNote(view),
       });
@@ -73,11 +73,13 @@ export function notesKind(links: LineNoteLinks): ReviewKind {
   };
 }
 
-/** The open note list, or an empty one when the open review is not notes. */
+/** The notes of the open review (empty when it holds none). `currentId` is the
+ *  current item only when that is a note. */
 export function lineNoteState(state: EditorState): LineNoteState {
   const s = reviewState(state);
-  if (s.review?.name !== "notes") return { notes: [], currentId: null, wide: s.wide };
-  return { notes: s.items as LineNoteSuggestion[], currentId: s.currentId, wide: s.wide };
+  const notes = s.items.filter((i) => i.kind.name === "notes") as unknown as LineNoteSuggestion[];
+  const currentId = notes.some((n) => n.id === s.currentId) ? s.currentId : null;
+  return { notes, currentId, wide: s.wide };
 }
 
 export function currentLineNote(state: EditorState): LineNoteSuggestion | undefined {
@@ -95,10 +97,9 @@ export function installLineNotes(
   installReview(view, notesKind(links), notes, collapseTo);
 }
 
-/** Make the next (+1) or previous (-1) note by position current, wrapping. */
-export function stepLineNote(view: EditorView, dir: 1 | -1): void {
-  if (reviewState(view.state).review?.name === "notes") stepReview(view, dir);
-}
+/** Make the next (+1) or previous (-1) item by position current, wrapping -
+ *  across both kinds when the review holds both. */
+export const stepLineNote = stepReview;
 
 function dismiss(view: EditorView, ids: number[]): void {
   if (ids.length === 0) return;

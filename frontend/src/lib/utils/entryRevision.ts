@@ -22,13 +22,19 @@
  * baked into `renderDiffRuns` ("Restore this") are snapshot wording the UI slice
  * will reword for a proposal; the *tint* is correct as-is and needs no override.
  *
+ * **The order is not the engine's.** The engine emits a changed region's `was`
+ * runs first — right for a snapshot (the past), wrong here, where `was` is the
+ * future: it put the proposal before the text it would replace. So the runs go
+ * through `olderFirst(runs, "now")`: the current wording, then the proposal
+ * (#2533). Only the order within a region moves; the colours above stand.
+ *
  * **One diff owns the runs.** `diffRuns` is not guaranteed boundary-symmetric
  * across orientation — its block alignment has direction-dependent tie-breaks —
  * so a consumer must render and adopt the runs THIS module returns and never
  * re-diff current-vs-proposal the other way round to recolour: the region ids
  * would not be guaranteed to line up, and adopt would corrupt against them.
  */
-import { groupRuns } from "@/lib/utils/diffRuns";
+import { groupRuns, olderFirst } from "@/lib/utils/diffRuns";
 import { diffRuns } from "@/lib/utils/snapshotDiff";
 import type { DiffRegion } from "@/lib/utils/diffRuns";
 import type { DiffRun } from "@/lib/types";
@@ -145,6 +151,10 @@ function canonicalizeEmphasis(line: string): string {
  * consumer of these runs relies on.
  */
 export function reviewBodyProposal(currentBody: string, proposedBody: string): BodyRevision {
-  const runs = diffRuns(normalizeReviewMarkdown(proposedBody), normalizeReviewMarkdown(currentBody));
+  // The current body is the older text: it shows first, the proposal after it (#2533).
+  const runs = olderFirst(
+    diffRuns(normalizeReviewMarkdown(proposedBody), normalizeReviewMarkdown(currentBody)),
+    "now",
+  );
   return { runs, regions: groupRuns(runs).regions };
 }

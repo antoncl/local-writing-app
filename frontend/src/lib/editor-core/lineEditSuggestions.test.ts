@@ -144,14 +144,15 @@ describe("LineEditSuggestions", () => {
       expect(down.defaultPrevented).toBe(true);
     });
 
-    it("wide mode puts the same card at the edit itself, right after its passage; one card either way", () => {
+    it("wide mode puts the same card at the edit itself, right after its new words; one card either way", () => {
       const editor = setup();
       setLineEditCardWide(editor.view, true);
       const found = cards(editor);
       expect(found).toHaveLength(1);
       const card = found[0] as HTMLElement;
       expect(card.classList.contains("line-edit-card-wide")).toBe(true);
-      expect((card.previousSibling as HTMLElement).className).toContain("line-edit-current");
+      // Older text first (#2533): the passage, then its coming words, then the card.
+      expect((card.previousSibling as HTMLElement).className).toContain("r-was");
       expect(reasonOf(editor)).toBe("livelier");
       setLineEditCardWide(editor.view, false);
       expect(cards(editor)).toHaveLength(1);

@@ -27,8 +27,7 @@ import {
 export {
   editsKind,
   LINE_EDIT_CURRENT_CLASS,
-  LINE_EDIT_NEW_CLASS,
-  LINE_EDIT_OLD_CLASS,
+  LINE_EDIT_CLASS,
   acceptAllLineEdits,
   acceptCurrentLineEdit,
   acceptLineEdit,

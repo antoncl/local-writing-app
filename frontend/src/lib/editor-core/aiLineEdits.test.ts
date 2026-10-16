@@ -303,7 +303,7 @@ describe("line edits (#2460)", () => {
     expect(lineEditState(editor.state).edits).toHaveLength(2);
     ctrl.reset();
     expect(lineEditState(editor.state).edits).toHaveLength(0);
-    expect(editor.view.dom.querySelectorAll(".line-edit-old")).toHaveLength(0);
+    expect(editor.view.dom.querySelectorAll(".line-edit")).toHaveLength(0);
     expect(ctrl.lineEdits).toBeNull();
     expect(editor.state.doc.textContent).toBe(TEXT);
   });

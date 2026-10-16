@@ -1,9 +1,12 @@
-/** The review kind for a model's line edits (#2460): each edit shows its old text
- *  struck through (muted) and the new text right after it, underlined; accepting
- *  writes the replacement, rejecting leaves the text alone. */
+/** The review kind for a model's line edits (#2460): each edit reads as a
+ *  word-level diff (#2531) - the passage's words that go are warm, the
+ *  replacement's words that come in sit beside them, cool; accepting writes the
+ *  whole replacement, rejecting leaves the text alone. */
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, type EditorView } from "@tiptap/pm/view";
+import type { DiffRun } from "@/lib/types";
+import { diffRuns } from "@/lib/utils/snapshotDiff";
 import type { PlacedEdit } from "../lineEdits";
 import { buildLineEditCard } from "../lineEditCard";
 import {
@@ -32,16 +35,44 @@ export type LineEditState = {
   wide: boolean;
 };
 
-export const LINE_EDIT_OLD_CLASS = "line-edit-old";
-export const LINE_EDIT_NEW_CLASS = "line-edit-new";
+export const LINE_EDIT_CLASS = "line-edit";
 export const LINE_EDIT_CURRENT_CLASS = "line-edit-current";
 
-function widgetFor(view: EditorView, edit: LineEditSuggestion, current: boolean): HTMLElement {
+/** The diff of one edit, memoized per (find, replace) so decorations do not
+ *  re-diff on every transaction. Exported for the test that pins the memo. */
+export const editRunsCache = new Map<string, DiffRun[]>();
+const EDIT_RUNS_CACHE_MAX = 200;
+
+function editRuns(find: string, replace: string): DiffRun[] {
+  const key = `${find}\u0000${replace}`;
+  let runs = editRunsCache.get(key);
+  if (!runs) {
+    // The replacement is the other version (cool), the passage the page's (warm).
+    runs = diffRuns(replace, find);
+    // The offsets walk `find`, so its runs must spell it exactly. The engine is
+    // markdown-aware; should it ever not reproduce the texts, mark the whole
+    // passage and the whole replacement rather than drift onto the wrong words.
+    const spells = (kind: "now" | "was") =>
+      runs!.filter((r) => r.kind === "equal" || r.kind === kind).map((r) => r.text).join("");
+    if (spells("now") !== find || spells("was") !== replace) {
+      runs = [
+        ...(find ? [{ kind: "now" as const, text: find, stacked: false }] : []),
+        ...(replace ? [{ kind: "was" as const, text: replace, stacked: false }] : []),
+      ];
+    }
+    if (editRunsCache.size >= EDIT_RUNS_CACHE_MAX) editRunsCache.clear();
+    editRunsCache.set(key, runs);
+  }
+  return runs;
+}
+
+/** Words only the replacement has: they come in, so they sit as a cool widget. */
+function widgetFor(view: EditorView, edit: LineEditSuggestion, text: string): HTMLElement {
   const added = document.createElement("span");
-  added.className = current ? `${LINE_EDIT_NEW_CLASS} ${LINE_EDIT_CURRENT_CLASS}` : LINE_EDIT_NEW_CLASS;
+  added.className = "r-was";
   added.contentEditable = "false";
   added.title = edit.reason;
-  added.textContent = edit.replace;
+  added.textContent = text;
   // mousedown + preventDefault: selecting never blurs the editor.
   added.addEventListener("mousedown", (e) => {
     e.preventDefault();
@@ -63,21 +94,33 @@ export const editsKind = (callbacks: LineEditCallbacks): ReviewKind => ({
   quoted: (item) => (item as LineEditSuggestion).find,
   decorate(item, current) {
     const edit = item as LineEditSuggestion;
+    // The whole passage: click-to-select and the current-item outline.
     const decos = [
       Decoration.inline(edit.from, edit.to, {
-        class: current ? `${LINE_EDIT_OLD_CLASS} ${LINE_EDIT_CURRENT_CLASS}` : LINE_EDIT_OLD_CLASS,
+        class: current ? `${LINE_EDIT_CLASS} ${LINE_EDIT_CURRENT_CLASS}` : LINE_EDIT_CLASS,
         title: edit.reason,
         "data-line-edit-id": String(edit.id),
       }),
     ];
-    if (edit.replace) {
-      decos.push(
-        Decoration.widget(edit.to, (view) => widgetFor(view, edit, current), {
-          side: 1,
-          key: `line-edit-${edit.id}-${edit.to}-${edit.replace}-${current}`,
-          stopEvent: () => true,
-        }),
-      );
+    // Placement guarantees one textblock and no inline leaves, so an offset into
+    // `find` is an offset into the doc.
+    let o = 0;
+    for (const run of editRuns(edit.find, edit.replace)) {
+      if (run.kind === "equal") {
+        o += run.text.length;
+      } else if (run.kind === "now") {
+        decos.push(Decoration.inline(edit.from + o, edit.from + o + run.text.length, { class: "r-now" }));
+        o += run.text.length;
+      } else {
+        const text = run.text;
+        decos.push(
+          Decoration.widget(edit.from + o, (view) => widgetFor(view, edit, text), {
+            side: 1,
+            key: `line-edit-${edit.id}-${edit.from + o}-${text}`,
+            stopEvent: () => true,
+          }),
+        );
+      }
     }
     return decos;
   },

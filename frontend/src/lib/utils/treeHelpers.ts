@@ -26,6 +26,17 @@ export function isLeafNode(node: StructureNode): boolean {
   return !isContainerNode(node);
 }
 
+export function flattenStructureScenes(node: StructureNode | null | undefined, acc: { id: string; title: string }[] = []): { id: string; title: string }[] {
+  if (!node) return acc;
+  if (node.scene_id && isLeafNode(node)) {
+    acc.push({ id: node.scene_id, title: node.title });
+  }
+  for (const child of node.children ?? []) {
+    flattenStructureScenes(child, acc);
+  }
+  return acc;
+}
+
 // Depth-first lookup of a node by id, starting from any subtree root.
 export function findStructureNodeById(
   node: StructureNode | null | undefined,

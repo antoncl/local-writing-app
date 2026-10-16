@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.base import (
     AIPolicy,
@@ -26,6 +26,17 @@ class DisplaySettings(BaseModel):
     ui_scale: float = 1.0
     paragraph_align: Literal["left", "justify"] = "left"
     paragraph_indent: bool = False
+    # A blank line between paragraphs (#2526), independent of the indent. A
+    # config written before it existed gets the look it had: the gap went with
+    # flush paragraphs and was dropped for indented ones.
+    paragraph_spacing: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _spacing_from_indent(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "paragraph_spacing" not in data:
+            return {**data, "paragraph_spacing": not data.get("paragraph_indent", False)}
+        return data
 
     @field_validator("ui_scale")
     @classmethod

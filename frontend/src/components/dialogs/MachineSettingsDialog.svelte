@@ -448,6 +448,11 @@
               <input type="checkbox" bind:checked={draft.display.paragraph_indent} onchange={previewDisplay} />
               Indent the first line of each paragraph
             </label>
+
+            <label class="choice-row">
+              <input type="checkbox" bind:checked={draft.display.paragraph_spacing} onchange={previewDisplay} />
+              Leave a blank line between paragraphs
+            </label>
           </section>
         {:else if activeTab === "palette"}
           <PaletteEditor swatches={draft.palette} onChange={setPalette} />
@@ -770,7 +775,10 @@
     color: var(--text-2);
   }
 
-  .choice-row {
+  /* Scoped under the modal so it outranks the modal-wide `label { display: grid }`
+     below, which Svelte compiles one element more specific than a bare class -
+     that stacked each radio / checkbox above its label (#2526). */
+  :global(.machine-settings-modal) .choice-row {
     display: flex;
     flex-direction: row;
     align-items: center;

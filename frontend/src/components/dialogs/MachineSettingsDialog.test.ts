@@ -29,7 +29,7 @@ import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.sv
 // that contract — the rest of the dialog (providers/palette/storage) has its own
 // coverage.
 
-const DISPLAY = { ui_scale: 1.0, paragraph_align: "left" as const, paragraph_indent: false };
+const DISPLAY = { ui_scale: 1.0, paragraph_align: "left" as const, paragraph_indent: false, paragraph_spacing: true };
 
 function view(ai_policy: MachineSettingsView["ai_policy"]): MachineSettingsView {
   return {

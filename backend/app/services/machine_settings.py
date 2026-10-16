@@ -739,10 +739,10 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
     _apply_provider_patch(base, patch.get("providers"))
     display_patch = patch.get("display")
     if isinstance(display_patch, dict):
-        # The three prose-presentation fields travel together from the UI; the
+        # The prose-presentation fields travel together from the UI; the
         # ui_scale clamp runs in DisplaySettings on the final model_validate.
         display = base.setdefault("display", {})
-        for key in ("ui_scale", "paragraph_align", "paragraph_indent"):
+        for key in ("ui_scale", "paragraph_align", "paragraph_indent", "paragraph_spacing"):
             if key in display_patch and display_patch[key] is not None:
                 display[key] = display_patch[key]
     return MachineSettings.model_validate(base)

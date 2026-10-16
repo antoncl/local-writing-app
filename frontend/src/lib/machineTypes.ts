@@ -28,7 +28,13 @@ export type Swatch = {
 };
 
 // Per-user prose-presentation prefs (#127 / #575), applied as CSS vars on :root.
-export type DisplaySettings = { ui_scale: number; paragraph_align: "left" | "justify"; paragraph_indent: boolean };
+export type DisplaySettings = {
+  ui_scale: number;
+  paragraph_align: "left" | "justify";
+  paragraph_indent: boolean;
+  /** A blank line between paragraphs (#2526), independent of the indent. */
+  paragraph_spacing: boolean;
+};
 
 // Which GitHub Releases channel this install follows for updates (ADR-0072 S6).
 // `stable` = tagged releases; `nightly` = the rolling bleeding-edge prerelease.

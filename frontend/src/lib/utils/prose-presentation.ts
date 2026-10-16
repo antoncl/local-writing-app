@@ -13,13 +13,9 @@ export function applyProsePresentation(display: DisplaySettings): void {
   const root = document.documentElement;
   root.style.setProperty("--ui-scale", String(display.ui_scale));
   root.style.setProperty("--prose-align", display.paragraph_align);
-  if (display.paragraph_indent) {
-    root.style.setProperty("--prose-indent", INDENT);
-    // Indented paragraphs run continuous — no blank line between them.
-    root.style.setProperty("--prose-para-gap", "0");
-  } else {
-    root.style.setProperty("--prose-indent", "0");
-    // Flush paragraphs keep each prose surface's own block-spacing default.
-    root.style.removeProperty("--prose-para-gap");
-  }
+  root.style.setProperty("--prose-indent", display.paragraph_indent ? INDENT : "0");
+  // The blank line between paragraphs is its own choice (#2526): on keeps each
+  // prose surface's own block-spacing default, off runs paragraphs together.
+  if (display.paragraph_spacing) root.style.removeProperty("--prose-para-gap");
+  else root.style.setProperty("--prose-para-gap", "0");
 }

@@ -402,10 +402,15 @@ class DisplaySettingsTests(unittest.TestCase):
 
     def test_view_defaults_when_unset(self) -> None:
         display = self.client.get("/api/settings/machine").json()["display"]
-        self.assertEqual(display, {"ui_scale": 1.0, "paragraph_align": "left", "paragraph_indent": False})
+        self.assertEqual(
+            display,
+            {"ui_scale": 1.0, "paragraph_align": "left", "paragraph_indent": False, "paragraph_spacing": True},
+        )
 
     def test_put_persists_display(self) -> None:
-        body = {"display": {"ui_scale": 1.2, "paragraph_align": "justify", "paragraph_indent": True}}
+        body = {
+            "display": {"ui_scale": 1.2, "paragraph_align": "justify", "paragraph_indent": True, "paragraph_spacing": True}
+        }
         returned = self.client.put("/api/settings/machine", json=body)
         self.assertEqual(returned.status_code, 200, returned.text)
         self.assertEqual(returned.json()["display"], body["display"])
@@ -438,6 +443,28 @@ class DisplaySettingsTests(unittest.TestCase):
         self.assertEqual(display.ui_scale, 1.1)
         self.assertEqual(display.paragraph_align, "justify")  # not reset to "left"
         self.assertTrue(display.paragraph_indent)  # not reset to False
+
+    def test_spacing_is_independent_of_the_indent(self) -> None:
+        # #2526: indented AND spaced, the combination the coupling ruled out.
+        body = {"display": {"paragraph_indent": True, "paragraph_spacing": True}}
+        self.client.put("/api/settings/machine", json=body)
+        display = ms.load_settings().display
+        self.assertTrue(display.paragraph_indent)
+        self.assertTrue(display.paragraph_spacing)
+        self.client.put("/api/settings/machine", json={"display": {"paragraph_spacing": False}})
+        self.assertFalse(ms.load_settings().display.paragraph_spacing)
+        self.assertTrue(ms.load_settings().display.paragraph_indent)
+
+    def test_a_config_without_spacing_keeps_its_look(self) -> None:
+        # Written before #2526: the gap went with flush paragraphs only.
+        from app.models import DisplaySettings
+
+        self.assertFalse(DisplaySettings.model_validate({"paragraph_indent": True}).paragraph_spacing)
+        self.assertTrue(DisplaySettings.model_validate({"paragraph_indent": False}).paragraph_spacing)
+        self.assertTrue(DisplaySettings.model_validate({}).paragraph_spacing)
+        # An explicit choice is never overridden.
+        chosen = DisplaySettings.model_validate({"paragraph_indent": True, "paragraph_spacing": True})
+        self.assertTrue(chosen.paragraph_spacing)
 
 
 class WarnOnOrphaningDeleteTests(unittest.TestCase):

@@ -52,6 +52,19 @@ derived from the installed package metadata, and `scripts/check_version_sync.py`
 (pre-commit + CI) holds the two literals equal. So a bump is a two-file edit, and
 a half-done bump fails the gate rather than shipping mismatched halves.
 
+**Every dev checkout must reinstall after the bump merges.** Because the version
+is read from the *installed* package metadata (the venv's
+`local_writing_service-<ver>.dist-info`), `git pull` + restart keeps reporting the
+old version — in the projects popup, the API, and the update check — until the
+editable install is redone:
+
+```
+backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.lock
+backend/.venv/Scripts/python.exe -m pip install -e backend --no-deps
+```
+
+Frozen builds carry their own metadata and are unaffected.
+
 **Do NOT touch when bumping:**
 
 - The `tiktoken` (or any dependency) pin in `pyproject.toml` — a dependency
@@ -110,11 +123,21 @@ tested.
    The tag names the exact commit that carries the bumped version — never a
    commit ahead of or behind it.
 3. **Publish a GitHub Release** on that tag — every time, no exceptions. The body
-   is the release notes (next section).
+   is the release notes (next section). Pushing a `v*` tag runs
+   `.github/workflows/release.yml`, which builds every platform and **creates the
+   Release itself** with placeholder notes — so don't pre-create it (its
+   `gh release create` would fail). Wait for the run, then set the title and body:
+
+   ```
+   gh release edit vX.Y.Z --title "vX.Y.Z — <headline>" --notes-file notes.md
+   ```
 
 ## 5. Release notes
 
-Notes are compiled per release from what closed since the previous tag. Recipe:
+Notes are compiled per release from what closed since the previous tag. Find it
+with `gh release list` (interim releases exist — 1.0.0's first notes were counted
+from 0.9.5 and overlapped 0.9.6), and count from its **publish timestamp**, not
+its date: a date-only window pulls in same-day work that shipped in it. Recipe:
 
 - Open with a stat line — e.g. *"N issues closed, M PRs since vPREV."*
 

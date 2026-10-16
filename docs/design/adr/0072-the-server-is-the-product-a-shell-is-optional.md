@@ -1,6 +1,6 @@
 # ADR-0072: The server is the product; a desktop shell is optional; updates ride GitHub Releases
 
-- Status: **Proposed** — 2026-08-23. Awaiting Anton's review.
+- Status: **Accepted** — 2026-08-23 (PR #1339). Shipped in 0.9.5; update-apply completed for 1.0.0.
 - Verified against `269d500f` (2026-08-23).
 - Feature: #173 (packaging & installers, the last pre-public 0.9.5 pillar) · Follows: ADR-0056
   (a boundary is a choke point) · Relates: ADR-0047 (settings live behind the `≡` menu),

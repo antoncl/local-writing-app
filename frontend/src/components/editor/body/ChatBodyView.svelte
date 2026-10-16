@@ -24,7 +24,7 @@
   import { PlaceFlagsController } from "@/lib/chat/placeFlags.svelte";
   import { revealQuoteBeside } from "@/lib/stores/quoteReveal";
   import { api } from "@/lib/api";
-  import { lastReportedTurn } from "@/lib/chat/loreFit";
+  import { lastReportedTurn, lastTurnInputTruncated } from "@/lib/chat/loreFit";
   import { journalEntryKey } from "@/lib/chat/journal";
   import { createDeltaCoalescer } from "@/lib/chat/deltaCoalescer";
   import {
@@ -492,6 +492,7 @@
       role: m.role,
       content: m.content,
       truncated: !!m.truncated,
+      input_truncated: !!m.input_truncated,
       stopped: !!m.stopped,
       thinking: m.thinking || undefined,
       journal_added: m.journal_added,
@@ -641,6 +642,7 @@
         content: m.content,
         thinking: m.thinking ?? "",
         truncated: !!m.truncated,
+        input_truncated: !!m.input_truncated,
         stopped: !!m.stopped,
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
@@ -791,6 +793,7 @@
         } else if (ev.type === "done") {
           deltas.flush();
           chatHistory[idx].truncated = ev.truncated;
+          chatHistory[idx].input_truncated = !!ev.input_truncated;
           if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
             chatHistory[idx].journal_added = ev.journal_added;
             appendToActiveChatJournal(ev.journal_added);
@@ -1194,6 +1197,7 @@
       {fetchLeftOutXml}
       loreEnabled={chatLoreEnabled}
       loreFree={chatLoreFree}
+      inputTruncated={lastTurnInputTruncated(chatHistory)}
       journal={activeChatJournal}
       changedPicks={activeChatChangedPicks}
       onOpenDoor={refreshChangedPicks}

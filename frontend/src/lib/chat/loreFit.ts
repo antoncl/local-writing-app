@@ -137,6 +137,22 @@ export const LEFT_OUT_HINT =
 export const DECLARED_OVER_HINT =
   "Entries the prompt picked, the scene references, or an always-include policy names are always sent whole; the budget applies only to lore the app adds on its own.";
 
+// #2207: the warning for a turn whose prompt Ollama read less of than was sent
+// (its window cut the start). One sentence for the transcript and the door.
+export const INPUT_TRUNCATED_NOTICE =
+  "The model's window cut the start of this prompt — the system prompt and lore may not have been read.";
+
+// Whether the LAST assistant turn was input-truncated. Reads the last assistant
+// turn itself, not `lastReportedTurn`: that skips turns without a lore report.
+export function lastTurnInputTruncated(
+  history: readonly { role: string; input_truncated?: boolean }[],
+): boolean {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === "assistant") return !!history[i].input_truncated;
+  }
+  return false;
+}
+
 // The last assistant turn that carries a report — a stopped or in-flight turn
 // never received one (it rides the stream's done line), so it must not hide
 // the last turn that did. Null when no turn has reported yet.

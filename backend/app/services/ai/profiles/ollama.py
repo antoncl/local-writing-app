@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import httpx
 
@@ -75,6 +75,20 @@ _EMPTY_STREAM_MESSAGE = (
 _CTX_BUCKETS = (2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144)
 
 
+# A turn is input-truncated when Ollama's `prompt_eval_count` falls below this
+# fraction of the app's cl100k estimate (#2207). Measured: the estimate tracks
+# Ollama's count within ~5% on Gemma4 / Qwen3.8, while a real front-truncation
+# read ~12% of it — 0.85 sits far outside the normal spread and far above a cut.
+INPUT_TRUNCATION_RATIO = 0.85
+
+
+class _CtxSizing(NamedTuple):
+    """The window a turn was sent with and the app's estimate of its prompt."""
+
+    num_ctx: int | None
+    prompt_estimate: int
+
+
 class _NativeStreamState:
     """Mutable accumulator for one `/api/chat` NDJSON stream: whether any
     visible event was emitted, plus the stop reason and final frame (its usage
@@ -127,11 +141,11 @@ class OllamaProfile(OpenAICompatibleProfile):
 
     def chat(self, call: ChatCall) -> ChatOutcome:
         messages = self._build_messages(call)
-        body = self._native_chat_body(call, messages, stream=False)
+        body, sizing = self._native_chat_body(call, messages, stream=False)
         try:
             with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
                 response = client.post(f"{self._base}/api/chat", json=body)
-                _raise_for_ollama_status(response)
+                _raise_for_ollama_status(response, sizing)
                 data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError(f"Ollama chat request failed: {exc}") from exc
@@ -143,20 +157,27 @@ class OllamaProfile(OpenAICompatibleProfile):
         content = str(message.get("content") or "")
         # `raw` is the native dict; `extract_usage` already reads its
         # prompt_eval_count / eval_count.
-        return ChatOutcome(content, data.get("done_reason"), data)
+        return ChatOutcome(
+            content,
+            data.get("done_reason"),
+            data,
+            input_truncated=input_truncated(
+                sizing.prompt_estimate, data.get("prompt_eval_count")
+            ),
+        )
 
     def chat_stream(
         self, call: ChatCall
     ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
         messages = self._build_messages(call)
-        body = self._native_chat_body(call, messages, stream=True)
+        body, sizing = self._native_chat_body(call, messages, stream=True)
         splitter = ThinkTagSplitter()
         state = _NativeStreamState()
         try:
             with httpx.Client(timeout=_STREAM_TIMEOUT) as client, client.stream(
                 "POST", f"{self._base}/api/chat", json=body
             ) as response:
-                _raise_for_ollama_status(response)
+                _raise_for_ollama_status(response, sizing)
                 for line in response.iter_lines():
                     yield from self._consume_stream_line(line, splitter, state)
         except (httpx.HTTPError, ValueError) as exc:
@@ -181,7 +202,14 @@ class OllamaProfile(OpenAICompatibleProfile):
             if state.final is not None
             else None
         )
-        yield StreamFinal(stop_reason=state.stop_reason, usage=usage)
+        yield StreamFinal(
+            stop_reason=state.stop_reason,
+            usage=usage,
+            input_truncated=input_truncated(
+                sizing.prompt_estimate,
+                (state.final or {}).get("prompt_eval_count"),
+            ),
+        )
 
     def _consume_stream_line(
         self, line: str, splitter: ThinkTagSplitter, state: _NativeStreamState
@@ -220,12 +248,14 @@ class OllamaProfile(OpenAICompatibleProfile):
 
     def _native_chat_body(
         self, call: ChatCall, messages: list[dict], *, stream: bool
-    ) -> dict:
-        """Assemble the `/api/chat` body, sizing `options.num_ctx` to the turn."""
+    ) -> tuple[dict, _CtxSizing]:
+        """Assemble the `/api/chat` body, sizing `options.num_ctx` to the turn.
+        Also returns the sizing, so the caller can check what Ollama read (and
+        explain a 400) against what was sent (#2207)."""
         options: dict[str, Any] = {"num_predict": call.max_tokens}
-        num_ctx = self._resolve_num_ctx(call, messages)
-        if num_ctx is not None:
-            options["num_ctx"] = num_ctx
+        sizing = self._resolve_num_ctx(call, messages)
+        if sizing.num_ctx is not None:
+            options["num_ctx"] = sizing.num_ctx
         if call.temperature is not None and self.supports_temperature(call.model):
             options["temperature"] = call.temperature
         body: dict[str, Any] = {
@@ -240,32 +270,34 @@ class OllamaProfile(OpenAICompatibleProfile):
             # JSON schema and the daemon holds generation to it, rather than
             # relying on prose instructions a local model can still break.
             body["format"] = call.response_schema
-        return body
+        return body, sizing
 
-    def _resolve_num_ctx(self, call: ChatCall, messages: list[dict]) -> int | None:
+    def _resolve_num_ctx(self, call: ChatCall, messages: list[dict]) -> _CtxSizing:
         """The context window to allocate for this turn, or None to leave it to
         the daemon (its default is the model's trained max — today's behavior).
 
         Reserve room for both the prompt and the reply (`num_ctx` is the whole
         window, prompt + generated), round up to a stable bucket so history
         growth doesn't thrash the loader, then clamp to the model's trained max.
-        Returns None when that max is unknown, so a discovery miss degrades to
-        the daemon default rather than a guessed cap.
+        `num_ctx` is None when that max is unknown, so a discovery miss degrades
+        to the daemon default rather than a guessed cap. The prompt estimate
+        rides along either way (#2207).
         """
-        model_max = self._model_context_window(call.model)
-        if model_max <= 0:
-            return None
         prompt_tokens = sum(
             self.count_tokens(str(m.get("content") or ""), call.model)
             for m in messages
         )
+        model_max = self._model_context_window(call.model)
+        if model_max <= 0:
+            return _CtxSizing(None, prompt_tokens)
         needed = prompt_tokens + max(int(call.max_tokens or 0), 0)
         wanted = min(model_max, _ceil_bucket(needed))
         # #2203: grow, never shrink. A different num_ctx makes the daemon unload
         # and reload the model, so a smaller turn (an AI commit after a long
         # chat) reuses the window already loaded when it fits, rather than
         # reloading twice (into the commit, and back at the next chat turn).
-        return max(wanted, self._loaded_context_window(call.model))
+        num_ctx = max(wanted, self._loaded_context_window(call.model))
+        return _CtxSizing(num_ctx, prompt_tokens)
 
     def _loaded_context_window(self, model: str) -> int:
         """The context window `model` is currently loaded with, via `/api/ps`, or
@@ -428,9 +460,24 @@ class OllamaProfile(OpenAICompatibleProfile):
         return None
 
 
-def _raise_for_ollama_status(response: httpx.Response) -> None:
+def input_truncated(prompt_estimate: int, prompt_eval_count: int | None) -> bool:
+    """True when Ollama's `prompt_eval_count` proves it read materially less
+    prompt than the app sent (silent front-truncation, #2207). Absent or zero
+    counts prove nothing, so they never flag."""
+    if not isinstance(prompt_eval_count, int) or prompt_eval_count <= 0:
+        return False
+    return prompt_eval_count < INPUT_TRUNCATION_RATIO * prompt_estimate
+
+
+def _raise_for_ollama_status(
+    response: httpx.Response, sizing: _CtxSizing | None = None
+) -> None:
     """Raise `ProviderError` for a non-2xx `/api/chat` response, preferring
     Ollama's own `{"error": ...}` message over the bare HTTP status.
+
+    Some models answer an over-long prompt with HTTP 400 instead of truncating
+    (#2207). When the estimate is at or above the window it was sent with, that
+    400 becomes a plain sentence; the daemon's text moves to `detail`.
 
     Ollama reports a bad model, a malformed request, etc. as an HTTP error with
     the reason in the body; surfacing that beats "Client error 404". `read()`
@@ -447,6 +494,18 @@ def _raise_for_ollama_status(response: httpx.Response) -> None:
         payload = None
     if isinstance(payload, dict) and payload.get("error"):
         message = str(payload["error"])
+    if (
+        response.status_code == 400
+        and sizing is not None
+        and sizing.num_ctx is not None
+        and sizing.prompt_estimate >= sizing.num_ctx
+    ):
+        raise ProviderError(
+            f"The prompt (~{sizing.prompt_estimate} tokens) didn't fit the model's "
+            f"{sizing.num_ctx}-token context window. Shorten the history or lore "
+            "budget, or pick a model with a larger window.",
+            detail=f"ollama HTTP 400: {message}",
+        )
     raise ProviderError(message)
 
 

@@ -190,6 +190,8 @@ export type AIStreamEvent =
       latency_ms: number;
       stop_reason: string | null;
       truncated: boolean;
+      // #2207: Ollama read materially less prompt than was sent.
+      input_truncated?: boolean;
       policy: string;
       session_id?: string;
       char_count?: number;

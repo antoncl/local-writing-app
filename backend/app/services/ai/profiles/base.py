@@ -388,6 +388,9 @@ class ChatOutcome:
     content: str
     stop_reason: str | None
     raw: Any
+    # The provider read materially less prompt than was sent (Ollama's silent
+    # front-truncation, #2207). Only Ollama sets it.
+    input_truncated: bool = False
 
 
 @dataclass
@@ -413,6 +416,8 @@ class StreamFinal:
 
     stop_reason: str | None
     usage: UsageMetrics | None = None
+    # See `ChatOutcome.input_truncated` (#2207).
+    input_truncated: bool = False
 
 
 class ThinkTagSplitter:

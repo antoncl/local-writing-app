@@ -126,6 +126,24 @@ class ChatSessionEndpointTests(unittest.TestCase):
         reread = self.client.get(f"/api/chats/{created['id']}").json()
         self.assertTrue(reread["messages"][1]["stopped"])
 
+    def test_save_round_trips_the_input_truncated_flag(self) -> None:
+        # #2207: additive, optional — survives a save and a fresh GET; a message
+        # saved without it reads False.
+        created = self.client.post("/api/chats", json={"title": "T"}).json()
+        payload = {
+            "title": "T",
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi", "input_truncated": True},
+                {"role": "assistant", "content": "again"},
+            ],
+        }
+        response = self.client.put(f"/api/chats/{created['id']}", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        reread = self.client.get(f"/api/chats/{created['id']}").json()
+        self.assertTrue(reread["messages"][1]["input_truncated"])
+        self.assertFalse(reread["messages"][2]["input_truncated"])
+
     def test_save_response_carries_the_projected_cost_total(self) -> None:
         # ADR-0076 decision 6: the UI keeps the save response as its live
         # session copy, so the response's cost_usd_total must be the same

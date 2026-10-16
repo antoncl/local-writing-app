@@ -4,6 +4,7 @@ import {
   declaredOverBudget,
   declaredOverLine,
   lastReportedTurn,
+  lastTurnInputTruncated,
   leftOutSegment,
   loreSourceLabel,
   notSentKind,
@@ -107,5 +108,22 @@ describe("notSentKind / reachSkipped (#2341)", () => {
     ];
     expect(reachSkipped(f, journal).map((e) => e.entry_id)).toEqual(["hop"]);
     expect(reachSkipped(fit({ expansion: "one_hop" }), journal)).toEqual([]);
+  });
+});
+
+describe("lastTurnInputTruncated (#2207)", () => {
+  it("reads the LAST assistant turn, not an earlier flagged one", () => {
+    expect(
+      lastTurnInputTruncated([
+        { role: "assistant", input_truncated: true },
+        { role: "user" },
+        { role: "assistant" },
+      ]),
+    ).toBe(false);
+    expect(
+      lastTurnInputTruncated([{ role: "assistant" }, { role: "assistant", input_truncated: true }]),
+    ).toBe(true);
+    expect(lastTurnInputTruncated([{ role: "user" }])).toBe(false);
+    expect(lastTurnInputTruncated([])).toBe(false);
   });
 });

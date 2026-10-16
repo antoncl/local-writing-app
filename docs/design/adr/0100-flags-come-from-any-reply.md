@@ -57,6 +57,8 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 
 9. **The selection prompts are unchanged.** `inline_edits` and `inline_notes` stay one-shot handlers with their JSON-only reply formats — the case of a reply that is nothing but flags, on a selection. No new output handler, no new disposition: the prompt list doesn't change.
 
+10. **A built-in *Revising* layout.** Working through flags is a scene beside its conversation, so the workspace ships a built-in layout preset for it, beside *writing*, *schema* and *research* (`PRESETS`, `frontend/src/lib/stores/workspaceLayout.serialize.ts`): the editor in the centre with room for the scene and its conversation side by side, the manuscript outline at the left, TODOs at the right (where kept flags land). It is built from Anton's own "Revisioning" preset, which lives in his browser's storage; its exact arrangement is his to confirm.
+
 ## Rejected alternatives
 
 - **Flags written inside the conversational reply** (markup the model emits as it talks). Every prompt would have to teach the format, the transcript would carry it, and a prompt not written for it would get nothing — the opposite of decision 1.
@@ -79,6 +81,7 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 ## Open
 
 - The action's label and where it sits on a reply.
+- The *Revising* preset's exact arrangement (decision 10), against Anton's "Revisioning".
 
 ## Consequences
 
@@ -86,6 +89,8 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
 - Accept and the edit widget handle a `replace` with paragraph breaks (S1).
 - One backend endpoint for the extraction turn; `_read_notes` gains `entry_required`; a name-to-entry lookup is shared with follow-ups; a new trace kind (S2).
 - **Place flags** on assistant replies in scene conversations; its wiring lives in its own module (`ChatBodyView.svelte` is at 1450 of 1500 lines), with the transcript taking the action per message; the scene pane's controller gains an entry point that installs flags from outside the pane; opening the scene beside the chat is shared with quote reveal (S2).
+- A built-in *Revising* layout preset (S3).
 - Planned slices, each its own PR:
   - **S1 — one review, both kinds; edits that add paragraphs.** *Done when:* a test installs edits and notes together and steps, accepts, keeps, dismisses and Accept-alls across them, and the review closes only when both are gone; an edit whose `replace` has two paragraphs inserts two paragraphs; every selection run behaves as before. *Not:* any conversation change.
   - **S2 — Place flags in scene conversations.** *Done when:* an end-to-end test on a fixture scene conversation presses Place flags on a reply that proposes a two-paragraph insertion and remarks on two passages, and the scene opens beside the chat with two notes and one edit; Keep turns a note into a TODO; Accept inserts the paragraphs. And in the browser, on *The Water Line*: *Scene / doctor*'s diagnosis reply places its notes on the quoted passages and the Route B sketch as an edit. *Not:* lore entry conversations, automatic placement, streaming, or a change to any prompt.
+  - **S3 — the *Revising* layout.** *Done when:* the layout menu offers *Revising* beside the other built-ins, and applying it shows the outline, the editor with room for a scene and its conversation side by side, and TODOs. *Not:* any change to the user's saved presets.

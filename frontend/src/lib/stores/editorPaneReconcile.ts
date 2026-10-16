@@ -105,7 +105,7 @@ function resetPaneBaseline(host: PaneReconcileHost, pane: EditorPaneState, fresh
     draftMarkdown: fresh.body,
     draftStatus: documentStatus(fresh),
     draftEntryType: fresh.entry_type,
-    draftMetadata: cloneMetadata(fresh.metadata),
+    draftMetadata: cloneMetadata(fresh.metadata ?? {}),
     recentlySaved: false,
   });
 }

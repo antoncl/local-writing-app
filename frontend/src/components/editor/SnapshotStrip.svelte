@@ -194,6 +194,13 @@
   </div>
 </div>
 
+<!-- A failed camera click (#1996): the backend's own message, in the quiet
+     caption style — the strip itself stays where it was. Outside the fixed-width
+     strip so it can be any length. -->
+{#if strip.notice}
+  <p class="writes-note" role="status" data-testid="snapshot-notice">{strip.notice}</p>
+{/if}
+
 <!-- The actions row exists only while parked, and everything variable lives
      here rather than beside the track — so it can be any width it likes. -->
 {#if parked}

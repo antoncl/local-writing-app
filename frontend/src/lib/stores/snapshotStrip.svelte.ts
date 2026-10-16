@@ -188,6 +188,10 @@ export class SnapshotStripController {
   /** Rendered HTML of the parked snapshot's body, for the read-only overlay. */
   bodyHtml = $state("");
   busy = $state(false);
+  /** Why the last camera click failed (#1996) — the backend's own message, shown
+   *  as a quiet line under the strip. Cleared by the next successful capture,
+   *  park or refresh; a failure never moves the strip, so this is the only trace. */
+  notice = $state<string | null>(null);
 
   // ---- the compare axis (ADR-0044 §F/§I, #409) ------------------------------
   //
@@ -376,6 +380,7 @@ export class SnapshotStripController {
   async refresh(): Promise<void> {
     const backend = this.#backend;
     if (!backend) return;
+    this.notice = null;
     try {
       const list = await backend.list();
       if (this.#backend?.key === backend.key) this.snapshots = inNotchOrder(list.snapshots);
@@ -397,6 +402,7 @@ export class SnapshotStripController {
    *  call in parallel. §G still puts the diff at the discrete moment the author
    *  parks; the runs carry all the text, so every later flip is a re-render. */
   async park(snapshotId: string | null): Promise<void> {
+    this.notice = null;
     const backend = this.#backend;
     if (snapshotId && !backend) {
       // No target yet — the pane is still mounting. Keep the intent for the
@@ -646,8 +652,10 @@ export class SnapshotStripController {
       await backend.capture(this.readLive?.()?.dynamic_context);
       await this.refresh();
       await this.park(null);
-    } catch {
-      // Leave the strip as it was; a failed capture must not move the author.
+    } catch (caught) {
+      // Leave the strip as it was; a failed capture must not move the author —
+      // but say why, or the camera reads as a dead button (#1996).
+      this.notice = caught instanceof Error && caught.message ? caught.message : "Couldn't take the snapshot.";
     } finally {
       this.busy = false;
     }

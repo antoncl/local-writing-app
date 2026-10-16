@@ -103,6 +103,7 @@ describe("PinnedSetsPanel (ADR-0055 §3)", () => {
     const deleteSpy = vi.spyOn(api, "deleteMutationSetEntry").mockResolvedValue({
       entries: [set({ id: "reusable", title: "Any promotion", target_entity: "" })],
     });
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] }); // the delete's chat reconcile (#2347)
     const confirmSpy = vi.spyOn(confirmService, "request");
     render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
 

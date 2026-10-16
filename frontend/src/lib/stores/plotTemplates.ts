@@ -5,6 +5,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
+import { withChatCascade } from "@/lib/stores/chats";
 import type { PlotTemplateSummary } from "@/lib/types";
 
 export const plotTemplatesStore = writable<PlotTemplateSummary[]>([]);
@@ -24,7 +25,7 @@ export function setPlotTemplates(entries: PlotTemplateSummary[]): void {
 // 409s / the palette only offers this on owned rows). A plotline instantiated from it
 // is unaffected: its beats + lineage were SNAPSHOTTED at instantiate (S1), not linked.
 export async function deletePlotTemplateEntry(id: string): Promise<void> {
-  setPlotTemplates((await api.deletePlotTemplate(id)).entries);
+  setPlotTemplates((await withChatCascade(() => api.deletePlotTemplate(id))).entries);
 }
 
 export function clearPlotTemplates(): void {

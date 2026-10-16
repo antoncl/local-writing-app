@@ -15,6 +15,7 @@ import {
   refreshAfterMutation,
   withTextChoice,
 } from "@/lib/stores/plotBoard";
+import { withChatCascade } from "@/lib/stores/chats";
 import { refreshStructure } from "@/lib/stores/structure";
 import type { DeckEntry, DeckSummary } from "@/lib/types";
 
@@ -49,7 +50,7 @@ export async function createDeckOnBoard(title = "New deck", parent?: string): Pr
 // Delete a deck. Only the deck goes: the backend's reference purge frees its cards and
 // child decks, so the board refetch shows them loose / top level.
 export async function deleteDeck(id: string, refresh = true): Promise<void> {
-  setDecks((await api.deleteDeck(id)).entries);
+  setDecks((await withChatCascade(() => api.deleteDeck(id))).entries);
   if (refresh) await refreshPlotBoard();
 }
 

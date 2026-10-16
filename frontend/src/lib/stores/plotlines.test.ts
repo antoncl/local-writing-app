@@ -42,6 +42,7 @@ const projection = (): PlotBoardProjection => ({
 // doesn't leak a real /plot/cards fetch (#973).
 beforeEach(() => {
   vi.spyOn(api, "listCards").mockResolvedValue({ entries: [] });
+  vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] }); // the delete's chat reconcile (#2347)
 });
 
 afterEach(() => vi.restoreAllMocks());

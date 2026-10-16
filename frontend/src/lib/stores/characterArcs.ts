@@ -8,6 +8,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
+import { withChatCascade } from "@/lib/stores/chats";
 import { refreshPlotBoard, refreshAfterMutation } from "@/lib/stores/plotBoard";
 import type { CharacterArcEntry, CharacterArcSummary } from "@/lib/types";
 
@@ -26,7 +27,7 @@ export function setCharacterArcs(entries: CharacterArcSummary[]): void {
 // Delete an arc from the board (its node's "Delete character arc"). Also refresh
 // the board so any card that fulfilled one of its change-beats loses that badge.
 export async function deleteArc(id: string): Promise<void> {
-  setCharacterArcs((await api.deleteCharacterArc(id)).entries);
+  setCharacterArcs((await withChatCascade(() => api.deleteCharacterArc(id))).entries);
   await refreshPlotBoard();
 }
 

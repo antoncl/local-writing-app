@@ -16,7 +16,17 @@
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import { DND_MIME, centrePos, toFlowPos } from "./view/insertionPlacement";
-  import { hydrateGraph, repairGraphCycles, tagEdge, toFlowNode, type FlowData } from "./view/hydrateView";
+  import {
+    buildInferenceGraph,
+    hydrateGraph,
+    repairGraphCycles,
+    tagEdge,
+    toFlowNode,
+    toGraph,
+    toLayout,
+    type FlowData,
+  } from "./view/hydrateView";
+  import { DesignerRoster } from "./view/designerRoster.svelte";
   import { PALETTE, defaultCfg } from "./view/paletteData";
   import type { GraphPort } from "@/lib/graph/graphCommands";
   import { untrack } from "svelte";
@@ -29,7 +39,7 @@
   import ViewGlyph from "./view/ViewGlyph.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
-  import { setDesignerContext, type DesignerContext, type FieldOption, type RosterWarning } from "./view/designerContext";
+  import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { canonicalIdIn, tagById, tagTitleById } from "@/lib/stores/tagNodes";
@@ -38,20 +48,9 @@
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
   import { viewUsesTagIds } from "@/lib/views/groupBy";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
-  import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { buildBindings, resolveParamControls } from "@/lib/views/viewParams";
   import ParamStrip from "./view/ParamStrip.svelte";
-  import {
-    effectiveFieldLabel,
-    effectiveFieldHidden,
-    kindRootEntryTypeId,
-    kindEntryTypeFqns,
-    kindEntryTypeOptions,
-    descendantTypeFqns,
-    intersectFieldKeysOverTypes,
-  } from "@/lib/utils/schemaTypeHelpers";
-  import { pickerMembership } from "@/lib/utils/pickerSources";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     graphToSpec,
@@ -63,26 +62,17 @@
     reachesFieldOf,
     outputPayload,
     valueSlotAccepts,
-    inferInputTypes,
-    inputKinds,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
-    type ViewGraph,
-    type ViewGraphNode,
-    type ViewGraphEdge,
     type ViewNodeData,
-    type InputTypeSet,
-    type TypeResolvers,
   } from "@/lib/views/viewGraph";
   import type {
     AssistantEntrySummary,
     EditableDocument,
     LoreEntrySummary,
-    MetadataFieldDefinition,
     PromptEntrySummary,
     StructureDocument,
-    ViewLayout,
     ViewNode,
     ViewSort,
     ViewSpec,
@@ -151,7 +141,7 @@
   // owning node. Derived off the graph (recomputes on any edit — light: no eval).
   type ParamRow = { nodeId: string; name: string; label: string; typeLabel: string; defaultText: string; bound: boolean };
   let paramRows = $derived.by<ParamRow[]>(() =>
-    collectParamBindings(toGraph()).map((b) => {
+    collectParamBindings(toGraph(flowNodes, flowEdges)).map((b) => {
       const cfg = flowNodes.find((n) => n.id === b.nodeId)?.data.cfg ?? {};
       const def = b.param.default;
       const bound = !isEmptyValue(def);
@@ -162,7 +152,7 @@
         defaultText = bound ? String(def) : "";
       } else if (b.slot === "type" || b.slot === "descendants_of") {
         typeLabel = "entry type";
-        defaultText = bound ? (entryTypeOptions.find((t) => t.fqn === def)?.name ?? String(def)) : "";
+        defaultText = bound ? (roster.entryTypes.find((t) => t.fqn === def)?.name ?? String(def)) : "";
       } else {
         // field slot — the field's datatype, and the field name folds into the label.
         const fdef = cfg.field?.key ? schema?.fields?.[cfg.field.key] : null;
@@ -257,53 +247,17 @@
   });
 
 
-  // Serialize the live canvas (positions + wiring) for persistence. Parallel to
-  // toGraph()/graphToExpr, but lossless — keeps every node incl. unwired ones,
-  // their positions, and full edge handles, none of which survive the semantic
-  // expr round-trip.
-  function toLayout(): ViewLayout {
-    return {
-      nodes: flowNodes.map((n) => ({
-        id: n.id,
-        kind: n.data.kind,
-        position: n.position,
-        cfg: (n.data.cfg ?? {}) as Record<string, unknown>,
-      })),
-      edges: flowEdges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        source_handle: e.sourceHandle ?? null,
-        target_handle: e.targetHandle ?? null,
-      })),
-    };
-  }
-
   // ---- graph → spec ----
-  function toGraph(): ViewGraph {
-    return {
-      nodes: flowNodes.map((n) => ({ id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} })),
-      // sourceHandle is load-bearing for the Nest orphans output (ADR-0028 Amdt 1,
-      // #260): graphToSpec folds an edge leaving the `orphans` handle into
-      // `nest.orphans`. It was dropped before that handle existed.
-      edges: flowEdges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle ?? null,
-        targetHandle: e.targetHandle ?? null,
-      })),
-    };
-  }
+  // (`toLayout` / `toGraph` — the canvas serializers — live in view/hydrateView.ts.)
   // Memoize the lowered spec by structural equality. Dragging a node mutates
   // flowNodes' positions every animation frame, but positions only feed n-ary
   // child ORDERING in graphToSpec, which rarely changes mid-drag. Returning the
   // SAME spec reference when the lowering is unchanged stops `preview` — a
   // $derived that re-evaluates the whole universe — from recomputing every drag
-  // frame (#96). The autosave effect still tracks positions via toLayout().
+  // frame (#96). The autosave effect still tracks positions via toLayout(...).
   let specMemo: { key: string; spec: ViewSpec } | null = null;
   let spec = $derived.by<ViewSpec>(() => {
-    const next = graphToSpec(toGraph(), { kind, sort, schema });
+    const next = graphToSpec(toGraph(flowNodes, flowEdges), { kind, sort, schema });
     const key = JSON.stringify(next);
     if (specMemo && specMemo.key === key) return specMemo.spec;
     specMemo = { key, spec: next };
@@ -367,184 +321,14 @@
   // silent (ADR-0028 §D, #110).
   let warnings = $derived(nestWarnings(preview.diagnostics));
 
-  // ---- schema-derived leaf-config options for the current kind ----
-  let entryTypeOptions = $derived(kindEntryTypeOptions(schema ?? null, kind));
-  // The `descendants_of` roster includes abstract family roots (#295); `type` and
-  // `field → entry_type` use the concrete-only `entryTypeOptions` above.
-  let entryTypeOptionsWithAbstract = $derived(kindEntryTypeOptions(schema ?? null, kind, true));
-  // The intrinsic identity fields (id/title/entry_type, #116) are now regular
-  // schema fields injected into every entry_type, so title/entry_type surface
-  // here naturally — pinned first (intrinsic before metadata). `hidden` fields
-  // (id by default) are skipped; the evaluator reads intrinsic keys off the
-  // node property (see fieldValue).
-  // Shared roster builder: field keys → sorted FieldOptions, resolving per-type
-  // label/hidden against `anchor` — the kind ROOT for a single kind (ADR-0029 §F:
-  // the built-in lore `title → "Name"` relabel sits on `lore:base` and reaches the
-  // picker; a leaf-only override deliberately does not), or the bare def (null) for
-  // a cross-kind set with no single root. Intrinsics (id/title/entry_type, #116)
-  // are regular injected fields, pinned first; `hidden` ones (id) are skipped.
-  function fieldOptionsFromKeys(keys: Iterable<string>, anchor: string | null): FieldOption[] {
-    const out: FieldOption[] = [];
-    for (const k of keys) {
-      const def = schema?.fields?.[k];
-      if (!def || effectiveFieldHidden(schema, anchor, k)) continue;
-      out.push({ key: k, name: effectiveFieldLabel(schema, anchor, k), def });
-    }
-    out.sort((a, b) => {
-      const ai = a.def.category === "intrinsic";
-      const bi = b.def.category === "intrinsic";
-      if (ai !== bi) return ai ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    return out;
-  }
-  // Structural containment ref (ADR-0029 §D `computed` category / #217): scenes
-  // and research notes carry a `parent` metadata ref stamped from the structure
-  // tree (`structureNodes.ts`), which drives `defaultView()`'s containment Nest.
-  // It's not a schema-declared field, so it's absent from the entry_type rosters
-  // — leaving every field picker (filter predicate, Nest link, field_of, group_by)
-  // unable to show, select, or RESTORE it (#251). Inject it as a first-class
-  // computed reference field so all those pickers offer it uniformly. `entity_ref`
-  // + non-intrinsic category = joinable AND groupable, matching how the evaluator
-  // follows it (`match.field: parent`, by ref). `children` is deferred to #217: no
-  // node stamps it, so the evaluator has no inverse index to resolve it yet.
-  const STRUCTURAL_KINDS = new Set(["manuscript", "research"]);
-  // The structural `parent` ref as a computed reference field, scoped to kind `k`
-  // so its value widget (op overlap/disjoint → ReferencePicker) offers that kind's
-  // nodes — without a `picker_config` the picker falls back to the `lore` roster.
-  function parentFieldDef(k: string): MetadataFieldDefinition {
-    return { name: "Parent", type: "entity_ref", options: [], category: "computed", picker_config: { sources: [{ kind: k }] } };
-  }
-  // The computed field options for a set of kinds — fields a kind's universe carries
-  // in `metadata` but the schema never declares, so they have no entry_type
-  // membership to intersect over and are PREPENDED to a roster rather than merged
-  // into the schema-key set. Two sources: the structural `parent` ref (when any kind
-  // is a tree kind, kind-scoped picker) and the lift-synthesized fields registered
-  // in `computedFields` (`seed_disposition` on chats, #960; prompts' `disposition`
-  // graduated to a real schema-declared computed field in #1684, so it arrives
-  // through the ordinary schema roster now, not here). A user-declared metadata
-  // field with the same key (rare) takes precedence —
-  // the real field is already in the roster, so skip the synthetic to avoid a
-  // duplicate option (`computedFieldByKey` likewise resolves the schema field first).
-  function computedFieldOptions(kinds: Iterable<string>): FieldOption[] {
-    const out: FieldOption[] = [];
-    const seen = new Set<string>();
-    // #1928: `layer` is UNIVERSAL — not tied to any kind or entry_type (it's the
-    // node's own resolved inheritance layer) — so it's added once here rather
-    // than per-kind, straight from the resolved schema (single-sourcing its
-    // label/options from the backend, like any other computed select). Not
-    // tracked in `seen`: nothing below can re-add it (a lift field keyed `layer`
-    // is already skipped by the `schema?.fields?.[cf.key]` guard in the loop).
-    if (schema?.fields?.layer) {
-      out.push({ key: "layer", name: schema.fields.layer.name, def: schema.fields.layer });
-    }
-    for (const k of kinds) {
-      if (!seen.has("parent") && !schema?.fields?.parent && STRUCTURAL_KINDS.has(k)) {
-        out.push({ key: "parent", name: "Parent", def: parentFieldDef(k) });
-        seen.add("parent");
-      }
-      for (const cf of liftFieldsForKind(k)) {
-        if (seen.has(cf.key) || schema?.fields?.[cf.key]) continue;
-        out.push({ key: cf.key, name: cf.def.name, def: cf.def });
-        seen.add(cf.key);
-      }
-    }
-    return out;
-  }
-  // The descriptor for a computed field key on a kind (the `fieldByKey` counterpart
-  // of `computedFieldOptions`): structural `parent` or a registered lift field.
-  function computedFieldByKey(k: string, key: string): MetadataFieldDefinition | null {
-    if (key === "layer" && schema?.fields?.layer) return schema.fields.layer;
-    if (key === "parent" && STRUCTURAL_KINDS.has(k)) return parentFieldDef(k);
-    return liftFieldByKey(k, key);
-  }
-  // The anchor-kind roster (union of the kind's fields over its entry_types) — the
-  // fallback when a node's input type is indeterminate. Per-node rosters come from
-  // `fieldsForNode` via §F inference below.
-  function buildFieldOptions(forKind: string): FieldOption[] {
-    const keys = new Set<string>();
-    for (const [, def] of Object.entries(schema?.entry_types ?? {})) {
-      if (def.kind !== forKind) continue;
-      for (const fk of def.fields ?? []) keys.add(fk);
-    }
-    return [...computedFieldOptions([forKind]), ...fieldOptionsFromKeys(keys, kindRootEntryTypeId(schema, forKind))];
-  }
-  let fieldOptions = $derived(buildFieldOptions(kind));
-  // Authoring-time TYPE inference (ADR-0031 §F): the entry_type-set of a node's
-  // INPUT set, driving which field roster AND tag roster its picker offers.
-  const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
-  const typeResolvers: TypeResolvers = {
-    fieldDef,
-    // A ref field's target as a type-set: kind → its entry_type FQNs (empty →
-    // whole kind, no entry_type constraint). Multi-kind refs are kept, not nulled
-    // — the roster intersects across them (§14.3).
-    refTargetTypes: (fieldKey) => {
-      const def = schema?.fields?.[fieldKey];
-      if (!def) return null;
-      const { kinds, entryTypes } = pickerMembership(def.picker_config);
-      if (kinds.length === 0) return null;
-      return new Map(kinds.map((k) => [k, entryTypes[k]?.length ? new Set(entryTypes[k]) : null]));
-    },
-    descendantsOf: (fqn) => descendantTypeFqns(schema, fqn),
-    kindOfType: (fqn) => schema?.entry_types?.[fqn]?.kind ?? fqn.split(":")[0] ?? null,
-  };
-  // Rebuilt once per graph mutation (a $derived), not per picker call —
-  // `fieldsForNode` runs per node per render, so a per-call rebuild would be
-  // O(N²) over the node count.
-  let inferenceGraph = $derived.by((): { byId: Map<string, ViewGraphNode>; edges: ViewGraphEdge[] } => ({
-    byId: new Map(
-      flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
-    ),
-    edges: flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
-  }));
-  function inputTypesForNode(nodeId: string): InputTypeSet | null {
-    return inferInputTypes(inferenceGraph.byId, inferenceGraph.edges, nodeId, kind, typeResolvers);
-  }
-  // Expand an inferred input type-set to the concrete entry_type FQNs it can hold
-  // (a `null` per-kind constraint → every concrete type of that kind).
-  function concreteTypesOf(ts: InputTypeSet): string[] {
-    const out: string[] = [];
-    for (const [k, set] of ts) out.push(...(set ? [...set] : kindEntryTypeFqns(schema, k)));
-    return out;
-  }
-  function fieldsForNode(nodeId: string): FieldOption[] {
-    const ts = inputTypesForNode(nodeId);
-    if (!ts) return fieldOptions; // indeterminate → anchor roster
-    const fqns = concreteTypesOf(ts);
-    // Determinate but provably empty (e.g. an intersect of disjoint types) — the
-    // set can hold no members, so only the always-present intrinsics apply.
-    if (fqns.length === 0) return fieldOptions.filter((o) => o.def.category === "intrinsic");
-    // §F: the fields present on EVERY member — a group-aware set-intersection over
-    // the input's concrete types (vertical inheritance AND shared field-groups). A
-    // cross-kind set has no single root → resolve labels against the bare def. The
-    // computed fields (structural `parent`, and the lift-synthesized
-    // seed_disposition) aren't entry_type members, so they survive the intersection
-    // only by being prepended here — offered whenever their kind is in the input set
-    // (the indeterminate branch above inherits them via `fieldOptions`).
-    const anchor = ts.size === 1 ? kindRootEntryTypeId(schema, [...ts.keys()][0]) : null;
-    return [...computedFieldOptions(ts.keys()), ...fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor)];
-  }
-  // The authoring warning ADR-0031 §F asks for (Slice B, #215): when a picker
-  // node's inferred INPUT set is cross-kind, its roster is a degraded intersection,
-  // not the precise single-kind roster. Cross-kind ⇔ the type-set spans a number of
-  // kinds OTHER than exactly one:
-  //  - size > 1 — a genuine multi-kind set (union of kinds, cross-kind ref, Nest);
-  //  - size 0 (a determinate, NON-null empty Map) — a cross-kind INTERSECT that
-  //    collapsed to nothing (`combineTypeSets` drops every kind when the branches
-  //    share none, e.g. `scenes ∩ characters`), the thinnest roster of all and
-  //    exactly the "nothing in common → down to intrinsics" case §F names.
-  // Silent (null) otherwise: `ts === null` (indeterminate → anchor fallback), and
-  // size 1 — a single kind, INCLUDING a same-kind empty intersect (`{scene:∅}`),
-  // which is a distinct impossible-filter diagnostic out of §F's cross-kind scope.
-  // `thin` reuses `fieldsForNode` (the roster the picker actually shows), so for a
-  // cross-kind node the note always agrees with the dropdown.
-  function rosterWarningFor(nodeId: string): RosterWarning | null {
-    const ts = inputTypesForNode(nodeId);
-    if (ts === null || ts.size === 1) return null;
-    const kinds = inputKinds(ts).sort();
-    const thin = !fieldsForNode(nodeId).some((o) => o.def.category !== "intrinsic");
-    return { kinds, thin };
-  }
+  // ---- schema-derived field roster + §F type inference (view/designerRoster.svelte.ts) ----
+  // Getters, so every derived in the roster tracks the live schema / kind / canvas.
+  const roster = new DesignerRoster({
+    getSchema: () => schema ?? null,
+    getKind: () => kind,
+    getNodes: () => flowNodes,
+    getEdges: () => flowEdges,
+  });
   // ---- designer context for the custom nodes ----
   setDesignerContext(
     (): DesignerContext => ({
@@ -554,12 +338,12 @@
       expandedId,
       toggleExpanded,
       kind,
-      entryTypes: entryTypeOptions,
-      entryTypesWithAbstract: entryTypeOptionsWithAbstract,
-      fields: fieldOptions,
-      fieldsFor: fieldsForNode,
-      rosterWarningFor,
-      fieldByKey: (key: string) => schema?.fields?.[key] ?? computedFieldByKey(kind, key),
+      entryTypes: roster.entryTypes,
+      entryTypesWithAbstract: roster.entryTypesWithAbstract,
+      fields: roster.fields,
+      fieldsFor: roster.fieldsFor,
+      rosterWarningFor: roster.rosterWarningFor,
+      fieldByKey: (key: string) => roster.fieldByKey(key),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       loreEntries,
@@ -636,7 +420,7 @@
 
   // ---- palette (sources vs operations — ADR-0038 §B) ----
   // Groups + per-kind default config live in `view/paletteData.ts` (size cap).
-  let hasTypeChoice = $derived(entryTypeOptions.length > 1);
+  let hasTypeChoice = $derived(roster.entryTypes.length > 1);
   function addNode(k: GraphNodeKind, position?: { x: number; y: number }): void {
     const id = `a${addCounter++}`;
     const node = toFlowNode(id, k, defaultCfg(k, hasTypeChoice), position ?? centrePos(canvasEl, flowNodes.length));
@@ -691,15 +475,7 @@
     if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
     if (!target) return false;
-    const byId = new Map<string, ViewGraphNode>(
-      flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
-    );
-    const edges = flowEdges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      targetHandle: e.targetHandle ?? null,
-    }));
+    const { byId, edges } = buildInferenceGraph(flowNodes, flowEdges);
     const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
     const srcNode = byId.get(conn.source);
     const tgtNode = byId.get(conn.target);
@@ -793,7 +569,7 @@
     }
     // Layout is in the snapshot so a position-only drag (which leaves `spec`
     // unchanged) still persists — now once, on release rather than per frame.
-    const snapshot = JSON.stringify({ title, spec, layout: toLayout() });
+    const snapshot = JSON.stringify({ title, spec, layout: toLayout(flowNodes, flowEdges) });
     if (hydrating || !loadedViewId) {
       lastSaved = snapshot;
       return;
@@ -819,7 +595,7 @@
         title: title || "Untitled view",
         base_revision: revision,
         spec,
-        layout: toLayout(),
+        layout: toLayout(flowNodes, flowEdges),
       });
       revision = saved.revision;
       lastSaved = snapshot;
@@ -827,7 +603,7 @@
       // no longer matches what we just persisted — stay "dirty" (a reschedule is
       // already queued) rather than flash a premature "Saved" (#263 review). Mirrors
       // saveEditorPane's `paneStillDirty` recompute for prose panes.
-      const caughtUp = JSON.stringify({ title, spec, layout: toLayout() }) === lastSaved;
+      const caughtUp = JSON.stringify({ title, spec, layout: toLayout(flowNodes, flowEdges) }) === lastSaved;
       onSaveState?.(caughtUp ? "saved" : "dirty");
       onBodyChange?.();
       // Refresh the shared saved-view roster so panes consuming this view

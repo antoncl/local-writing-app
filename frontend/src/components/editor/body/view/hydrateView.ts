@@ -8,14 +8,67 @@ import {
   specToGraph,
   outputPayload,
   type GraphNodeKind,
+  type ViewGraph,
+  type ViewGraphEdge,
   type ViewGraphNode,
   type ViewNodeData,
 } from "@/lib/views/viewGraph";
 import { repairGraphCycles as repairEdges } from "@/lib/views/cycleCheck";
-import type { MetadataSchema, ViewNode } from "@/lib/types";
+import type { MetadataSchema, ViewLayout, ViewNode } from "@/lib/types";
 
 /** The custom node payload every canvas node carries. */
 export type FlowData = { kind: GraphNodeKind; cfg: ViewNodeData };
+
+// Serialize the live canvas (positions + wiring) for persistence. Parallel to
+// toGraph()/graphToExpr, but lossless — keeps every node incl. unwired ones,
+// their positions, and full edge handles, none of which survive the semantic
+// expr round-trip.
+export function toLayout(nodes: Node<FlowData>[], edges: Edge[]): ViewLayout {
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      kind: n.data.kind,
+      position: n.position,
+      cfg: (n.data.cfg ?? {}) as Record<string, unknown>,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      source_handle: e.sourceHandle ?? null,
+      target_handle: e.targetHandle ?? null,
+    })),
+  };
+}
+
+// The canvas lowered to a ViewGraph (graph → spec input).
+export function toGraph(nodes: Node<FlowData>[], edges: Edge[]): ViewGraph {
+  return {
+    nodes: nodes.map((n) => ({ id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} })),
+    // sourceHandle is load-bearing for the Nest orphans output (ADR-0028 Amdt 1,
+    // #260): graphToSpec folds an edge leaving the `orphans` handle into
+    // `nest.orphans`. It was dropped before that handle existed.
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle ?? null,
+      targetHandle: e.targetHandle ?? null,
+    })),
+  };
+}
+
+// The id-indexed node map + slim edge list the type-inference / connection
+// classifiers consume (one builder for the roster and `isValidConnection`).
+export function buildInferenceGraph(
+  nodes: Node<FlowData>[],
+  edges: Edge[],
+): { byId: Map<string, ViewGraphNode>; edges: ViewGraphEdge[] } {
+  return {
+    byId: new Map(nodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }])),
+    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
+  };
+}
 
 export function toFlowNode(id: string, k: GraphNodeKind, cfg: ViewNodeData, position: { x: number; y: number }): Node<FlowData> {
   return { id, type: "viewNode", position, data: { kind: k, cfg }, deletable: k !== "output" };

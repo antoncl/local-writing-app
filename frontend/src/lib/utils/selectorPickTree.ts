@@ -321,3 +321,12 @@ export function memberCountForRef(groups: SelectorGroup[], ref: NodePickerRef): 
   const g = groups.find((x) => x.ref.kind === ref.kind && x.ref.id === ref.id);
   return g ? g.members.length : null;
 }
+
+/** A copy of `set` with `id` flipped in/out — the expand/collapse toggle shared by
+ * every pick tree (manuscript, lore, selector axes). */
+export function toggleInSet(set: Set<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}

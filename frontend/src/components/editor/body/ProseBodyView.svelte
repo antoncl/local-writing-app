@@ -785,7 +785,10 @@
         .map((entry) => ({
           group: "AI",
           label: entry.title,
-          description: promptEntryDescription(promptCtx, entry),
+          // The filter matches `description` word by word, so it stays the short
+          // type name; the prompt's summary goes in the display-only hint (#2546).
+          description: promptCtx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type,
+          hint: promptEntryDescription(promptCtx, entry),
           // Colon-free token from the title, NOT the entry_type: since the FQN
           // change (#77) entry_type is `kind:key` (e.g. `prompt:general`), and a
           // colon fails the slash grammar and strands the menu (#1215). The

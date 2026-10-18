@@ -183,6 +183,21 @@ describe("bodyToolbarActions (ProseBodyView's toolbar, #1893 seam extraction)", 
     expect(runPrompt).toHaveBeenCalledWith(entryB);
   });
 
+  it("a revise entry's summary becomes the hover tooltip, as a button and as menu items (#2546)", () => {
+    const { editor } = makeEditor();
+    const withSummary = { ...entryA, summary: "Makes the passage tighter." };
+    const base = { hasText: true, inTable: false, isScene: true, runPrompt: vi.fn(), markTodo: vi.fn() };
+    const single = bodyToolbarActions(editor, { ...base, reviseEntries: [withSummary] });
+    const button = single.find((a) => a.id === "ai-revise:prompt_a");
+    if (!button || button.kind !== "button") throw new Error("expected a button");
+    expect(button.tooltip).toBe("Makes the passage tighter.");
+    const many = bodyToolbarActions(editor, { ...base, reviseEntries: [withSummary, entryB] });
+    const menu = many.find((a) => a.id === "ai-revise");
+    if (!menu || menu.kind !== "menu") throw new Error("expected a menu");
+    const tooltips = menu.items.map((item) => ("tooltip" in item ? item.tooltip : undefined));
+    expect(tooltips).toEqual(["Makes the passage tighter.", undefined]);
+  });
+
   it("isScene false: Revise shows for an offered prompt (#2475), but no TODO", () => {
     const { editor } = makeEditor();
     const actions = bodyToolbarActions(editor, {

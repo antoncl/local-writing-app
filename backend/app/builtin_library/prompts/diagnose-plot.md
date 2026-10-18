@@ -2,6 +2,8 @@
 id: prompt_a5ccb80a83
 title: Diagnose plot
 entry_type: prompt:general
+metadata:
+  summary: "Reads the whole plot board and points out the weak spots a structural check can't see."
 ---
 
 {% role "system" %}

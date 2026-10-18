@@ -2,6 +2,8 @@
 id: prompt_f784c122fa
 title: Relevant lore
 entry_type: prompt:snippet
+metadata:
+  summary: "The lore entries relevant to the work at hand, for prompts that should stay consistent with your world."
 inputs:
 - name: lore
   type: context_pick

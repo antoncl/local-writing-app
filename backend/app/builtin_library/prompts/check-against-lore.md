@@ -2,6 +2,8 @@
 id: prompt_5160b9ffbe
 title: Check against lore
 entry_type: prompt:general
+metadata:
+  summary: "Checks the selected passage against your lore and notes where it contradicts an entry, without rewriting."
 offer_on:
 - manuscript:scene
 context_strategy:

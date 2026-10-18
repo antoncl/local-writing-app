@@ -2,6 +2,8 @@
 id: prompt_f714309b36
 title: Line edit (entry)
 entry_type: prompt:general
+metadata:
+  summary: "Proposes small wording fixes to a lore entry's text, which you accept or reject one by one."
 offer_on:
 - lore:base
 inputs:

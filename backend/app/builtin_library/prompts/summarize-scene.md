@@ -2,6 +2,8 @@
 id: prompt_24dd1026e3
 title: Summarize scene
 entry_type: prompt:general
+metadata:
+  summary: "Writes a short synopsis of a scene from its prose, and revises it to the angle you ask for."
 offer_on:
 - manuscript:scene
 inputs:

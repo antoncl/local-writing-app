@@ -223,11 +223,21 @@ export function chatPromptPickList(
   return promptEntriesForSurface(ctx, "conversation").filter((entry) => !promptDeclaresCommit(ctx, entry));
 }
 
+// The prompt's one-line summary of what it does for the writer (#2546) — the
+// `summary` metadata field `prompt:base` nominates. Empty when unset, so a
+// caller can use it directly as "tooltip only when there is one".
+export function promptSummary(entry: Pick<PromptEntrySummary, "metadata">): string {
+  const value = entry.metadata?.summary;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+// The run dialog's one-line description: the prompt's summary, else the entry
+// type's name (the pre-#2546 behaviour) for a prompt that carries none.
 export function promptEntryDescription(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
 ): string {
-  return ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
+  return promptSummary(entry) || (ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type);
 }
 
 // True iff `entry` declares it should be offered on a subject of schema type

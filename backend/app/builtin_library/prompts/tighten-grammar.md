@@ -2,6 +2,8 @@
 id: prompt_4511b25021
 title: Tighten grammar
 entry_type: prompt:general
+metadata:
+  summary: "Finds grammar, punctuation, and spelling errors in the selection and proposes the smallest fix for each."
 offer_on:
 - manuscript:scene
 context_strategy:

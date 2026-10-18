@@ -2,6 +2,8 @@
 id: prompt_d026628591
 title: Rephrase
 entry_type: prompt:general
+metadata:
+  summary: "Rewrites the selected passage in fresh words, keeping its meaning, voice, and tense."
 offer_on:
 - manuscript:scene
 context_strategy:

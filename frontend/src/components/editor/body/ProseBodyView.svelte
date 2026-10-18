@@ -99,6 +99,7 @@
     type PromptResolutionContext,
     inlinePromptsOfferedOn,
     promptEntryDescription,
+    promptSummary,
     defaultPromptForSurface,
     resolvePromptPositionalArgs,
   } from "@/lib/editor-core/promptResolution";
@@ -891,7 +892,10 @@
   function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
     const isScene = documentKind === "manuscript";
-    const reviseEntries = inlinePromptsOfferedOn(promptCtx, "selection", scene?.entry_type);
+    const reviseEntries = inlinePromptsOfferedOn(promptCtx, "selection", scene?.entry_type).map((entry) => ({
+      ...entry,
+      summary: promptSummary(entry),
+    }));
     return bodyToolbarActions(editor, {
       hasText,
       inTable,

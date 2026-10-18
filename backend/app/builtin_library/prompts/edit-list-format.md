@@ -2,6 +2,8 @@
 id: prompt_c48d8aa36f
 title: Edit list reply format
 entry_type: prompt:snippet
+metadata:
+  summary: "Tells a prompt to answer with small reasoned edits you accept or reject one by one."
 ---
 {#
   The reply contract of an edit-list revise prompt (#2460, #2474): a prompt

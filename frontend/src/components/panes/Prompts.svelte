@@ -15,6 +15,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { resolveColor } from "@/lib/utils/colors";
+  import { summaryLine } from "@/lib/utils/summaryFields";
   import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -104,6 +105,13 @@
   });
   // The view's chosen render layout (ADR-0069); absent axes keep the pane default.
   const appearance = $derived(paneViews.appearanceFor("prompt"));
+
+  // The row's one-line detail (#2546): the prompt type's nominated `summary`
+  // field — what the prompt does for the writer — via the shared summary reader.
+  function entryDetailText(entry: PromptEntrySummary): string | null {
+    if (!schema) return null;
+    return summaryLine(schema.entry_types[entry.entry_type], schema, entry.metadata);
+  }
 </script>
 
 <!-- Shelving reads the schema-declared `disposition` computed field (#1684) —
@@ -155,6 +163,7 @@
        from the writer's own prompts — the same treatment Lore uses. -->
   <NodeRow
     title={entry.title}
+    detail={entryDetailText(entry)}
     layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}

@@ -160,6 +160,23 @@ describe("Prompts pane — disposition shelves (#951/#1684)", () => {
   });
 });
 
+describe("Prompts pane — summary detail line (#2546)", () => {
+  it("shows a prompt's summary as its row detail", () => {
+    metadataSchemaStore.set({
+      entry_types: {
+        "prompt:base": { name: "Prompt" },
+        "prompt:general": { name: "General", parent: "prompt:base", fields: ["summary"], summary_fields: ["summary"] },
+      },
+      fields: { summary: { name: "Summary", type: "long_text" } },
+    } as unknown as MetadataSchema);
+    const entry = { ...libraryPrompt("p-sum", "Draft scene"), metadata: { summary: "Writes a first draft of the scene." } };
+    render(Prompts, {
+      props: { entries: [entry], onOpenEntry: noop, onNewEntry: noop, onCloneEntry: noop },
+    });
+    expect(screen.getByText("Writes a first draft of the scene.")).toBeInTheDocument();
+  });
+});
+
 describe("Prompts pane — Library hide (ADR-0049 slice 3)", () => {
   it("hides a row off the shelf, reveals it, and un-hides it", async () => {
     renderPane();

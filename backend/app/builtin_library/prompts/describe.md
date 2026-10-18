@@ -2,6 +2,8 @@
 id: prompt_de9faf834c
 title: Describe
 entry_type: prompt:general
+metadata:
+  summary: "Rewrites the selected passage as a vivid description, drawing on the senses you choose."
 offer_on:
 - manuscript:scene
 inputs:

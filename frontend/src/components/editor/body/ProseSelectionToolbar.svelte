@@ -84,6 +84,7 @@
         <button
           class:danger={action.danger}
           type="button"
+          title={action.tooltip || undefined}
           onmousedown={(e) => {
             e.preventDefault();
             onRun(action.run);
@@ -148,6 +149,7 @@
                   <button
                     class:danger={entry.danger}
                     type="button"
+                    title={entry.tooltip || undefined}
                     onmousedown={(e) => {
                       e.preventDefault();
                       onRun(entry.run);

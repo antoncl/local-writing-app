@@ -2,6 +2,8 @@
 id: prompt_cb76611de7
 title: Revise entry
 entry_type: prompt:general
+metadata:
+  summary: "Brainstorms a lore entry with you, then commits the result as a revision, or a new entry."
 offer_on:
 - lore:base
 inputs:

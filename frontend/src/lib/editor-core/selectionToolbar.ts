@@ -57,6 +57,8 @@ export type ToolbarButtonAction = {
   run: () => void | Promise<void>;
   /** Destructive action (e.g. Delete table) — rendered in the danger colour. */
   danger?: boolean;
+  /** Hover text (the `title` attribute); absent or empty = none. */
+  tooltip?: string;
 };
 
 // Entries inside a dropdown popover. A leaf runs a command; a submenu opens a
@@ -68,6 +70,7 @@ export type ToolbarMenuLeaf = {
   label: string;
   run: () => void | Promise<void>;
   danger?: boolean;
+  tooltip?: string;
 };
 
 export type ToolbarSubmenu = {

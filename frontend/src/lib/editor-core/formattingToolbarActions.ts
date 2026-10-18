@@ -78,7 +78,7 @@ export function formattingToolbarActions(editor: Editor, hasText: boolean, inTab
  *  Generic over the caller's own entry type (ProseBodyView's is the full
  *  `PromptEntrySummary`) so `runPrompt` gets the exact type back, not this
  *  narrowed one. */
-export type ReviseEntry = { id: string; title: string };
+export type ReviseEntry = { id: string; title: string; summary?: string };
 
 export type BodyToolbarOptions<T extends ReviseEntry> = {
   hasText: boolean;
@@ -111,6 +111,7 @@ export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, option
               kind: "button",
               id: `ai-revise:${reviseEntries[0].id}`,
               label: `✨ ${reviseEntries[0].title}`,
+              tooltip: reviseEntries[0].summary,
               run: () => runPrompt(reviseEntries[0]),
             }
           : {
@@ -120,6 +121,7 @@ export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, option
               items: reviseEntries.map((entry) => ({
                 id: `ai-revise:${entry.id}`,
                 label: entry.title,
+                tooltip: entry.summary,
                 run: () => runPrompt(entry),
               })),
             };

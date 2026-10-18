@@ -2,6 +2,8 @@
 id: prompt_c61687ef16
 title: Finalize roleplay
 entry_type: prompt:general
+metadata:
+  summary: "Turns a roleplayed scene into finished narrative prose from the point-of-view character's side."
 context_strategy:
   output:
     handler: finalize_scene

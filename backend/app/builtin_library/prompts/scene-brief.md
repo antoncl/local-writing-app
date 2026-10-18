@@ -2,6 +2,8 @@
 id: prompt_f564c868ff
 title: Scene brief
 entry_type: prompt:snippet
+metadata:
+  summary: "The scene's brief — every field your schema gives a scene — for prompts that draft or check it."
 ---
 {#
   Scene brief snippet (#2511): the scene as its author designed it — its summary,

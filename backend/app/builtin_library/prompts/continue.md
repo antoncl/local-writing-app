@@ -2,6 +2,8 @@
 id: prompt_0670474a78
 title: Continue
 entry_type: prompt:general
+metadata:
+  summary: "Picks the prose up at your cursor and keeps writing in the same voice, tense, and rhythm."
 offer_on:
 - manuscript:scene
 inputs:

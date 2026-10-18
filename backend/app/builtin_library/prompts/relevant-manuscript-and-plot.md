@@ -2,6 +2,8 @@
 id: prompt_ca222add6c
 title: Relevant manuscript and plot
 entry_type: prompt:snippet
+metadata:
+  summary: "The scenes and plot cards you pick, for prompts that need the story so far or where it is heading."
 inputs:
 - name: manuscript_plot
   type: context_pick

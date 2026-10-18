@@ -10,6 +10,7 @@
   // Content-only, like every Popover child (it carries its own style scope). The
   // caller owns the Popover shell (role="menu", dismiss, Escape-to-close at root).
   import type { MenuNode } from "@/lib/editor-core/promptMenuTree";
+  import { promptSummary } from "@/lib/editor-core/promptResolution";
   import type { PromptEntrySummary } from "@/lib/types";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
@@ -109,6 +110,7 @@
     role="menuitem"
     aria-haspopup={node.children.length > 0 ? "menu" : undefined}
     use:focusOnNav={i === 0}
+    title={(node.entry && promptSummary(node.entry)) || undefined}
     onclick={() => activate(node)}
     onkeydown={(event) => onItemKeydown(event, node)}
   >

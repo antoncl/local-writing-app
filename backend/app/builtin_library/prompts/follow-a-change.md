@@ -2,6 +2,8 @@
 id: prompt_50c0db790b
 title: Follow a change
 entry_type: prompt:general
+metadata:
+  summary: "Helps you update an entry so it follows a change made to another entry it depends on."
 offer_on:
 - lore:base
 inputs:

@@ -16,6 +16,8 @@ import {
   isFinalizePrompt,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
+  promptEntryDescription,
+  promptSummary,
   promptOffersOn,
   promptOnAccept,
   proposeDefaultPrompt,
@@ -855,5 +857,31 @@ describe("inline rosters honour offer_on (#2475)", () => {
     expect(defaultPromptForSurface(withCheck, "selection", "lore:character")?.id).toBe("lore-edit");
     const onlyCheck = ctx({ metadataSchema: isaSchema, promptEntries: [checkP] });
     expect(defaultPromptForSurface(onlyCheck, "selection", "lore:character")).toBeNull();
+  });
+});
+
+describe("promptEntryDescription / promptSummary (#2546)", () => {
+  const typed = {
+    entry_types: { "prompt:general": { name: "General" } },
+    fields: {},
+  } as unknown as MetadataSchema;
+  const withSummary = (summary: unknown): PromptEntrySummary => ({
+    ...prompt("p", "prompt:general"),
+    metadata: { summary } as PromptEntrySummary["metadata"],
+  });
+
+  it("describes a prompt by its summary", () => {
+    const c = ctx({ metadataSchema: typed });
+    expect(promptEntryDescription(c, withSummary("Writes a first draft."))).toBe("Writes a first draft.");
+  });
+
+  it("falls back to the entry type's name when the summary is empty or absent", () => {
+    const c = ctx({ metadataSchema: typed });
+    expect(promptEntryDescription(c, withSummary("  "))).toBe("General");
+    expect(promptEntryDescription(c, prompt("p", "prompt:general"))).toBe("General");
+  });
+
+  it("promptSummary is empty for a non-string value", () => {
+    expect(promptSummary(withSummary(42))).toBe("");
   });
 });

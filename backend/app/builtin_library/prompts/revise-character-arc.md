@@ -2,6 +2,8 @@
 id: prompt_9c3b7ea41d
 title: Revise character arc
 entry_type: prompt:general
+metadata:
+  summary: "Brainstorms a character arc with you, then commits the result as a revision of it."
 offer_on:
 - plot:character_arc
 inputs:

@@ -2,6 +2,8 @@
 id: prompt_f826ca8db8
 title: Notes reply format
 entry_type: prompt:snippet
+metadata:
+  summary: "Tells a prompt to answer with notes that quote a place in the passage and name the entry involved."
 ---
 {#
   The reply contract of a lore-check prompt (#2490, ADR-0098): a prompt whose

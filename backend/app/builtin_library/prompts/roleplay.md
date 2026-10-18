@@ -2,6 +2,8 @@
 id: prompt_5d33fdb02d
 title: Roleplay
 entry_type: prompt:general
+metadata:
+  summary: "Plays one character in the scene, writing their next beat in voice, so you can act the scene out."
 offer_on:
 - manuscript:scene
 inputs:

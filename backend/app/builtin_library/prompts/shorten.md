@@ -2,6 +2,8 @@
 id: prompt_7836e868f4
 title: Shorten
 entry_type: prompt:general
+metadata:
+  summary: "Proposes cuts that make the selected passage shorter and tighter without losing a story beat."
 offer_on:
 - manuscript:scene
 context_strategy:

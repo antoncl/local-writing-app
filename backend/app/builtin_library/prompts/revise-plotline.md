@@ -2,6 +2,8 @@
 id: prompt_0a3136cfd9
 title: Revise plotline
 entry_type: prompt:general
+metadata:
+  summary: "Brainstorms a plotline's structure with you, then commits the result as a revision of it."
 offer_on:
 - plot:plotline
 inputs:

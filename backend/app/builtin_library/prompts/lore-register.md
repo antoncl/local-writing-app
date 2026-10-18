@@ -2,6 +2,8 @@
 id: prompt_b3f32b952a
 title: Lore register
 entry_type: prompt:snippet
+metadata:
+  summary: "Tells a prompt to write lore like a terse series bible: each fact once, no essay padding."
 ---
 {#
   Lore register snippet (#2371). How lore should READ, as opposed to how long it

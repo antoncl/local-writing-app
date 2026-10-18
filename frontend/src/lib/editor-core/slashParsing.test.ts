@@ -65,6 +65,17 @@ describe("#1215: every autocomplete token parses (no stranded menu)", () => {
   });
 });
 
+describe("#2546: a prompt's summary is a display-only hint, never a filter key", () => {
+  it("typing a word from a summary does not match the command", () => {
+    const commands = [
+      { label: "Draft scene", description: "General", hint: "Writes a first draft of the scene from its brief.", group: "AI" },
+      { label: "Table", description: "Insert a table", group: "Insert" },
+    ];
+    expect(filterSlashCommands(commands, "brief", false)).toEqual([]);
+    expect(filterSlashCommands(commands, "draft", false).map((c) => c.label)).toEqual(["Draft scene"]);
+  });
+});
+
 describe("#1215: the completed token keeps its AI command visible in the filter", () => {
   const commands = [
     { label: "Roleplay", description: "Roleplay a character", group: "AI" },

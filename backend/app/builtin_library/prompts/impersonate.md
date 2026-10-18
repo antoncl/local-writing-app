@@ -2,6 +2,8 @@
 id: prompt_cb11befef1
 title: Impersonate
 entry_type: prompt:general
+metadata:
+  summary: "Lets you talk with a character, who answers in first person and always in character."
 offer_on:
 - lore:character
 inputs:

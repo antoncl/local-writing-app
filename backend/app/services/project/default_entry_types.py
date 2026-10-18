@@ -390,6 +390,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "kind": "prompt",
         "abstract": True,
         "fields": [
+            "summary",
             "preferred_assistant_id",
             "assistant_tags",
             "color",
@@ -398,6 +399,9 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "conversations",
             "references",
         ],
+        # One line on what the prompt does for the writer (#2546) — the row detail,
+        # the menu tooltip and the run dialog's description.
+        "summary_fields": ["summary"],
         "has_body": True,
         "body_editor": "code",
         "body_language": "jinja2",

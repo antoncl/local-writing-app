@@ -2,6 +2,8 @@
 id: prompt_7c1e4a92d6
 title: Draft scene
 entry_type: prompt:general
+metadata:
+  summary: "Writes a first draft of the scene from its brief: its summary and every field your schema gives a scene."
 offer_on:
 - manuscript:scene
 inputs:

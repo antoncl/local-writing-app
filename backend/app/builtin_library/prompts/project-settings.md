@@ -2,6 +2,8 @@
 id: prompt_b0b24a22d9
 title: Project settings
 entry_type: prompt:snippet
+metadata:
+  summary: "Your project's general facts (language, spelling, units, author) for prompts that should honour them."
 ---
 {#
   Project settings snippet (#1020 / finishes #317). Surfaces the project's

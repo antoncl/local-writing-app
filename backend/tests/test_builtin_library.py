@@ -113,6 +113,24 @@ class BuiltinLibraryTests(unittest.TestCase):
         for lib_id in self.library_ids:
             self.assertNotEqual(entries[lib_id].source_layer_id, own_layer_id)
 
+    def test_every_builtin_prompt_carries_a_one_line_summary(self) -> None:
+        """#2546: the Prompts pane, the run menus and the run dialog all describe a
+        prompt by its `summary`; the payload the pane reads carries it in metadata."""
+        library = [e for e in self._summaries().values() if e.is_library]
+        self.assertGreaterEqual(len(library), 30)
+        for entry in library:
+            summary = entry.metadata.get("summary")
+            self.assertIsInstance(summary, str, f"{entry.title} has no summary")
+            self.assertTrue(summary.strip(), f"{entry.title} has an empty summary")
+            self.assertLessEqual(len(summary), 160, f"{entry.title}'s summary is too long")
+
+    def test_prompt_types_carry_and_nominate_summary(self) -> None:
+        schema = self.service.read_metadata_schema()
+        for entry_type in ("prompt:general", "prompt:snippet"):
+            resolved = schema.entry_types[entry_type]
+            self.assertIn("summary", resolved.fields)
+            self.assertEqual(resolved.summary_fields, ["summary"])
+
     def test_library_context_inputs_source_real_node_kinds(self) -> None:
         """#2414: a context_pick source's `kind` is a node kind. Three built-ins said
         `scene`, which no picker section answers to, so their picker offered nothing."""

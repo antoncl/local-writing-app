@@ -2,6 +2,8 @@
 id: prompt_1f26e1b2dc
 title: Prose generation settings
 entry_type: prompt:snippet
+metadata:
+  summary: "The scene's point of view and tense, for prompts that write manuscript prose."
 ---
 {#
   Prose-generation settings snippet (#1076; scene override #1321). Surfaces the

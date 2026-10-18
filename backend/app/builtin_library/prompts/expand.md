@@ -2,6 +2,8 @@
 id: prompt_55f5c77e1b
 title: Expand
 entry_type: prompt:general
+metadata:
+  summary: "Rewrites the selected passage at greater length, adding detail, interiority, and rhythm."
 offer_on:
 - manuscript:scene
 context_strategy:

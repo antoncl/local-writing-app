@@ -22,6 +22,10 @@ export type SlashCommand = {
   label: string;
   description: string;
   group: string;
+  /** Longer text for the menu's hint line in place of `description` — e.g. a
+   *  prompt's one-line summary (#2546). Display only: the filter never matches
+   *  it, so a sentence of prose doesn't make every word a command prefix. */
+  hint?: string;
   autocompleteTo?: string;
   /** A scene verb (scene break, mutate, the cursor prompts — roleplay only
    *  makes sense in a scene): offered in a manuscript body only. Unscoped

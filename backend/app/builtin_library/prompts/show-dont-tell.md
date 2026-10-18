@@ -2,6 +2,8 @@
 id: prompt_4655b40593
 title: Show, don't tell
 entry_type: prompt:general
+metadata:
+  summary: "Finds places where the passage states what it could dramatise and proposes scenes that show it."
 offer_on:
 - manuscript:scene
 context_strategy:

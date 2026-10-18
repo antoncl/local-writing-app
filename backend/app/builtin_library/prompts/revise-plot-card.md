@@ -2,6 +2,8 @@
 id: prompt_a2622629ca
 title: Revise plot card
 entry_type: prompt:general
+metadata:
+  summary: "Brainstorms a plot card with you, then commits the result as a revision of it."
 offer_on:
 - plot:card
 inputs:

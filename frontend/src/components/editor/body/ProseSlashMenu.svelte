@@ -103,7 +103,7 @@
         {/each}
       </div>
       {#if activeCommand}
-        <div class="slash-hint">{activeCommand.description}</div>
+        <div class="slash-hint">{activeCommand.hint || activeCommand.description}</div>
       {/if}
     {/if}
   </div>

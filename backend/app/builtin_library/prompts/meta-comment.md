@@ -2,6 +2,8 @@
 id: prompt_31e4fe7b6a
 title: Author directions in brackets
 entry_type: prompt:snippet
+metadata:
+  summary: "Teaches a prompt to treat [square-bracket] notes in your prose as directions to act on, then remove."
 ---
 {#
   Teaches a revise prompt to treat [square-bracket] notes in the prose as

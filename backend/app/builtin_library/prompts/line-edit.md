@@ -2,6 +2,8 @@
 id: prompt_e67a8720e3
 title: Line edit
 entry_type: prompt:general
+metadata:
+  summary: "Proposes targeted line edits to the selected passage, which you accept or reject one by one."
 offer_on:
 - manuscript:scene
 context_strategy:

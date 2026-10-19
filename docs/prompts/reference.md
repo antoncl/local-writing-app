@@ -431,6 +431,10 @@ you chose and the *always include* entries are sent.
 {% do auto_lore() %}
 ```
 
+- **Watch out:** automatic lore is a chat feature. A prompt run once from the
+  editor sends only what you chose and the *always include* entries, even if it
+  calls `auto_lore()`.
+
 #### lore_named_in()
 
 `lore_named_in(text)` — the lore entries a piece of text names (by title or alias),

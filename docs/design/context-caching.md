@@ -320,6 +320,7 @@ is unchanged and correct; only §5's single-tier placement is superseded here.
 - ADR-0055 — as-of-scene reads + the staged-set 1h block.
 - ADR-0006 — `_format_lore_block`, the resolver chokepoint.
 - `docs/prompts/README.md` — the "stable prefix, dynamic suffix" principle.
-- `docs/prompts/helpers.md` — `relevant_lore` / partition reference (note §2a:
-  the partition pattern is preview-only for chat today).
+- `docs/prompts/helpers.md` — *at the commit above*, the `relevant_lore` /
+  partition reference (§2a). Both were since retired (ADR-0060 §2/§5); the current
+  author surface is `docs/prompts/reference.md`.
 - OpenRouter prompt-caching guide — per-provider write/read multipliers, TTLs.

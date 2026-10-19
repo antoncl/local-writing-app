@@ -1,115 +1,88 @@
 # Chat
 
-`POST /api/ai/chat` is the first real model call in the system. It runs a chat completion against the chosen provider and returns the assistant's reply. This is where tokens start being billed.
+`POST /api/ai/chat` runs one chat turn against the resolved provider and returns
+the assistant's reply. `POST /api/ai/chat/stream` runs the same turn and streams it.
+Both take the same request body. The chat pane uses the streaming route.
 
-## Request
+The request and response fields are in the generated schema (`/docs` on the running
+backend; models `AIChatRequest` / `AIChatResponse` in `backend/app/models/ai.py`).
+This page covers the behaviour the schema can't show.
 
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-haiku-4-5-20251001",
-  "system_prompt": "You are a brainstorming partner.",
-  "messages": [
-    { "role": "user", "content": "Give me three ideas for an opening scene." },
-    { "role": "assistant", "content": "1. The reactor scram…" },
-    { "role": "user", "content": "More tension in option 1." }
-  ],
-  "max_tokens": 1024
-}
-```
+## What a turn does
 
-| Field | Required | Default | Meaning |
-| --- | --- | --- | --- |
-| `provider` | no | machine settings `default_provider` | `anthropic`, `openai`, `openrouter`, or `ollama`. |
-| `model` | no | machine settings `default_models[provider]` | Model name passed straight to the provider. |
-| `system_prompt` | no | `""` | Anthropic: set on its dedicated param. OpenAI-compatible: prepended as a system message. Empty string means no system prompt. |
-| `messages` | yes | — | Chat history. Each `{role, content}`, role is `user` or `assistant`. Must not be empty. Must alternate convention is enforced by the provider, not by us. |
-| `max_tokens` | no | `1024` | Cap on the response. |
+1. **Resolve the call.** Provider, model, temperature and `max_tokens` resolve
+   request override → `assistant_id` (or the default assistant) → machine-settings
+   fallback; see [README § Mental model](README.md#mental-model).
+2. **Read the AI policy** (below). A refused call never reaches a provider.
+3. **Prepare the bound chat's context**, when `chat_id` is set: the implicit-context
+   expander scans the latest user message, records new detections in that chat's
+   lore journal (`journal_added` on the response), and the journal is packed into a
+   cache-stable system block between `system_prompt` and the history. The lore that
+   rides is held to the assistant's lore budget, and what it left out is reported
+   as `lore_fit`.
+4. **Window the history.** Older rounds that exceed the history budget are dropped
+   from what is sent (not from the caller's copy) and reported as `history_fit`.
+5. **Call the provider**, then report `stop_reason`, `truncated` (the reply hit
+   `max_tokens`), `input_truncated` (Ollama read less prompt than was sent),
+   `usage` and `cost_usd`. A successful turn on a bound chat also records an
+   invocation row, and `cost_usd_total` is the chat's running total.
 
-## Response
+`system_prompt` and `messages` are sent as the caller supplies them. Nothing is
+rendered as a template on this route — template rendering is
+[preview](preview.md) and [generate](generate.md).
 
-```json
-{
-  "role": "assistant",
-  "content": "Sure — here are three sharper variants…",
-  "provider": "anthropic",
-  "model": "claude-haiku-4-5-20251001",
-  "latency_ms": 1473,
-  "policy": "cloud-allowed",
-  "ok": true,
-  "error": null
-}
-```
+## The caller owns the transcript
 
-| Field | Meaning |
-| --- | --- |
-| `role` | Always `"assistant"`. |
-| `content` | The reply text. Empty when `ok: false`. |
-| `provider`, `model` | Echoed so the UI can show what was used. |
-| `latency_ms` | Wall-clock from request issued to response received. Includes network. |
-| `policy` | The project's current AI policy at the moment of the call. |
-| `ok` | `true` on success. `false` for any error — policy rejection, missing key, provider error, network error. |
-| `error` | Human-readable error string when `ok: false`. |
+The endpoint doesn't store messages. The caller sends the whole history every
+turn. A chat is persisted separately as a `chat` node under `<project>/chats/`,
+through the chat-session endpoints (`/api/chats/{chat_id}`, `PUT` to save). The
+`chat_id` on a turn ties it to that node's journal and cost record.
 
-**The endpoint returns HTTP 200 even for errors** — the `ok` field is the success flag. This is so the frontend can render the error inline in the chat history without elaborate error handling. The only non-200 paths are 400 (no project open) and FastAPI validation errors.
+## Errors arrive as data
 
-## Policy enforcement
+The non-streaming route returns **HTTP 200 for provider-side failures**: `ok: false`
+with `error` set (policy refused, missing key, provider or network error), so the UI
+can show the failure inline in the conversation. A request that fails validation, or
+that arrives with no project in scope, is rejected before the handler runs.
 
-The endpoint reads `ai_policy` — resolved over the project's declared layer
-chain, not from its own `project.yaml` alone (#312) — and applies it:
+## AI policy
+
+The turn reads `ai_policy`, resolved over the project's declared layer chain
+(#312):
 
 | Policy | Behavior |
 | --- | --- |
-| `off` | All calls fail with `policy: off`. Provider drivers are never invoked. |
-| `local-only` | Cloud providers (`anthropic`, `openai`, `openrouter`) are rejected. `ollama` runs as normal. |
+| `off` | Every call fails with `ok: false`. No provider is invoked. |
+| `local-only` | Cloud providers (`anthropic`, `openai`, `openrouter`) are refused; `ollama` runs. |
 | `cloud-allowed` | All providers are permitted. |
 
-Resolution is **nearest explicit statement wins**: a layer that states no
-`settings.ai.policy` has no opinion and defers outward, so a universe set to
-`cloud-allowed` covers every book that declares it, and a book stating `off` is
-off regardless of what sits above it. A chain that states nothing anywhere is
-`off`, and so is a value the reader does not recognise.
+The **nearest explicit statement wins.** A layer that doesn't state
+`settings.ai.policy` defers outward, so a universe set to `cloud-allowed` covers
+every book that declares it, and a book stating `off` is off whatever is above it.
+A chain that states nothing anywhere resolves to `off`, and so does a value the
+reader doesn't recognise. The policy is checked **before** any API key leaves the
+machine.
 
-Policy is checked **before** any API key is sent anywhere. A misconfigured key won't leak even briefly when policy says no.
+## Streaming line protocol
 
-## Multi-turn pattern
+Both `/stream` routes answer with newline-delimited JSON, one object per line
+(`services/ai/streaming.py`):
 
-The endpoint is stateless. The caller owns the conversation history:
-
-1. **First turn**: send `messages: [{role: "user", content: "..."}]`.
-2. **Receive reply**: append the response's `content` as `{role: "assistant", content: "..."}` to the local history.
-3. **Next turn**: send the full accumulated history with one more user message at the end.
-
-No conversation IDs, no server-side state. Restarting the backend doesn't lose history because there isn't any to lose.
-
-## A worked curl example
-
-```bash
-curl -X POST http://127.0.0.1:8787/api/ai/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
-    "system_prompt": "You are a brainstorming partner for fiction writers.",
-    "messages": [
-      {"role": "user", "content": "Give me three opening lines for a heist story."}
-    ]
-  }'
+```text
+{"type":"delta","text":"..."}        zero or more — reply text
+{"type":"thinking","text":"..."}     zero or more — reasoning, where the model streams it
+{"type":"done", ...}                 one, on success — provider, model, latency_ms,
+                                     stop_reason, truncated, policy, usage, cost_usd, …
+{"type":"error","error":"...", ...}  one, on failure — instead of done
 ```
 
-Provided the project is open with `ai_policy: cloud-allowed` and the Anthropic key is configured in machine settings, this returns a JSON body with `ok: true` and `content` containing the reply.
-
-For Ollama, swap `provider` to `"ollama"` and `model` to a locally pulled model name (e.g., `"llama3.2"`). The Ollama host comes from machine settings.
-
-## What this endpoint is NOT yet
-
-- **No streaming.** The response is returned all at once. Streaming is a planned addition.
-- **No template rendering.** The system prompt and messages are passed verbatim. Prose-generation tasks that need the template engine's helpers (`use`, `story_so_far`, …) use `/api/ai/generate` instead — see [generate.md](generate.md).
-- **No persistence.** Chats live only in the UI's memory. Saving conversations as `chat` node files is planned but not yet implemented.
-- **No conversation tools / function calling.** Plain text in, plain text out.
+On the chat stream, `done` also carries what the non-streaming response reports
+about the turn (`journal_added`, `lore_fit`, `history_fit`, cost). Closing the
+connection cancels the provider call.
 
 ## Implementation reference
 
-- Endpoint: `POST /api/ai/chat` in [`backend/app/main.py`](../../backend/app/main.py)
-- Provider dispatch: [`backend/app/services/ai/providers.py`](../../backend/app/services/ai/providers.py) — `chat()` plus `_anthropic_chat()` and `_openai_compatible_chat()`
-- Tests: [`backend/tests/test_ai_chat.py`](../../backend/tests/test_ai_chat.py) (SDK calls mocked; no network in CI)
+- Routes: [`backend/app/routers/ai.py`](../../backend/app/routers/ai.py) — `ai_chat`, `ai_chat_stream`
+- Turn orchestration: [`backend/app/services/ai/chat.py`](../../backend/app/services/ai/chat.py) — `run_chat_turn`, `expand_and_prepare_chat_blocks`
+- Provider dispatch: [`backend/app/services/ai/providers.py`](../../backend/app/services/ai/providers.py) and `services/ai/profiles/`
+- Tests: `backend/tests/test_ai_chat*.py`, `test_ai_stream_cancel.py` (SDK calls mocked; no network in CI)

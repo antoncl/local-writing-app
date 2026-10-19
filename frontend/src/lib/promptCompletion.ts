@@ -122,7 +122,7 @@ function refHopTarget(fieldId: string, entryType: string, schema: MetadataSchema
 }
 
 // Cap on ref hops in a base, mirroring the render path's chain ceiling
-// (docs/prompts/helpers.md). Completion only walks the hops actually typed, so
+// (_ENTRY_REF_MAX_DEPTH in backend/app/services/ai/entry_ref.py). Completion only walks the hops actually typed, so
 // this just bounds a pathologically long chain.
 const MAX_REF_HOPS = 6;
 

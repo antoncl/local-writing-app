@@ -1,141 +1,94 @@
 # Preview
 
-`POST /api/ai/preview` renders a template against a target scene and returns the structured messages that would be sent to a model. It does **not** call any model — preview is the surface for staring at the assembled prompt before paying tokens for it.
+`POST /api/ai/preview` renders a template and returns what would be sent, **without
+calling a model**. The prompt editor's preview pane, the invocation dialog and the
+chat's cost estimate are built on it. [Generate](generate.md) runs the same render (`build_preview`) before it
+calls the provider.
 
-## Request
+The request and response fields are in the generated schema (`/docs` on the running
+backend; models `AIPreviewRequest` / `AIPreviewResponse` in
+`backend/app/models/ai.py`). This page covers the behaviour the schema can't show.
 
-```json
-{
-  "template_source": "{% role \"system\" %}…{% endrole %}",
-  "target_scene_id": "scene_xxxxx",
-  "session_id": "optional-session-key",
-  "inputs": { "words": 300, "message": "What happens here?" },
-  "text_before": "She walked into",
-  "text_after": "the storm.",
-  "commit": false
-}
-```
+## What the render sees
 
-| Field | Required | Default | Meaning |
-| --- | --- | --- | --- |
-| `template_source` | yes | — | Jinja2 template body. See [template-language.md](template-language.md). |
-| `target_scene_id` | yes | — | The scene the template will render against. Available in the template as `{{ scene }}`. |
-| `session_id` | no | `null` | Cache-continuity key. Reusing the same key across calls lets the backend keep the stable prefix warm; the template author manages nothing here. |
-| `inputs` | no | `{}` | Surfaced in the template as `{{ inputs.foo }}`. |
-| `text_before` | no | `""` | Body markdown before the cursor in the editor. |
-| `text_after` | no | `""` | Body markdown after the cursor. |
-| `commit` | no | `false` | If `true`, this render's selected-node revisions become the session's cache baseline for the next call. |
+- `target_scene_id` is the scene the prompt runs on (`scene`). It may be empty — a
+  chat-routed prompt has no scene, and `scene` is then `None`.
+  `resolution_scene_id` (a `scene_ref` input's value) overrides it as the scene the
+  story is read *as of*. `subject`, a bound chat's subject, is the fallback scene
+  when neither is set.
+- `inputs`, `selection`, `text_before` and `text_after` become the template variables
+  of the same names. [reference.md § Variables](reference.md#variables) lists every
+  variable.
+- Text outside any `{% role %}` block becomes a `system` message — the same default
+  the send path uses.
 
-## Response
+## Errors are data
 
-```json
-{
-  "messages": [
-    {
-      "role": "system",
-      "blocks": [ { "text": "You are an expert fiction writer." } ]
-    },
-    {
-      "role": "user",
-      "blocks": [ { "text": "Write 300 words…" } ]
-    }
-  ],
-  "warnings": [],
-  "char_count": 234,
-  "estimated_tokens": 61,
-  "cache_blocks": [
-    { "label": "system",        "role": "system", "tier": "stable",   "tokens": 12, "text": "You are an expert fiction writer." },
-    { "label": "volatile lore", "role": "system", "tier": "volatile", "tokens": 18, "text": "<lore name=\"Honor Harrington\">Captain of the Fearless.</lore>" },
-    { "label": "user",          "role": "user",   "tier": null,       "tokens": 8,  "text": "Write 300 words…" }
-  ],
-  "lore_enabled": true,
-  "used_node_ids": [],
-  "used_node_hints": {},
-  "session_id": "session-key-supplied",
-  "rendered": true,
-  "error": null
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `messages` | Role-tagged messages, each broken into content blocks. A block is **just text** — the author does not mark caching, so blocks carry no cache flag. |
-| `warnings` | Author errors that didn't block rendering (unknown role names, nested roles),. |
-| `char_count` / `estimated_tokens` | Size of the rendered prompt. `estimated_tokens` sums `cache_blocks`, so it includes the backend-placed lore. |
-| `cache_blocks` | The **send-path composition**, in volatility order — the cache strip. Each block has a `label` (`system`, `stable lore`, `volatile lore`, or a role), a `role`, a `tier` (`"stable"`, `"volatile"`, or `null` for an uncached conversation turn), a `tokens` count, and its `text`. This is where the tiered lore the backend selected appears (made visible again), badged by tier. See [The cache strip](#the-cache-strip). |
-| `lore_enabled` | `true` when the template called `auto_lore()`. A prompt that only calls `use()` reports `false` and still carries its picks in `cache_blocks`. |
-| `used_node_ids` / `used_node_hints` | Ids the template selected with `use()`, and any `use(node, "stable"\|"volatile")` cache-tier hints. |
-| `session_id` | Echo of the supplied session id (or `null`). |
-| `rendered` | `true` if rendering succeeded. |
-| `error` | `null` on success; otherwise a render-error object (see below) — the response is still `200`. |
-
-## Errors
-
-Preview is exploratory — the editor auto-fires it before required inputs are filled — so a **render failure returns `200` with `error` populated**, not a thrown status. `error` is an object with a coarse `kind` the UI keys on:
+Preview is exploratory — the editor fires it before required inputs are filled — so
+a **render failure returns HTTP 200** with `rendered: false` and `error` set. `error`
+carries `message`, the `line` / `col` where Jinja gave one, and a coarse `kind` the
+UI keys its message on:
 
 | `error.kind` | Cause |
 | --- | --- |
-| `undefined` | An undefined variable / attribute. `undefined_name` (and `undefined_namespace` for an attribute miss like `project.language`) are set when derivable. |
-| `syntax` | Template syntax error (e.g. an unknown tag); `line` is set. |
-| `scene_not_found` | `target_scene_id` didn't resolve to a scene in the open project. |
-| `other` | Anything else. |
+| `undefined` | An undefined name. `undefined_name` is set when it can be derived, and `undefined_namespace` too when the miss was an attribute on a real object (`project` for `project.language`). |
+| `syntax` | A template syntax error, such as an unknown tag. `line` is set. |
+| `include` | An `{% include %}` name resolved to no snippet, or to more than one in the nearest layer. |
+| `stopped` | The template called `stop(message)`. `message` is the author's text, verbatim. |
+| `scene_not_found` | `target_scene_id` doesn't resolve. |
+| `other` | Anything else, sandbox violations included. |
 
-A genuine HTTP error (no project open, a 5xx) is still thrown normally.
+A request that can't be served at all (no project in scope, a server fault) is still
+an HTTP error.
 
 ## The cache strip
 
-`cache_blocks` is what makes preview cache-aware. It is the composition the send path will actually build, in the order the backend lays it down:
+`cache_blocks` is the **send-path composition**, in the order the backend lays it
+down:
 
-1. the **system prefix** (persona and other stable authored system content),
-2. the **tiered lore** the backend selected from the template's `use()` / `auto_lore()` calls — placed here on the send path even though the template emitted nothing for it, so preview shows it *again* where it really lands,
-3. the **conversation turns** (the per-call user/assistant material).
+1. the **system prefix** — the rendered system content,
+2. the **lore** the backend placed for the template's `use()` / `auto_lore()` calls
+   and the *always include* entries, split into `stable` and `volatile` tiers. The
+   template printed nothing for these, so this is the only place a preview shows
+   them,
+3. the **conversation turns** — the uncached `user` / `assistant` material.
 
-Each block is badged with its `tier` — `stable` first, then `volatile`, then the uncached turns (`tier: null`). Stare at this strip to see exactly what will be cached and what will re-send on the next call; you tune it by choosing what to `use()`, not by placing breakpoints.
+Each block has its `tier` (`"stable"`, `"volatile"`, or `null` for an uncached turn),
+a token count and its `text`. A lore block also lists its `entry_ids`. `cached` and
+`ttl_seconds` are the resolved provider's own projection: whether it expects to
+serve the block from cache, and for how long (ADR-0084). `estimated_tokens` and the
+cost estimates are summed over this strip, so they include the placed lore.
+
+`lore_fit` reports what the assistant's lore budget left out. `lore_enabled` is
+`true` when the template called `auto_lore()`, and `lore_free` when it called
+`no_lore()`. `used_node_ids`, `used_node_hints` and `used_snapshots` echo the
+template's `use()` calls. `field_contract_stored` is the fields the template
+registered with `field_contract.store()`.
+
+The HTTP preview always renders the way a chat turn does. A template that calls
+`auto_lore()` therefore shows automatic lore here, even though a one-shot
+[generate](generate.md#what-lore-a-one-shot-run-carries) run doesn't send it.
+
+## Effective inputs
+
+With `resolve_effective_inputs: true` and the author's `own_inputs`, the response
+also carries the prompt's **effective inputs**: its own, plus those of every snippet
+it includes, transitively (ADR-0061). It also carries `input_conflicts` (same name,
+different type) and `input_provenance` (which snippet each inherited input came
+from). These are resolved before the render, so they come back even when the render
+fails on an input that isn't filled in yet.
 
 ## Sessions
 
-`session_id` is a cache-continuity key, not an author-facing control. Reusing it across calls lets the backend keep the stable prefix warm; `commit: true` promotes this render's selected-node revisions to the baseline the next call diffs against. Set `commit: false` to preview without disturbing that baseline. Sessions live in process memory only — restarting the backend clears them. The template author never touches any of this.
-
-## Worked example: minimal continue-scene
-
-```jinja
-{% role "system" %}
-You are an expert fiction writer.
-{% if 'tense' in project.metadata %}Always write in {{ project.tense }} tense.{% endif %}
-{% endrole %}
-
-{% role "user" %}
-{{ auto_lore() }}
-{% if story_so_far(scene) %}
-The story so far:
-{{ story_so_far(scene) }}
-{% endif %}
-{% endrole %}
-
-{% role "assistant" %}
-{{ text_before }}
-{% endrole %}
-
-{% role "user" %}
-Write {{ inputs.words }} words that continue the story:
-
-{{ inputs.message }}
-{% endrole %}
-```
-
-POST this against a scene, supply `inputs: {"words": 300, "message": "Honor decides to break the engagement."}`, `text_before` from the editor, and a `session_id`. Inspect the response: `messages` holds the rendered turns (the `auto_lore()` call emits nothing into them), while `cache_blocks` shows the backend-selected lore placed and tier-badged in the send-path composition.
-
-## Worked example: bare role round-trip (sanity check)
-
-```jinja
-{% role "system" %}You write fiction.{% endrole %}
-{% role "user" %}Scene: {{ scene.title }}{% endrole %}
-```
-
-Useful for verifying the wiring before any helpers are involved.
+`session_id` is a cache-continuity key, not an author control. Reusing it across
+calls lets the backend compare this render's selected nodes against the previous
+one, and keep a settled node in the stable tier. `commit: true` makes this render's
+revisions the new baseline. `commit: false` previews without moving it. Sessions
+live in process memory, so restarting the backend clears them.
 
 ## Implementation reference
 
-- Endpoint: `POST /api/ai/preview` in [`backend/app/main.py`](../../backend/app/main.py)
-- Dispatch: [`backend/app/services/ai/preview.py`](../../backend/app/services/ai/preview.py)
-- Tests: [`backend/tests/test_ai_preview.py`](../../backend/tests/test_ai_preview.py)
+- Route: [`backend/app/routers/ai.py`](../../backend/app/routers/ai.py) — `ai_preview`
+- Render: [`backend/app/services/ai/preview.py`](../../backend/app/services/ai/preview.py) — `build_preview`
+- Sessions: [`backend/app/services/ai/sessions.py`](../../backend/app/services/ai/sessions.py)
+- Tests: `backend/tests/test_ai_preview.py`, `test_ai_preview_cost.py`

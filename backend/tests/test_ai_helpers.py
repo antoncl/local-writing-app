@@ -1201,6 +1201,20 @@ class JsonFilterTests(_HelperFixtureBase):
             {"title": "Saga", "metadata": {"measurement_system": "metric"}},
         )
 
+    def test_a_model_dumps_as_an_object_not_field_value_pairs(self) -> None:
+        # A pydantic model iterates as (field, value) pairs; `project.chain`'s
+        # layers are models, so the dump must show them as objects.
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{{ value | json }}{% endrole %}',
+            context={"value": [ProjectInfo(title="Saga", root_path="/x")]},
+            env=env,
+        )
+        dumped = json.loads(out.messages[0].text)
+        self.assertIsInstance(dumped[0], dict)
+        self.assertEqual(dumped[0]["title"], "Saga")
+        self.assertEqual(dumped[0]["root_path"], "/x")
+
     def test_metadata_quotes_as_an_object_with_its_references_as_stubs(self) -> None:
         # The reference doc's own example (`entry(x).metadata | json`): the view
         # is an object, and an entity_ref_list field inside it lists id + title.

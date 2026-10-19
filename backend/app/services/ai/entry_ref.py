@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 from app.services.body_text import story_text
 from app.services.project.metadata_refs import ref_members
 
@@ -477,8 +479,6 @@ def _json_inside_node(value: Any) -> Any:
     """A value inside a node's metadata: a referenced node is its stub."""
     if isinstance(value, EntryRef):
         return _json_node_stub(value)
-    if isinstance(value, ProjectInfoRef):
-        return str(value)
     if isinstance(value, (_EntryMetadataView, _GroupView)):
         return {key: _json_inside_node(value[key]) for key in value}
     return _json_container(value, _json_inside_node)
@@ -492,11 +492,15 @@ def _json_node_stub(ref: EntryRef) -> dict[str, str]:
 
 
 def _json_container(value: Any, item: Callable[[Any], Any]) -> Any:
-    """Scalars as JSON has them; a mapping is an object and any other iterable
-    (a list, a Jinja `map`/`select` generator, `dict_keys`) an array, each member
-    shaped by `item`; anything else is what a bare `{{ value }}` prints."""
+    """Scalars as JSON has them; a mapping or a model (e.g. `project.chain`'s
+    layers) is an object and any other iterable (a list, a Jinja `map`/`select`
+    generator, `dict_keys`) an array, each member shaped by `item`; anything else
+    is what a bare `{{ value }}` prints."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, BaseModel):
+        # Checked before Iterable: a model iterates as (field, value) pairs.
+        return {name: item(member) for name, member in value}
     if isinstance(value, Mapping):
         return {_json_key(key): item(member) for key, member in value.items()}
     if isinstance(value, Iterable):

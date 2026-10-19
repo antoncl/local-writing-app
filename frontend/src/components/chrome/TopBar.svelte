@@ -365,7 +365,7 @@
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">Help</div>
-        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenGuides)}>Guides</button>
+        <button type="button" class="switcher-item" role="menuitem" onclick={() => runAction(onOpenGuides)}>Guides</button>
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">App</div>

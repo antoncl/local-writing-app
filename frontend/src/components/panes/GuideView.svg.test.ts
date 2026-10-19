@@ -17,6 +17,8 @@ import { guides } from "@/lib/generated/guides";
 const DIAGRAM_GUIDES: Array<[id: string, count: number]> = [
   ["ollama-context", 3],
   ["ai-context", 4],
+  ["writing-prompts", 3],
+  ["reference", 2],
 ];
 
 describe.each(DIAGRAM_GUIDES)("%s guide diagrams", (id, count) => {

@@ -52,6 +52,8 @@
 {#if lineEditReview?.flags}
   <FlagReviewBar
     flags={lineEditReview.flags}
+    view={lineEditReview.lineEditView}
+    onView={(v) => lineEditReview?.setLineEditView(v)}
     onAcceptAllEdits={() => lineEditReview?.acceptAllFlagEdits()}
     onRejectAll={() => lineEditReview?.rejectAllFlags()}
   />
@@ -66,6 +68,8 @@
 {:else if lineEditReview?.lineEdits}
   <LineEditReviewBar
     lineEdits={lineEditReview.lineEdits}
+    view={lineEditReview.lineEditView}
+    onView={(v) => lineEditReview?.setLineEditView(v)}
     meta={lineEditReview.meta}
     generating={lineEditReview.generating}
     onAcceptAll={() => lineEditReview?.acceptAllLineEdits()}

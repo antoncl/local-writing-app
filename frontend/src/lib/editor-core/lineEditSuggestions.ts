@@ -20,7 +20,9 @@ import {
   rangeText,
   reviewState,
   setCurrentItem,
+  setReviewView,
   stepReview,
+  toggleReviewView,
 } from "./reviewKinds/core";
 
 // Re-exported so callers and tests keep their import path.
@@ -43,7 +45,15 @@ export {
   type LineEditState,
   type LineEditSuggestion,
 } from "./reviewKinds/edits";
-export { installFlags, keepReviewItem, liveItem, rejectAllFlags } from "./reviewKinds/core";
+export {
+  installFlags,
+  keepReviewItem,
+  liveItem,
+  rejectAllFlags,
+  setReviewView,
+  toggleReviewView,
+  type ReviewView,
+} from "./reviewKinds/core";
 export {
   LINE_NOTE_CURRENT_CLASS,
   LINE_NOTE_QUOTE_CLASS,
@@ -129,9 +139,10 @@ export const LineEditSuggestions = Extension.create({
               // By position: stepping walks the list, and a mixed review (ADR-0100)
               // arrives one kind after the other.
               const items = [...meta.items].sort((a, b) => a.from - b.from).map((e) => ({ ...e, id: nextId++ }));
-              return { items, accepted: 0, kept: 0, currentId: nextByPosition(items, 0), wide: old.wide };
+              return { items, accepted: 0, kept: 0, currentId: nextByPosition(items, 0), wide: old.wide, view: "both" };
             }
             if (old.items.length === 0) return old;
+            if (meta?.type === "view") return { ...old, view: meta.view };
             let items = old.items;
             if (tr.docChanged) {
               items = items.flatMap((item) => {
@@ -158,7 +169,11 @@ export const LineEditSuggestions = Extension.create({
               const was = old.items.find((e) => e.id === old.currentId);
               currentId = nextByPosition(items, was ? tr.mapping.map(was.from, 1) : 0);
             }
-            return { items, accepted, kept, currentId, wide: old.wide };
+            // Current / Proposed hide text that is still editable, so the writer's
+            // own change (typing, paste - not an accept/reject) goes back to Both,
+            // where what they changed is visible (#2561).
+            const view = tr.docChanged && meta?.type !== "resolve" ? "both" : old.view;
+            return { items, accepted, kept, currentId, wide: old.wide, view };
           },
         },
         view: (view) => ({ destroy: observeCardRoom(view) }),
@@ -178,15 +193,24 @@ export const LineEditSuggestions = Extension.create({
             return false;
           },
           // Alt+Down / Alt+Up step, Alt+Enter accepts (edits only), Alt+Backspace
-          // rejects / dismisses the current item - only while a review is open, so
-          // the keys are free otherwise.
+          // rejects / dismisses the current item, Alt+A / S / B pick the version
+          // read - only while a review is open, so the keys are free otherwise.
           handleKeyDown: (view, event) => {
             const { items, currentId } = reviewState(view.state);
             if (items.length === 0) return false;
             const cur = items.find((i) => i.id === currentId);
             if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+            // A / S / B read the passages as the page's words, the proposed ones, or
+            // both. The letter on the key first (AZERTY, Dvorak); the key's position
+            // only when Alt turns the letter into another character (macOS: å ß ∫).
+            const letter = /^[a-z]$/i.test(event.key)
+              ? event.key.toUpperCase()
+              : /^Key[ASB]$/.test(event.code) ? event.code.slice(3) : "";
             const act =
-              event.key === "ArrowDown" ? () => stepReview(view, 1)
+              letter === "A" ? () => toggleReviewView("now", view)
+              : letter === "S" ? () => toggleReviewView("proposed", view)
+              : letter === "B" ? () => setReviewView("both", view)
+              : event.key === "ArrowDown" ? () => stepReview(view, 1)
               : event.key === "ArrowUp" ? () => stepReview(view, -1)
               : event.key === "Enter" && cur?.kind.accept ? () => cur.kind.accept?.(view)
               : event.key === "Backspace" && cur ? () => cur.kind.reject(view)
@@ -195,6 +219,11 @@ export const LineEditSuggestions = Extension.create({
             event.preventDefault();
             act();
             return true;
+          },
+          // The version being read, as a class on the editor root for review.css.
+          attributes: (state): Record<string, string> => {
+            const { items, view } = reviewState(state);
+            return items.length > 0 && view !== "both" ? { class: `review-view-${view}` } : {};
           },
           decorations: (state) => {
             const { items, currentId, wide } = reviewState(state);

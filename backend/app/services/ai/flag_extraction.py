@@ -71,6 +71,10 @@ FLAGS_CUE = (
     "- Report only what your last reply actually said. A change it proposed is "
     'an edit; a remark about a passage is a note. Nothing else — if it '
     'suggested nothing about the text, reply {{"edits": [], "notes": []}}.\n'
+    "- If your last reply offered alternatives for the same problem (two routes, "
+    "options A and B, either-or), don't choose between them: make no edit for "
+    "any of them, and put ONE note on the passage naming each alternative and "
+    "its trade-off, so the author chooses in the conversation.\n"
     '- Copy every "find" and "quote" character for character from the scene '
     "text above and from nowhere else — not from earlier versions of the scene "
     "elsewhere in this conversation. Keep each within a single paragraph, and "

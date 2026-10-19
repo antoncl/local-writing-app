@@ -52,7 +52,13 @@ export type ReviewState = {
   /** Room for the decision card in the margin right of the prose column (set by
    *  the layout observer); else it is a block under the paragraph. */
   wide: boolean;
+  /** Which version the passages read as: the page's own words, the proposed
+   *  ones, or the diff of both. Presentation only - never the doc or the items. */
+  view: ReviewView;
 };
+
+/** The review's A / S / B axis (the snapshot strip's Active / Snapshot / Both). */
+export type ReviewView = "now" | "proposed" | "both";
 
 /** How a flag was settled: taken, turned down, or turned into a TODO (ADR-0099). */
 export type ReviewOutcome = "accepted" | "rejected" | "kept";
@@ -61,10 +67,11 @@ export type ReviewMeta =
   | { type: "install"; items: FlagInput[] }
   | { type: "resolve"; ids: number[]; outcome: ReviewOutcome }
   | { type: "current"; id: number }
-  | { type: "layout"; wide: boolean };
+  | { type: "layout"; wide: boolean }
+  | { type: "view"; view: ReviewView };
 
 export const pluginKey = new PluginKey<ReviewState>("line-edit-suggestions");
-export const EMPTY: ReviewState = { items: [], accepted: 0, kept: 0, currentId: null, wide: false };
+export const EMPTY: ReviewState = { items: [], accepted: 0, kept: 0, currentId: null, wide: false, view: "both" };
 
 export const reviewState = (state: EditorState): ReviewState => pluginKey.getState(state) ?? EMPTY;
 
@@ -168,6 +175,17 @@ export function stepReview(view: EditorView, dir: 1 | -1): void {
   const at = items.findIndex((i) => i.id === currentId);
   setCurrentItem(view, items[(at + dir + items.length) % items.length].id);
   revealCurrent(view);
+}
+
+/** Read the passages as `view`. Never touches the document or resolves an item. */
+export function setReviewView(view: ReviewView, v: EditorView): void {
+  if (reviewState(v.state).view === view) return;
+  v.dispatch(v.state.tr.setMeta(pluginKey, { type: "view", view } satisfies ReviewMeta).setMeta("addToHistory", false));
+}
+
+/** The snapshot strip's rule: choosing the version already shown goes back to both. */
+export function toggleReviewView(view: Exclude<ReviewView, "both">, v: EditorView): void {
+  setReviewView(reviewState(v.state).view === view ? "both" : view, v);
 }
 
 /** Reject every item, whatever its kind: neither kind touches the document on reject. */

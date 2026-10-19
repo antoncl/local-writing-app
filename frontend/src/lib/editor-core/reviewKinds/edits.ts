@@ -70,9 +70,12 @@ function editRuns(find: string, replace: string): DiffRun[] {
 }
 
 /** Words only the replacement has: they come in, so they sit as a cool widget. */
-function widgetFor(view: EditorView, edit: LineEditSuggestion, text: string): HTMLElement {
+function widgetFor(view: EditorView, edit: LineEditSuggestion, text: string, current: boolean): HTMLElement {
   const added = document.createElement("span");
-  added.className = "r-was";
+  // `line-edit-added`: the widget is a sibling of the passage's spans, not inside
+  // `.line-edit`, so the version views (review.css) key on this class - and on
+  // `-current`, so the current edit's new words share its tint in Proposed.
+  added.className = current ? "r-was line-edit-added line-edit-added-current" : "r-was line-edit-added";
   added.contentEditable = "false";
   added.title = edit.reason;
   added.textContent = text;
@@ -117,9 +120,10 @@ export const editsKind = (callbacks: LineEditCallbacks): ReviewKind => ({
       } else {
         const text = run.text;
         decos.push(
-          Decoration.widget(edit.from + o, (view) => widgetFor(view, edit, text), {
+          Decoration.widget(edit.from + o, (view) => widgetFor(view, edit, text, current), {
             side: 1,
-            key: `line-edit-${edit.id}-${edit.from + o}-${text}`,
+            // `current` in the key: a widget whose class changes must be rebuilt.
+            key: `line-edit-${edit.id}-${edit.from + o}-${text}-${current ? "c" : ""}`,
             stopEvent: () => true,
           }),
         );

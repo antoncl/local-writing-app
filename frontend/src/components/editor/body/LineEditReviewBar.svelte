@@ -15,6 +15,8 @@
 <script lang="ts">
   import { formatCostEur } from "@/lib/utils/money";
   import type { AiSuggestionMeta } from "@/lib/editor-core/aiToolbar";
+  import type { ReviewView } from "@/lib/editor-core/lineEditSuggestions";
+  import ReviewViewToggle from "@/components/editor/body/ReviewViewToggle.svelte";
 
   interface Props {
     lineEdits: { remaining: number; index: number } | null;
@@ -23,11 +25,15 @@
     onAcceptAll: () => void;
     onRejectAll: () => void;
     onRetry: () => void;
+    /** The version the passages read as (#2561); the toggle shows with `onView`. */
+    view?: ReviewView;
+    onView?: (view: ReviewView) => void;
   }
 
   let {
     lineEdits, meta, generating = false,
     onAcceptAll, onRejectAll, onRetry,
+    view = "both", onView,
   }: Props = $props();
 
   const keepFocus = (e: MouseEvent) => e.preventDefault();
@@ -43,6 +49,7 @@
       <button type="button" class="ler-btn" data-testid="line-edit-reject-all" title="Reject every remaining edit" onmousedown={keepFocus} onclick={onRejectAll}>Reject all</button>
       <button type="button" class="ler-btn" data-testid="line-edit-retry" title="Drop what is left and ask again on the same text" disabled={generating} onmousedown={keepFocus} onclick={onRetry}>Retry</button>
     </span>
+    {#if onView}<ReviewViewToggle {view} {onView} />{/if}
     {#if meta}
       <span class="ler-meta" data-testid="line-edit-meta">
         {meta.model}{#if meta.cost_usd != null} · {formatCostEur(meta.cost_usd)}{/if}

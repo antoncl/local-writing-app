@@ -57,8 +57,10 @@ import {
   rejectAllFlags,
   rejectAllLineEdits,
   rejectCurrentLineEdit,
+  setReviewView,
   stepLineEdit,
   stepLineNote,
+  type ReviewView,
 } from "@/lib/editor-core/lineEditSuggestions";
 import { notesKind } from "@/lib/editor-core/reviewKinds/notes";
 import { reviewState, stepReview } from "@/lib/editor-core/reviewKinds/core";
@@ -141,6 +143,9 @@ export class AiSuggestionController {
   // its own combined bar. Independent of lineEdits / lineNotes, which stay null.
   // `edits` = how many of the remaining are edits (Accept all shows only then).
   flags: { remaining: number; index: number; edits: number } | null = $state(null);
+  // Which version an open edit review reads as (#2561), mirrored from the plugin
+  // on every sync so the bar's A / S / B buttons and the Alt keys agree.
+  lineEditView: ReviewView = $state("both");
 
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
@@ -870,6 +875,7 @@ export class AiSuggestionController {
   // Publish the plugin's view of the open list (count, current place, reason),
   // writing only on change so unrelated transactions don't churn the bar.
   #syncLineEdits(editor: Editor): void {
+    this.lineEditView = reviewState(editor.state).view;
     const { edits } = lineEditState(editor.state);
     const current = currentLineEdit(editor.state);
     if (!current) return;
@@ -948,6 +954,7 @@ export class AiSuggestionController {
   }
 
   #syncFlags(editor: Editor): void {
+    this.lineEditView = reviewState(editor.state).view;
     const { items, currentId } = reviewState(editor.state);
     const at = items.findIndex((i) => i.id === currentId);
     if (at < 0) return;
@@ -975,6 +982,12 @@ export class AiSuggestionController {
   prevFlag(): void {
     const editor = this.#deps.getEditor();
     if (editor && this.flags) stepReview(editor.view, -1);
+  }
+
+  // The bar's Current / Proposed / Both: same view as Alt+A / Alt+S / Alt+B.
+  setLineEditView(view: ReviewView): void {
+    const editor = this.#deps.getEditor();
+    if (editor && !editor.isDestroyed && (this.lineEdits || this.flags)) setReviewView(view, editor.view);
   }
 
   acceptAllLineEdits(): void {

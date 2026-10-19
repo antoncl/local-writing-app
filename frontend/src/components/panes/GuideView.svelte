@@ -217,6 +217,10 @@
     font-size: var(--fs-sm);
     background: var(--inset);
     border-radius: var(--r-sm);
+    /* In dark, --inset sits a hair off --surface, so the chip vanished and its
+       padding read as a stray indent wherever a line or cell opens with code.
+       A hairline keeps the chip's edge visible in both themes. */
+    box-shadow: inset 0 0 0 1px var(--border);
   }
   .guide-prose :global(pre) {
     margin: 0 0 var(--sp-3);
@@ -230,6 +234,7 @@
   .guide-prose :global(pre code) {
     padding: 0;
     background: transparent;
+    box-shadow: none;
   }
   .guide-prose :global(blockquote) {
     margin: 0 0 var(--sp-3);

@@ -93,6 +93,23 @@ describe("review view (#2561)", () => {
     expect(view(editor)).toBe("proposed");
   });
 
+  it("the writer's own change goes back to both, so nothing is typed into hidden text", () => {
+    const editor = setup();
+    setReviewView("proposed", editor.view);
+    editor.view.dispatch(editor.state.tr.insertText("!", editor.state.doc.content.size - 1));
+    expect(view(editor)).toBe("both");
+  });
+
+  it("the letter on the key wins over its position (AZERTY, Dvorak)", () => {
+    const editor = setup();
+    // AZERTY: the key labelled Q sits where QWERTY's A is.
+    expect(key(editor, { altKey: true, code: "KeyA", key: "q" })).toBe(false);
+    expect(view(editor)).toBe("both");
+    // ...and the one labelled A sits where QWERTY's Q is.
+    expect(key(editor, { altKey: true, code: "KeyQ", key: "a" })).toBe(true);
+    expect(view(editor)).toBe("now");
+  });
+
   it("Alt+A / Alt+S / Alt+B (by code) set the view and are handled", () => {
     const editor = setup();
     expect(key(editor, { altKey: true, code: "KeyA", key: "å" })).toBe(true);

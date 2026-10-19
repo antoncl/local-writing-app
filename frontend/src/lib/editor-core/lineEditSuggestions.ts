@@ -169,7 +169,11 @@ export const LineEditSuggestions = Extension.create({
               const was = old.items.find((e) => e.id === old.currentId);
               currentId = nextByPosition(items, was ? tr.mapping.map(was.from, 1) : 0);
             }
-            return { items, accepted, kept, currentId, wide: old.wide, view: old.view };
+            // Current / Proposed hide text that is still editable, so the writer's
+            // own change (typing, paste - not an accept/reject) goes back to Both,
+            // where what they changed is visible (#2561).
+            const view = tr.docChanged && meta?.type !== "resolve" ? "both" : old.view;
+            return { items, accepted, kept, currentId, wide: old.wide, view };
           },
         },
         view: (view) => ({ destroy: observeCardRoom(view) }),
@@ -197,8 +201,11 @@ export const LineEditSuggestions = Extension.create({
             const cur = items.find((i) => i.id === currentId);
             if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
             // A / S / B read the passages as the page's words, the proposed ones, or
-            // both. `code` first: on macOS Alt+letter yields a different `key`.
-            const letter = /^Key[ASB]$/.test(event.code) ? event.code.slice(3) : event.key.toUpperCase();
+            // both. The letter on the key first (AZERTY, Dvorak); the key's position
+            // only when Alt turns the letter into another character (macOS: å ß ∫).
+            const letter = /^[a-z]$/i.test(event.key)
+              ? event.key.toUpperCase()
+              : /^Key[ASB]$/.test(event.code) ? event.code.slice(3) : "";
             const act =
               letter === "A" ? () => toggleReviewView("now", view)
               : letter === "S" ? () => toggleReviewView("proposed", view)

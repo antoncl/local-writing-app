@@ -120,6 +120,9 @@
   border-radius: 0;
   cursor: inherit;
 }
+.editor-body.review-view-proposed .line-edit-added-current {
+  background: var(--accent-soft);
+}
 .editor-body.review-view-now .line-edit-current.r-now,
 .editor-body.review-view-now .line-edit-current .r-now {
   background: var(--accent-soft);

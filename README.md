@@ -100,8 +100,9 @@ Deliberately absent: export to Word/PDF/EPUB, collaboration, cloud sync.
 The app has a built-in manual: **≡ menu → Help → Guides**. It starts with
 *Getting started* and covers lore, custom fields, mutations, views, plotting,
 AI setup, writing prompts, and roleplay, plus a full prompt reference. The same
-guides are readable here in the repository — start with
-[Getting started](docs/getting-started.md).
+guides are [on the website](https://antoncl.github.io/local-writing-app/guides/),
+for the latest release — start with
+[Getting started](https://antoncl.github.io/local-writing-app/guides/getting-started.html).
 
 ## Project format
 

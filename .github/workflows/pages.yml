@@ -1,37 +1,91 @@
-# Deploys the static landing page in site/ to GitHub Pages (#1370).
+# Deploys the website in site/ to GitHub Pages (#1370), with the in-app guides
+# rendered into site/guides/ (#2556).
 #
-# Deliberately independent of gates.yml and release.yml: the site is plain
-# static files with no build step, so there is nothing to gate — a push to
-# master that touches site/ republishes it, and that's the whole pipeline.
+# Deliberately independent of gates.yml and release.yml. The landing page is
+# plain static files; the one build step renders the guide bundle the app ships
+# (frontend/src/lib/generated/guides.ts) into pages, with the same `marked` the
+# in-app viewer uses — see frontend/scripts/build-site-guides.mjs.
+#
+# Which guides: the website describes what people can download, so a deploy
+# renders the bundle from the LATEST STABLE RELEASE TAG, not master. release.yml
+# starts this workflow (workflow_dispatch, on master) once it has published a
+# stable release — a dispatch, because the github-pages environment deploys from
+# master only, and the `release: published` event its GITHUB_TOKEN raises would
+# not start another workflow. site/ itself always comes from master.
+#
+# A pull request that touches the site, the script, or the guides builds the
+# pages from its own bundle (labelled "development version") and does not
+# deploy — so a breakage shows up before merge.
 
 name: pages
 
 on:
   push:
     branches: [master]
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths:
+      - "site/**"
+      - "frontend/scripts/build-site-guides.mjs"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "frontend/src/lib/generated/guides.ts"
+      - "frontend/scripts/build-site-guides.mjs"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  # One deploy at a time; a PR's build-only run never cancels a deploy.
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'pages-deploy' }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # A deploy always publishes master's site/; a PR builds its own merge
+          # commit.
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'master' }}
+          fetch-depth: 0   # the release tags, to find the latest stable one
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'   # strips the bundle's TS types on import
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend --no-audit --no-fund
+      - name: Use the latest stable release's guides
+        if: github.event_name != 'pull_request'
+        run: |
+          # Stable tags only: `v1.2.3`, not the rolling `nightly` or a `-rc` tag.
+          tag="$(git tag --list 'v*' --sort=-v:refname | grep -vE -- '-' | head -n1)"
+          if [ -z "$tag" ]; then echo "::error::no stable v* tag found"; exit 1; fi
+          git show "$tag:frontend/src/lib/generated/guides.ts" > frontend/src/lib/generated/guides.ts
+          echo "GUIDES_VERSION=$tag" >> "$GITHUB_ENV"
+          echo "Rendering the guides from $tag"
+      - name: Render the guides
+        run: node frontend/scripts/build-site-guides.mjs --out site/guides ${GUIDES_VERSION:+--version "$GUIDES_VERSION"}
+      - uses: actions/configure-pages@v6
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
       - id: deployment
         uses: actions/deploy-pages@v5

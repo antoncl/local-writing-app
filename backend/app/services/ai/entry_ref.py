@@ -446,12 +446,40 @@ class ProjectInfoRef:
         return self._info is not None
 
 
+
 def template_json_default(value: Any) -> Any:
     """`json.dumps` fallback for the `| json` filter (#2552): the JSON shape of a
-    template-facing wrapper. A metadata or group view is an object (its values
-    recurse back through here, so a reference inside one lands as a title); any
-    other wrapper — a node (`EntryRef`), the project — quotes as what a bare
-    `{{ value }}` prints, so `| json` never fails on a value a template can hold."""
+    template-facing wrapper, so `| json` never fails on a value a template holds
+    and doubles as a way to see what a node offers. The node you pipe is an
+    object of the fields a template can read off it — `id`, `title`,
+    `entry_type`, `metadata`, `body` (the project: its `title` and `metadata`);
+    a node it *references* stays its title, which keeps the dump bounded and
+    cycle-free (pipe that field to see it). A metadata or group view is an
+    object; anything else is what a bare `{{ value }}` prints."""
+    if isinstance(value, EntryRef):
+        if not value.found:
+            return value.id
+        return {
+            "id": value.id,
+            "title": value.title,
+            "entry_type": value.entry_type,
+            "metadata": _json_inner(value.metadata),
+            "body": value.body,
+        }
+    if isinstance(value, ProjectInfoRef):
+        return {"title": value.title, "metadata": _json_inner(value.metadata)}
+    return _json_inner(value)
+
+
+def _json_inner(value: Any) -> Any:
+    """A value inside a node's dump: views become objects, lists and dicts
+    recurse, and a referenced node is its title."""
     if isinstance(value, (_EntryMetadataView, _GroupView)):
-        return {key: value[key] for key in value}
+        return {key: _json_inner(value[key]) for key in value}
+    if isinstance(value, dict):
+        return {key: _json_inner(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_inner(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
     return str(value)

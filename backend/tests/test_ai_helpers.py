@@ -1143,9 +1143,36 @@ class JsonFilterTests(_HelperFixtureBase):
         out = render_template('{% role "system" %}{{ ' + expr + " | json }}{% endrole %}", context={}, env=env)
         return json.loads(out.messages[0].text)
 
-    def test_a_node_quotes_as_its_title_like_a_bare_print(self) -> None:
-        # `{{ node }}` prints the title; `{{ node | json }}` quotes the same thing.
-        self.assertEqual(self._json(f"entry('{self.honor['id']}')"), "Honor Harrington")
+    def test_a_node_dumps_the_fields_a_template_can_read(self) -> None:
+        # `{{ node | json }}` is how an author sees what a node offers (#2552):
+        # its readable fields, in order; a node it references is that node's title.
+        node = self._json(f"entry('{self.honor['id']}')")
+        self.assertEqual(list(node), ["id", "title", "entry_type", "metadata", "body"])
+        self.assertEqual(node["id"], self.honor["id"])
+        self.assertEqual(node["title"], "Honor Harrington")
+        self.assertEqual(node["entry_type"], "lore:character")
+        self.assertEqual(node["metadata"]["related_entries"], ["Nimitz"])
+        self.assertEqual(node["body"].strip(), "Captain of the Fearless. Treecat-adopted.")
+
+    def test_a_list_of_nodes_dumps_each_node(self) -> None:
+        nodes = self._json(f"[entry('{self.honor['id']}'), entry('{self.nimitz['id']}')]")
+        self.assertEqual([n["title"] for n in nodes], ["Honor Harrington", "Nimitz"])
+
+    def test_an_unresolved_node_dumps_as_its_id(self) -> None:
+        self.assertEqual(self._json("entry('lore_missing')"), "lore_missing")
+
+    def test_the_project_dumps_its_title_and_authored_fields(self) -> None:
+        info = ProjectInfo(title="Saga", root_path="/x", metadata={"measurement_system": "metric"})
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{{ project | json }}{% endrole %}',
+            context={"project": ProjectInfoRef(info, project=self.service, schema=None)},
+            env=env,
+        )
+        self.assertEqual(
+            json.loads(out.messages[0].text),
+            {"title": "Saga", "metadata": {"measurement_system": "metric"}},
+        )
 
     def test_metadata_quotes_as_an_object_with_its_references_as_titles(self) -> None:
         # The reference doc's own example (`entry(x).metadata | json`): the view

@@ -576,6 +576,12 @@ escaping. Use it to hand the AI structured data:
 Known facts: {{ entry(inputs.character).metadata | json }}
 ```
 
+A node prints as an object of everything a prompt can read from it — `id`,
+`title`, `entry_type`, `metadata` and `body` — so `{{ scene | json }}` in the
+preview is a quick way to see what a scene offers. A node it refers to shows as
+that node's title; print that field the same way to see inside it. `project | json`
+gives the project's `title` and `metadata`.
+
 ## Tags
 
 #### role

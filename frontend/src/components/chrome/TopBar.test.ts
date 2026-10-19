@@ -125,6 +125,20 @@ describe("TopBar — app menu (#766.1)", () => {
     expect(screen.queryByRole("menu", { name: "Application menu" })).toBeNull();
   });
 
+  it("keeps Guides enabled with no project open (#2558)", async () => {
+    // Guides are bundled data — a new user must reach Getting started before
+    // creating a project; project-scoped items around it stay disabled.
+    const onOpenGuides = vi.fn();
+    render(TopBar, { props: { currentTitle: "", projectOpen: false, onOpenGuides } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Application menu" }));
+    expect(screen.getByRole("menuitem", { name: "Prompts" })).toBeDisabled();
+    const guidesItem = screen.getByRole("menuitem", { name: "Guides" });
+    expect(guidesItem).toBeEnabled();
+    await fireEvent.click(guidesItem);
+    expect(onOpenGuides).toHaveBeenCalledOnce();
+  });
+
   it("no longer carries the Layout section — it moved to the chrome (#1651)", async () => {
     render(TopBar, { props: { currentTitle: "My Book", projectOpen: true } });
     await fireEvent.click(screen.getByRole("button", { name: "Application menu" }));

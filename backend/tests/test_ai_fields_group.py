@@ -15,6 +15,7 @@ field's value like any other field."""
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -133,6 +134,18 @@ class FieldsGroupExposureTests(unittest.TestCase):
         self.assertIn("Slay the wyrm | Her own fear |", text)  # by name, then by id
         # A field NOT in the group is not reachable through it.
         self.assertNotIn("Hums", text)
+
+    def test_a_group_dumps_as_an_object_of_its_members(self) -> None:
+        # `{{ e.GMO | json }}` (#2552): the group's members by field id, and only
+        # its members — the ungrouped field stays out.
+        hero = self._make_hero()
+        env = create_environment_for_project(self.service)
+        text = render_template(
+            '{% role "system" %}{{ entry(hero).GMO | json }}{% endrole %}',
+            context={"hero": hero},
+            env=env,
+        ).messages[0].text
+        self.assertEqual(json.loads(text), {"goal": "Slay the wyrm", "obstacle": "Her own fear"})
 
     def test_use_delivers_a_grouped_fields_value(self) -> None:
         # use() renders a grouped field like any other field — the values are

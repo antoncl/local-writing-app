@@ -18,7 +18,9 @@ from app.models import (
     SavePromptEntryRequest,
     SaveSceneRequest,
 )
+from app.services.ai.preview import _render_or_preview_error
 from app.services.ai.sessions import default_registry
+from app.services.project.errors import ProjectServiceError
 
 
 class PreviewEndpointTests(unittest.TestCase):
@@ -565,6 +567,58 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(body["error"]["kind"], "stopped")
         self.assertEqual(body["error"]["message"], "Write a summary first.")
         self.assertIsNone(body["error"]["line"])
+
+    def test_a_python_error_raised_while_rendering_is_a_template_error_not_a_500(self) -> None:
+        """A template is author code: any exception its render raises — not only
+        Jinja's own — comes back as the pane's error, with the line, never a bare
+        500 (`{{ 1 / 0 }}` stands for every helper/filter that can raise)."""
+        with self.assertLogs("app.services.ai.preview", "WARNING") as logs:
+            response = self.client.post(
+                "/api/ai/preview",
+                json={
+                    "template_source": '{% role "user" %}\nfine\n{{ 1 / 0 }}\n{% endrole %}',
+                    "target_scene_id": self.scene_id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        error = response.json()["error"]
+        self.assertEqual(error["kind"], "other")
+        self.assertIn("ZeroDivisionError", error["message"])
+        self.assertEqual(error["line"], 3)
+        # On record in app.log (the traceback rides along), not in the curated
+        # errors.log — the preview re-renders on every edit.
+        self.assertIsNotNone(logs.records[0].exc_info)
+        self.assertFalse((self.root / "errors.log").exists())
+
+    def test_a_python_error_inside_an_included_snippet_points_at_the_include(self) -> None:
+        # The snippet's own frames carry its id, not `<template>`, so the gutter
+        # marker lands on the include line of the prompt being edited.
+        self._make_prompt("Divider", "{{ 1 / 0 }}", "prompt:snippet")
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}\nfine\n\n{% include "Divider" %}\n{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        error = response.json()["error"]
+        self.assertEqual(error["kind"], "other")
+        self.assertEqual(error["line"], 4)
+
+    def test_a_domain_failure_during_render_keeps_its_own_response(self) -> None:
+        # A ProjectServiceError already maps to its HTTP response (e.g. ADR-0045's
+        # 409); the render catch-all must not relabel it as a template error.
+        class _Boom:
+            def __str__(self) -> str:
+                raise ProjectServiceError("no scope", 409)
+
+        with self.assertRaises(ProjectServiceError):
+            _render_or_preview_error(
+                '{% role "user" %}{{ boom }}{% endrole %}',
+                {"boom": _Boom()},
+                env=None,
+                default_role=None,
+            )
 
     def test_template_syntax_error_returns_line_info_on_error(self) -> None:
         # Open `{{` with nothing after it — Jinja parse fails with lineno.

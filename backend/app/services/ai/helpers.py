@@ -31,7 +31,7 @@ from jinja2.exceptions import TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.adjacent_scene import adjacent_scene
-from app.services.ai.entry_ref import EntryRef
+from app.services.ai.entry_ref import EntryRef, template_json_value
 from app.services.ai.field_contract import FieldContract
 from app.services.ai.field_roster import field_descriptor
 from app.services.ai.plot_prompt_context import render_plot_context
@@ -755,7 +755,7 @@ def register_helpers(
     # persist into adopted values, and the member order contradicts the catalog).
     # This one preserves insertion order and emits readable text. Replaces the old
     # `plain_json()` global and `tojson`; there is one spelling now.
-    env.filters["json"] = lambda value: json.dumps(value, ensure_ascii=False)
+    env.filters["json"] = lambda value: json.dumps(template_json_value(value), ensure_ascii=False)
 
 
 def create_environment_for_project(

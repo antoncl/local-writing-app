@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from mutation_helpers import save_scenes_with_mutations
 
@@ -1135,6 +1137,93 @@ class JsonFilterTests(_HelperFixtureBase):
         # Member order preserved (b before a); `<`, `>`, `&`, `'` NOT \uXXXX-escaped
         # the way Jinja's built-in `tojson` would.
         self.assertEqual(out.messages[0].text, '{"b": 1, "a": "<x> & \'y\'"}')
+
+    def _json(self, expr: str) -> Any:
+        env = create_environment_for_project(self.service)
+        out = render_template('{% role "system" %}{{ ' + expr + " | json }}{% endrole %}", context={}, env=env)
+        return json.loads(out.messages[0].text)
+
+    def test_a_node_dumps_the_fields_a_template_can_read(self) -> None:
+        # `{{ node | json }}` is how an author sees what a node offers (#2552):
+        # its readable fields, in order; a node it references is its id and title.
+        node = self._json(f"entry('{self.honor['id']}')")
+        self.assertEqual(list(node), ["id", "title", "entry_type", "metadata", "body"])
+        self.assertEqual(node["id"], self.honor["id"])
+        self.assertEqual(node["title"], "Honor Harrington")
+        self.assertEqual(node["entry_type"], "lore:character")
+        self.assertEqual(node["metadata"]["related_entries"], [self._nimitz_stub()])
+        self.assertEqual(node["body"].strip(), "Captain of the Fearless. Treecat-adopted.")
+
+    def test_a_list_of_nodes_dumps_each_node(self) -> None:
+        nodes = self._json(f"[entry('{self.honor['id']}'), entry('{self.nimitz['id']}')]")
+        self.assertEqual([n["title"] for n in nodes], ["Honor Harrington", "Nimitz"])
+
+    def test_a_node_inside_a_dict_you_built_expands_too(self) -> None:
+        # The one rule: a node expands unless it is inside another node.
+        dumped = self._json(f"{{'who': entry('{self.honor['id']}')}}")
+        self.assertEqual(dumped["who"]["title"], "Honor Harrington")
+        self.assertEqual(dumped["who"]["metadata"]["related_entries"], [self._nimitz_stub()])
+
+    def test_generators_and_key_views_dump_as_arrays(self) -> None:
+        # Jinja's map/select return generators and `.keys()` a view — both are
+        # arrays, not their Python repr.
+        nodes = f"[entry('{self.honor['id']}'), entry('{self.nimitz['id']}')]"
+        self.assertEqual(self._json(nodes + " | map(attribute='title')"), ["Honor Harrington", "Nimitz"])
+        self.assertIn("related_entries", self._json(f"entry('{self.honor['id']}').metadata.keys()"))
+
+    def test_an_unresolved_node_dumps_as_a_stub_whose_title_is_its_id(self) -> None:
+        # Same shape as a reference, so it never reads as a plain string; the
+        # title falls back to the id exactly as `{{ n.title }}` does.
+        self.assertEqual(self._json("entry('lore_missing')"), {"id": "lore_missing", "title": "lore_missing"})
+
+    def test_the_stubs_paths_render_off_the_reference(self) -> None:
+        # What the dump shows is what a template can write: `{"id", "title"}`
+        # on a reference means `ref.id` and `ref.title` both render.
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% set r = entry("' + self.honor["id"] + '").related_entries[0] %}'
+            "{{ r.id }}|{{ r.title }}{% endrole %}",
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, f"{self.nimitz['id']}|Nimitz")
+
+    def test_the_project_dumps_its_title_and_authored_fields(self) -> None:
+        info = ProjectInfo(title="Saga", root_path="/x", metadata={"measurement_system": "metric"})
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{{ project | json }}{% endrole %}',
+            context={"project": ProjectInfoRef(info, project=self.service, schema=None)},
+            env=env,
+        )
+        self.assertEqual(
+            json.loads(out.messages[0].text),
+            {"title": "Saga", "metadata": {"measurement_system": "metric"}},
+        )
+
+    def test_a_model_dumps_as_an_object_not_field_value_pairs(self) -> None:
+        # A pydantic model iterates as (field, value) pairs; `project.chain`'s
+        # layers are models, so the dump must show them as objects.
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{{ value | json }}{% endrole %}',
+            context={"value": [ProjectInfo(title="Saga", root_path="/x")]},
+            env=env,
+        )
+        dumped = json.loads(out.messages[0].text)
+        self.assertIsInstance(dumped[0], dict)
+        self.assertEqual(dumped[0]["title"], "Saga")
+        self.assertEqual(dumped[0]["root_path"], "/x")
+
+    def test_metadata_quotes_as_an_object_with_its_references_as_stubs(self) -> None:
+        # The reference doc's own example (`entry(x).metadata | json`): the view
+        # is an object, and an entity_ref_list field inside it lists id + title.
+        metadata = self._json(f"entry('{self.honor['id']}').metadata")
+        self.assertIsInstance(metadata, dict)
+        self.assertEqual(metadata["related_entries"], [self._nimitz_stub()])
+
+    def _nimitz_stub(self) -> dict[str, str]:
+        return {"id": self.nimitz["id"], "title": "Nimitz"}
 
 
 class FullOutlineTests(_HelperFixtureBase):

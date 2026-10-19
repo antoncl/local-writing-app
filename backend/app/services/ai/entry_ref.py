@@ -8,7 +8,10 @@ is part of the public surface.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel
 
 from app.services.body_text import story_text
 from app.services.project.metadata_refs import ref_members
@@ -444,3 +447,66 @@ class ProjectInfoRef:
 
     def __bool__(self) -> bool:
         return self._info is not None
+
+
+def template_json_value(value: Any) -> Any:
+    """The JSON shape of a value a template pipes through `| json` (#2552), built
+    top-down so what expands never depends on how `json.dumps` happens to reach a
+    value. One rule: **a node expands unless it is inside another node.** The node
+    you pipe — alone, or in a list or dict you built — is an object of the fields
+    a template can read off it (`id`, `title`, `entry_type`, `metadata`, `body`);
+    the project is its `title` and `metadata`. Inside a node's metadata — and for
+    a node that no longer resolves — a node is just its `id` and `title`, which
+    keeps the dump bounded and cycle-free (pipe that field to see it)."""
+    if isinstance(value, EntryRef):
+        if not value.found:
+            return _json_node_stub(value)
+        return {
+            "id": value.id,
+            "title": value.title,
+            "entry_type": value.entry_type,
+            "metadata": _json_inside_node(value.metadata),
+            "body": value.body,
+        }
+    if isinstance(value, ProjectInfoRef):
+        return {"title": value.title, "metadata": _json_inside_node(value.metadata)}
+    if isinstance(value, (_EntryMetadataView, _GroupView)):
+        return _json_inside_node(value)
+    return _json_container(value, template_json_value)
+
+
+def _json_inside_node(value: Any) -> Any:
+    """A value inside a node's metadata: a referenced node is its stub."""
+    if isinstance(value, EntryRef):
+        return _json_node_stub(value)
+    if isinstance(value, (_EntryMetadataView, _GroupView)):
+        return {key: _json_inside_node(value[key]) for key in value}
+    return _json_container(value, _json_inside_node)
+
+
+def _json_node_stub(ref: EntryRef) -> dict[str, str]:
+    """A node in brief: the first two keys of its full dump, and both paths a
+    template can read off it (`scene.pov.id`, `scene.pov.title`). An unresolved
+    node's title falls back to its id, as `.title` does."""
+    return {"id": ref.id, "title": ref.title}
+
+
+def _json_container(value: Any, item: Callable[[Any], Any]) -> Any:
+    """Scalars as JSON has them; a mapping or a model (e.g. `project.chain`'s
+    layers) is an object and any other iterable (a list, a Jinja `map`/`select`
+    generator, `dict_keys`) an array, each member shaped by `item`; anything else
+    is what a bare `{{ value }}` prints."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, BaseModel):
+        # Checked before Iterable: a model iterates as (field, value) pairs.
+        return {name: item(member) for name, member in value}
+    if isinstance(value, Mapping):
+        return {_json_key(key): item(member) for key, member in value.items()}
+    if isinstance(value, Iterable):
+        return [item(member) for member in value]
+    return str(value)
+
+
+def _json_key(key: Any) -> Any:
+    return key if key is None or isinstance(key, (str, int, float, bool)) else str(key)

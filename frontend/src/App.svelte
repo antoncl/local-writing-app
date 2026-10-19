@@ -13,6 +13,7 @@
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import GuideView from "@/components/panes/GuideView.svelte";
+  import WelcomeView from "@/components/workspace/WelcomeView.svelte";
   import AiSpendPane from "@/components/panes/AiSpendPane.svelte";
   import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
   import {
@@ -620,6 +621,9 @@
   // hides. The toggle side effect stays in the TopBar wiring below.
   let inheritRows = $derived(declarationRows(project?.ancestors));
   let isProjectOpen = $derived(appState.name === "projectOpen");
+  // With no project open there is no Workspace to host the guide region, so
+  // ≡ → Guides shows the viewer in the welcome area instead (#2558).
+  let welcomeGuideOpen = $state(false);
   let structure = $derived($structureStore);
   // Research tree — parallel structure to the manuscript tree. Topics
   // are containers, notes are leaves with their own markdown file.
@@ -703,7 +707,7 @@
   onOpenPlotBoard={openPlotBoardPane}
   onOpenMutations={openMutationsPane}
   onOpenAiSpend={openAiSpendPane}
-  onOpenGuides={openGuidePane}
+  onOpenGuides={() => (isProjectOpen ? openGuidePane() : (welcomeGuideOpen = true))}
   onManageAllTags={openTagsPane}
   canFinalize={canFinalizeRoleplay}
   onFinalizeRoleplay={() => activeScene && finalizeDialog?.open(activeScene)}
@@ -731,14 +735,7 @@
       actions={editorDocActions}
     />
   {:else}
-    <div class="welcome" data-testid="no-project">
-      <!-- The Project pane is gone (#417 slice 6); this is the only remaining
-           no-project state, inlined here rather than routed through a pane that
-           could vanish. Once a project opens, the tiled Workspace takes over. -->
-      <p class="muted welcome-hint">
-        No project open. Pick one from the switcher above — recents, browse, or create new.
-      </p>
-    </div>
+    <WelcomeView bind:guideOpen={welcomeGuideOpen} />
   {/if}
 
   <!-- SchemaPanes stays mounted for its schema-authoring state; it now registers
@@ -1111,7 +1108,7 @@
 
 <style>
   /* Main area below the top bar. The tiled Workspace fills it; before a project
-     opens, a centred welcome hint shows instead. */
+     opens, WelcomeView shows instead. */
   .app-main {
     display: flex;
     flex-direction: column;
@@ -1119,21 +1116,6 @@
     height: calc(100vh - 40px);
     margin-top: 40px;
     overflow: hidden;
-  }
-
-  .welcome {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding: var(--sp-5);
-    overflow: auto;
-  }
-  .welcome-hint {
-    width: min(560px, 100%);
-    margin: var(--sp-1) 0;
-    font-size: var(--fs-md);
   }
 
   /* The plot board fills its tile (a canvas, not a padded list); PlotEditor's

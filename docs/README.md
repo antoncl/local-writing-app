@@ -77,11 +77,11 @@ The rules a change must meet and the mechanics behind them:
 **Note:** `prompts/guide.md` and `prompts/reference.md` are the two *bundled user
 guides* listed above. Everything else here is contributor-facing:
 
-- [prompts/README.md](prompts/README.md) — overview of the prompts & AI docs.
-- [prompts/template-language.md](prompts/template-language.md) — the Jinja template language.
-- [prompts/helpers.md](prompts/helpers.md) — the type-aware helpers and filters.
+- [prompts/README.md](prompts/README.md) — index of the prompts & AI developer pages, mental model, design principles.
+- [prompts/template-language.md](prompts/template-language.md) — the template engine: sandbox, role markers, snippet loader.
+- [prompts/helpers.md](prompts/helpers.md) — how helpers are registered, `EntryRef`, adding a helper.
 - [prompts/snippets-and-prompts.md](prompts/snippets-and-prompts.md) — how snippets relate to prompts.
-- [prompts/chat.md](prompts/chat.md), [prompts/generate.md](prompts/generate.md), [prompts/preview.md](prompts/preview.md) — the per-surface prompt bases.
+- [prompts/chat.md](prompts/chat.md), [prompts/generate.md](prompts/generate.md), [prompts/preview.md](prompts/preview.md) — the AI endpoints' behaviour (fields: the generated OpenAPI schema at `/docs`).
 
 ### [`spikes/`](spikes/) — throwaway experiments
 

@@ -1,143 +1,123 @@
-# Template language
+# Template engine
 
-A prompt's body markdown is rendered as a [Jinja2](https://jinja.palletsprojects.com/) template inside a sandbox. Jinja's standard syntax — variables, conditionals, loops, includes, filters — works as documented upstream. This page covers only the additions specific to this project. For the exhaustive list of variables, helpers, filters, and tags with their types, see [reference.md](reference.md).
+How a prompt body becomes role-tagged messages. This page covers the engine's
+internals. What an author can write — every variable, helper, filter and tag — is in
+[reference.md](reference.md), and the author's introduction is [guide.md](guide.md).
 
-## What rendering produces
+## The environment
 
-A template doesn't produce a single string. It produces a list of role-tagged messages that the provider layer serializes into whatever shape Anthropic, OpenAI, or Ollama wants. The Python shape:
+A prompt body is a [Jinja2](https://jinja.palletsprojects.com/) template rendered
+in a `SandboxedEnvironment` (`create_environment()`, `services/ai/templates.py`):
 
-```python
-RenderedTemplate
-├── messages: list[RenderedMessage]
-│   ├── role: str   # "system" | "user" | "assistant"
-│   └── blocks: list[ContentBlock]
-│       └── text: str
-└── warnings: list[str]
-```
+- **`StrictUndefined`** — a typo like `{{ scnee.title }}` raises instead of rendering
+  empty.
+- **`autoescape=False`**, `trim_blocks=True`, `lstrip_blocks=True` — a statement on
+  its own line leaves no blank line behind.
+- **Extensions:** the custom `{% role %}` tag (`RoleExtension`) and Jinja's
+  `jinja2.ext.do`. `{% do … %}` is the form for the helpers that work by side effect
+  (`{% do use(node) %}`, `{% do field_contract.store(f) %}`).
+- The sandbox forbids dunder access and unsafe calls. Users can't register their
+  own helpers or filters. The vocabulary is fixed in code (see [helpers.md](helpers.md)).
 
-A message is built from one `{% role %}` block (or from un-roled prose homed to the base type's default role). A content block is just text — the author never marks where caching happens; that ordering is the backend's job (see [Caching is a backend concern](#caching-is-a-backend-concern)).
+`create_environment_for_project()` (`services/ai/helpers.py`) is what the render
+paths use. It builds that environment, installs the snippet loader, and calls
+`register_helpers()`. Environments are built per render, so per-render state (the
+`use()` picks, the `auto_lore()` flag, the field contract) lives on the environment
+and never leaks between renders.
 
-## `{% role %}` — an override, not a required wrapper
+## Roles: a marker stream
 
-```jinja
-{% role "system" %}
-You are an expert thriller writer.
-{% endrole %}
+`{% role "user" %}…{% endrole %}` doesn't build a message directly. It wraps its
+body in control-character markers (`ROLE_START` / `ROLE_END`, starting with `\x00`),
+and the template renders to **one string**. `_parse_marker_stream()` then splits
+that string into messages. That is why a helper can emit its own role boundaries:
+`character_turns()` returns text already wrapped in role markers, which the parser
+splits like any `{% role %}` block. It must therefore be called outside a
+`{% role %}` block. Because `autoescape` is off, the markers pass through untouched.
 
-{% role "user" %}
-Write a paragraph about the rain.
-{% endrole %}
-```
+- **Text outside any role block** becomes a message of the caller's `default_role`.
+  The send and preview paths always pass `system`, so a prose-only prompt is one
+  system message. With no default role (`None`), loose text is dropped with a
+  warning.
+- The role argument is an expression, usually a string literal.
+- An **empty** role block produces no message, so a conditional turn needs no
+  special handling.
 
-**Un-roled prose is homed to the base type's default role** (usually `system`), so a prose-only prompt just works — you don't need to wrap anything. `{% role %}` is the **override** you reach for when a prompt needs more than one message: a system persona plus a user instruction, or an assistant turn carrying prior prose. Text is split across roles exactly as the blocks fall.
+### Warnings
 
-The role argument is an expression — usually a string literal, but `{% role pov_role %}` works if `pov_role` is in the context.
-
-**Valid role names:** `system`, `user`, `assistant`. Other names render but emit a warning, in case a future provider needs custom roles.
-
-**An empty role block** produces no message. This is convenient for conditionally including a message:
-
-```jinja
-{% role "assistant" %}
-{% if previous_text %}{{ previous_text }}{% endif %}
-{% endrole %}
-```
-
-If `previous_text` is empty, no assistant message is emitted.
-
-**Nested roles** are an author error. The outer wrapper is discarded; inner roles still produce messages. A warning is appended.
-
-## `{% include %}` — inline a snippet node
-
-```jinja
-{% role "system" %}
-You are a thriller writer.
-{% include "House style" %}
-{% endrole %}
-```
-
-Standard Jinja `{% include %}`, backed by a loader that resolves the name to a `prompt:snippet` node by id and inlines its rendered body. See [snippets-and-prompts.md](snippets-and-prompts.md) for how snippets are stored and inherited.
-
-## Caching is a backend concern
-
-The author never places cache breakpoints. Caching is a provider-neutral **volatility ordering** the backend produces: it lays stable content down first (persona, world canon, the lore it selected and tiered `stable`) and the per-call material last, then each provider adapter maps that ordering onto its own caching primitive — Anthropic `cache_control: { type: "ephemeral" }` markers where supported, a no-op for OpenAI / Ollama.
-
-Because ordering is the backend's job, prose you want cached just needs to be stable prose: authored system content rides the stable system prefix automatically, and lore you select with `use(node)` is placed and tiered by the backend (with `use(node, "stable")` as an advisory hint). You write the meaning; the engine handles the byte-stability. See [reference.md](reference.md) and [preview.md](preview.md#the-cache-strip) — the preview shows the resulting tier-badged composition.
-
-## The sandbox
-
-Templates render inside [`jinja2.sandbox.SandboxedEnvironment`](https://jinja.palletsprojects.com/en/latest/sandbox/). This:
-
-- Forbids access to dunder attributes (`obj.__class__`, etc.) and most callable attributes on arbitrary Python objects
-- Restricts operations on registered "unsafe" types (none registered by default)
-- Allows the full set of standard Jinja filters and tests
-
-**Undefined variables are strict.** A typo like `{{ scnee.summary }}` raises `UndefinedError` rather than rendering empty. This catches author errors early.
-
-## Variables available
-
-The dispatch pipeline populates the context. See [reference.md](reference.md#variables) for the full table with types; the common ones:
-
-| Variable | Meaning |
-| --- | --- |
-| `scene` | The prompt's scene node (`scene.title`, `scene.summary`, `scene.body`, …). Field access is uniform attribute access — `scene.pov.title` chases an entity-ref field — resolved as of this scene. |
-| `project` | The project node. `project.<field>` reads an authored project field (`project.spelling`, `project.tense`, `project.measurement_system`, …). Each is resolved nearest-explicit-wins over the inheritance chain, so a value set on the universe reaches every book under it; a field no layer sets is absent, so guard with `{% if 'tense' in project.metadata %}` (`.metadata` is the explicit whole-map escape; a bare `{{ project.tense }}` raises `UndefinedError` when unset). |
-| `inputs` | User-supplied inputs declared by the prompt entry (e.g., `inputs.words`). |
-| `selection`, `text_before`, `text_after` | The editor selection and the body markdown around the cursor (strings; `""` when not dispatched from an editor). |
-
-Helpers (callable functions like `use`, `story_so_far`, `pov`) and the `json` filter are documented in [helpers.md](helpers.md) and [reference.md](reference.md).
-
-## Warnings
-
-Author errors that don't block rendering, returned on `RenderedTemplate.warnings`:
+Author mistakes that don't stop the render are collected on
+`RenderedTemplate.warnings`:
 
 | Warning | Meaning |
 | --- | --- |
-| `Unknown role 'foo'. Valid roles: ['assistant', 'system', 'user']` | The role argument is not one of the canonical names. The message is still emitted. |
-| `Nested role block inside 'foo' is not supported; outer role discarded, inner roles preserved` | A role block contained another role block. The outer wrapper is dropped; inner roles produce messages. |
+| `Unknown role 'x'. Valid roles: [...]` | Not `system` / `user` / `assistant`. The message is still emitted. |
+| `Nested role block inside 'x' is not supported; …` | A role block inside another. The outer wrapper is dropped; the inner blocks still become messages. |
+| `Text outside any role block is ignored: …` | Loose text with no default role. The send paths never trigger this. |
+| `Malformed role marker…` / `… missing end marker…` | The marker stream is corrupt. Rendering stops there. |
 
-## Errors
+### Errors
 
-Things that abort rendering by raising:
+Rendering raises Jinja's own errors — `UndefinedError`, `TemplateSyntaxError`,
+`SecurityError` — plus the loader's error for an unresolvable include and the
+`stop()` helper's error. `build_preview` turns each into a `PreviewError` with a
+coarse `kind` (`undefined`, `syntax`, `include`, `stopped`, `scene_not_found`,
+`other`). [Preview](preview.md#errors-are-data) returns these as data, and
+[generate](generate.md#errors) as HTTP errors.
 
-- `jinja2.UndefinedError` — referenced an undefined variable (typo, missing context)
-- `jinja2.TemplateSyntaxError` — malformed Jinja syntax
-- `jinja2.sandbox.SecurityError` — sandbox-forbidden access (e.g., dunder attribute, unsafe call)
+## `{% include %}` — the snippet loader
 
-These propagate up to the dispatch / preview layer and are reported to the user.
+`PromptSnippetLoader` (`services/ai/snippet_loader.py`) resolves an include name to
+a `prompt:snippet` node, and Jinja inlines its body:
 
-## Example: a minimal `continue_scene` template
+1. A name that is a snippet's **id** resolves to that snippet.
+2. Otherwise the name is matched against snippet **titles** (the shipped prompts
+   include by title). Among the matches, the one in the **nearest layer** wins, so a
+   project's own snippet overrides an inherited or built-in one with the same title.
+3. Two matches with the same title in that nearest layer are **ambiguous**. Like no
+   match at all, that is an `include` error naming the snippet.
 
-```jinja
-{% role "system" %}
-You are an expert fiction writer.
-{% if 'tense' in project.metadata %}Always write in {{ project.tense }} tense.{% endif %}
-{% if 'spelling' in project.metadata %}Use {{ project.spelling }} spelling.{% endif %}
-{% if 'measurement_system' in project.metadata %}Measurements are {{ project.measurement_system }}.{% endif %}
-{% include "House voice" %}
-{{ auto_lore() }}
-{% endrole %}
+An included snippet also contributes its declared inputs to the prompt's effective
+inputs (ADR-0061, see [preview.md § Effective inputs](preview.md#effective-inputs)).
+How snippets are stored and inherited is in
+[snippets-and-prompts.md](snippets-and-prompts.md).
 
-{% role "user" %}
-{% if story_so_far(scene) %}
-The story so far:
-{{ story_so_far(scene) }}
-{% endif %}
-{% endrole %}
+## What a render returns
 
-{% role "assistant" %}
-{{ text_before }}
-{% endrole %}
-
-{% role "user" %}
-Write {{ inputs.words }} words that continue the story:
-
-{{ inputs.message }}
-{% endrole %}
+```python
+render_template(source, context=None, *, env=None, default_role=None) -> RenderedTemplate
 ```
 
-`auto_lore()` enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`House voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
+`RenderedTemplate.messages` is a list of `RenderedMessage(role, blocks)`, where each
+block is a `ContentBlock(text)`. A block carries no cache flag, because the author
+never places caches. `warnings` is described above.
+
+The rest of `RenderedTemplate` is **execution state copied off the environment** by
+`build_preview` after the render, plus the send-path lore it computes from that
+state:
+
+- what the template *did*: `lore_invoked` (`auto_lore()` ran), `lore_free`
+  (`no_lore()` ran), `lore_position` (`lore_as_of()`), `used_node_ids`,
+  `used_node_hints` and `used_snapshots` (`use()`), `field_contract_stored`;
+- what the backend will place: the `send_lore_*` fields — each tier's text, member
+  ids, per-entry XML and snapshot elements — and `send_lore_fit`, the lore
+  budget's report.
+
+A chat persists the execution state, so later turns place the same lore without
+re-rendering. The preview and generate routes turn the `send_lore_*` fields into
+the cache strip and the one-shot system blocks.
+
+## Caching is not in the template
+
+The author never marks cache breakpoints (the old `{% cache_break %}` tag is
+retired, ADR-0060 §5). The backend orders what it sends by volatility — system
+prefix, stable lore, volatile lore, then the turns — and each provider adapter maps
+that order onto its own caching: Anthropic cache-control markers, OpenAI's automatic
+prefix cache, and nothing for Ollama. See `docs/design/context-caching.md` and
+[preview.md § The cache strip](preview.md#the-cache-strip).
 
 ## Implementation reference
 
-The engine lives in [`backend/app/services/ai/templates.py`](../../backend/app/services/ai/templates.py). The relevant entrypoints are `render_template(source, context)` (returns a `RenderedTemplate`) and `create_environment()` (returns the sandboxed env if you need to customize). Tests are in [`backend/tests/test_ai_templates.py`](../../backend/tests/test_ai_templates.py) and double as worked examples of every feature on this page.
+- Engine: [`backend/app/services/ai/templates.py`](../../backend/app/services/ai/templates.py) — `create_environment`, `render_template`, `RoleExtension`
+- Snippet loader: [`backend/app/services/ai/snippet_loader.py`](../../backend/app/services/ai/snippet_loader.py)
+- Render orchestration: [`backend/app/services/ai/preview.py`](../../backend/app/services/ai/preview.py) — `build_preview`
+- Tests: `backend/tests/test_ai_templates.py` — they double as worked examples of every rule above

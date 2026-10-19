@@ -1,97 +1,84 @@
 # Generate
 
-`POST /api/ai/generate` runs the full pipeline: render a template against a target scene, convert the rendered role-tagged messages into a chat-API payload, call the provider, return the generated text. It ties the render engine, the helpers, the cache-continuity session, and the provider chat call together.
+`POST /api/ai/generate` runs a prompt **one-shot**. It renders the template (as
+[preview](preview.md) does), turns the rendered messages into a chat payload, calls
+the provider and returns the reply. `POST /api/ai/generate/stream` does the same and
+streams the reply, using the line protocol in
+[chat.md § Streaming line protocol](chat.md#streaming-line-protocol). The frontend
+only uses the streaming route, because only a stream's disconnect can cancel the
+provider call (#2464).
 
-It's the surface that editor integrations (`continue_scene`, `revise_selection`) call.
+The request and response fields are in the generated schema (`/docs` on the running
+backend; models `AIGenerateRequest` / `AIGenerateResponse` in
+`backend/app/models/ai.py`). The request is preview's render fields plus the call
+fields from [chat](chat.md) (`assistant_id`, `provider`, `model`, `max_tokens`).
+This page covers the behaviour the schema can't show.
 
-## Request
+## From template to payload
 
-```json
-{
-  "template_source": "{% role \"system\" %}…{% endrole %}{% role \"user\" %}…{% endrole %}",
-  "target_scene_id": "scene_xxxxx",
-  "session_id": "optional-session-key",
-  "inputs": { "words": 300, "message": "What happens next?" },
-  "text_before": "She walked into",
-  "text_after": "the storm.",
-  "commit": false,
-  "provider": "anthropic",
-  "model": "claude-haiku-4-5-20251001",
-  "max_tokens": 4096
-}
-```
+`build_chat_payload` (`services/ai/preview.py`) converts the rendered messages:
 
-Same fields as `/api/ai/preview` (see [preview.md](preview.md)) plus the provider routing fields from `/api/ai/chat` (see [chat.md](chat.md)).
-
-## Response
-
-```json
-{
-  "content": "the storm without hesitation…",
-  "rendered_messages": [
-    { "role": "system", "blocks": [ { "text": "…" } ] },
-    { "role": "user",   "blocks": [ { "text": "…" } ] }
-  ],
-  "rendered_warnings": [],
-  "char_count": 1247,
-  "provider": "anthropic",
-  "model": "claude-haiku-4-5-20251001",
-  "latency_ms": 2843,
-  "policy": "cloud-allowed",
-  "ok": true,
-  "error": null,
-  "stop_reason": "end_turn",
-  "truncated": false,
-  "session_id": "optional-session-key",
-  "usage": { "input_tokens": 1180, "output_tokens": 340 },
-  "cost_usd": 0.0042
-}
-```
-
-`content` is the generated text. `rendered_messages` echoes the prompt that was sent (so the UI can show provenance) — each block is just text, since the author never marks caching. `char_count` is the input size in characters — a rough token estimate (~4 chars/token). `usage` and `cost_usd` report actual token spend for the call.
-
-`ok`, `error`, `stop_reason`, `truncated`, `policy` behave identically to `/api/ai/chat`.
-
-## How the template becomes a chat payload
-
-The template renders to a list of role-tagged messages. The handler converts that into the chat-API shape:
-
-1. **All `{% role "system" %}` blocks** are concatenated (newline-separated) into a single `system_prompt`.
-2. **`{% role "user" %}` and `{% role "assistant" %}` blocks** pass through in order as the chat messages array.
-3. Other roles are silently dropped (warnings from the renderer already flag them).
+1. **Every `system` message** is joined (blank-line separated) into one system prompt.
+   Text outside any `{% role %}` block is already a `system` message — the send
+   path renders with `system` as the default role.
+2. **`user` and `assistant` messages** pass through in order. Whitespace-only
+   messages are dropped. Consecutive same-role messages are merged, because
+   Anthropic rejects two `user` turns in a row.
+3. Other roles are dropped. The renderer has already warned about them.
 
 So this template:
+
 ```jinja
-{% role "system" %}You write fiction.{% endrole %}
+You write fiction.
 {% role "user" %}Plan the scene.{% endrole %}
 {% role "assistant" %}Here's a plan…{% endrole %}
 {% role "user" %}Now write it.{% endrole %}
 ```
-becomes:
-- `system_prompt` = "You write fiction."
-- `messages` = `[{role:"user","Plan the scene."}, {role:"assistant","Here's a plan…"}, {role:"user","Now write it."}]`
+
+sends the system prompt "You write fiction." and three alternating messages. If
+nothing is left in `user` / `assistant` turns, there is nothing to send, and the
+route answers **400**.
+
+## What lore a one-shot run carries
+
+A one-shot run sends the **declared** lore: the template's `use()` picks, plus the
+entries marked *always include* (unless the prompt calls `no_lore()`). These are
+placed as stable/volatile system blocks after the system prompt
+(`one_shot_system_blocks`, `services/ai/chat.py`). It sends **no automatic lore**,
+even if the template calls `auto_lore()` — the generate routes render with
+`automatic_lore=False` (ADR-0092 Amendment 1 §5). Automatic lore is a chat-turn
+feature.
+
+## Response formats
+
+`response_format` selects what the model is asked to return:
+
+| Value | Reply | Route |
+| --- | --- | --- |
+| `text` (default) | Prose in `content`. | both |
+| `line_edits` | A list of find/replace edits, parsed into `edits`. A reply that doesn't parse comes back as `ok: false`. | both |
+| `notes` | Lore-check notes. | streaming only — the plain route answers 422 |
 
 ## Errors
 
-| Status | Cause |
+| Response | Cause |
 | --- | --- |
-| `400` | Template rendered no user/assistant messages — nothing to send. |
+| `400` | The template rendered no `user` / `assistant` content. |
 | `404` | `target_scene_id` doesn't resolve. |
-| `422` | Template error — undefined variable, syntax error, sandbox violation. |
-| `200, ok:false` | Provider call failed — bad key, network error, policy refused. See `error`. |
+| `422` | The template failed to render — an undefined name, a syntax error, an `{% include %}` that doesn't resolve, a sandbox violation, or a `stop()` call. `detail` is the message, or `{message, line, col}` when Jinja gave a location. |
+| `200`, `ok: false` | The provider call failed or was refused — bad key, network error, AI policy. See `error`. |
 
-## Session and cache behavior
+The streaming route renders before it starts streaming, so render errors arrive as
+the same HTTP errors. Only provider events go through the stream.
 
-Identical to preview. `session_id` is the cache-continuity key; with `commit: true` this render's selected-node revisions become the baseline the next call diffs against, so the backend can keep the stable prefix warm. The template author manages none of it — caching is the backend's volatility ordering (see [preview.md#the-cache-strip](preview.md#the-cache-strip)).
+## Sessions
 
-## What this endpoint is NOT yet
-
-- **No streaming.** Full response returned at once.
-- **No `n` parameter.** Single response per call. N-variant generation lands in a later slice.
-- **No diff overlay.** The endpoint returns text; how it lands in the editor is the caller's problem.
+`session_id` and `commit` work as on [preview](preview.md#sessions): with
+`commit: true`, this render's selected-node revisions become the baseline the next
+call is compared against.
 
 ## Implementation reference
 
-- Endpoint: `POST /api/ai/generate` in [`backend/app/main.py`](../../backend/app/main.py)
-- Dispatch helpers: [`backend/app/services/ai/preview.py`](../../backend/app/services/ai/preview.py) — `build_preview` and `build_chat_payload`
-- Tests: [`backend/tests/test_ai_generate.py`](../../backend/tests/test_ai_generate.py)
+- Routes: [`backend/app/routers/ai.py`](../../backend/app/routers/ai.py) — `ai_generate`, `ai_generate_stream`
+- Render + payload: [`backend/app/services/ai/preview.py`](../../backend/app/services/ai/preview.py) — `build_preview`, `build_chat_payload`
+- Tests: `backend/tests/test_ai_generate.py`, `test_ai_generate_lore.py`

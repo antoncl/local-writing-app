@@ -72,7 +72,9 @@ function editRuns(find: string, replace: string): DiffRun[] {
 /** Words only the replacement has: they come in, so they sit as a cool widget. */
 function widgetFor(view: EditorView, edit: LineEditSuggestion, text: string): HTMLElement {
   const added = document.createElement("span");
-  added.className = "r-was";
+  // `line-edit-added`: the widget is a sibling of the passage's spans, not inside
+  // `.line-edit`, so the version views (review.css) key on this class.
+  added.className = "r-was line-edit-added";
   added.contentEditable = "false";
   added.title = edit.reason;
   added.textContent = text;

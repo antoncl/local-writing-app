@@ -11,13 +11,19 @@
   actions. mousedown preventDefault keeps the editor focused.
 -->
 <script lang="ts">
+  import type { ReviewView } from "@/lib/editor-core/lineEditSuggestions";
+  import ReviewViewToggle from "@/components/editor/body/ReviewViewToggle.svelte";
+
   interface Props {
     flags: { remaining: number; index: number; edits: number } | null;
     onAcceptAllEdits: () => void;
     onRejectAll: () => void;
+    /** The version the passages read as (#2561); the toggle shows with `onView`. */
+    view?: ReviewView;
+    onView?: (view: ReviewView) => void;
   }
 
-  let { flags, onAcceptAllEdits, onRejectAll }: Props = $props();
+  let { flags, onAcceptAllEdits, onRejectAll, view = "both", onView }: Props = $props();
 
   const keepFocus = (e: MouseEvent) => e.preventDefault();
 </script>
@@ -33,6 +39,7 @@
       {/if}
       <button type="button" class="flr-btn" data-testid="flag-reject-all" title="Reject every remaining edit and dismiss every note" onmousedown={keepFocus} onclick={onRejectAll}>Reject all</button>
     </span>
+    {#if onView && flags.edits > 0}<ReviewViewToggle {view} {onView} />{/if}
   </div>
 {/if}
 

@@ -52,6 +52,24 @@ describe("EditorFooter", () => {
     expect(controller.acceptAllLineEdits).toHaveBeenCalled();
   });
 
+  it("shows the A / S / B version toggle on the edit bar and routes the click (#2561)", async () => {
+    const controller = {
+      lineEdits: { remaining: 2, index: 1 },
+      meta: null,
+      generating: false,
+      lineEditView: "now" as const,
+      setLineEditView: vi.fn(),
+    };
+    render(EditorFooter, { props: props({ lineEditReview: controller }) });
+    expect(screen.getByTestId("review-view-now").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("review-view-proposed").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByTestId("review-view-proposed").getAttribute("title")).toContain("Alt+S");
+    await fireEvent.click(screen.getByTestId("review-view-proposed"));
+    expect(controller.setLineEditView).toHaveBeenCalledWith("proposed");
+    await fireEvent.click(screen.getByTestId("review-view-both"));
+    expect(controller.setLineEditView).toHaveBeenCalledWith("both");
+  });
+
   it("renders the note bar (not the edit bar) while lore-check notes are pending, and routes its buttons", async () => {
     const controller = {
       lineEdits: null,

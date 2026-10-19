@@ -93,6 +93,38 @@
   cursor: pointer;
 }
 
+/* Reading one version whole (#2561): Alt+A / Alt+S / Alt+B (or the review bar)
+   set a class on the editor root - `review-view-now` / `review-view-proposed`,
+   nothing for both. Scoped to `.line-edit`'s own marks and widgets, so a
+   snapshot overlay's `.r-now` / `.r-was` is untouched. ProseMirror merges the
+   passage and its `.r-now` run into one span per word, so `.line-edit.r-now`
+   is the same element as `.line-edit`; the current-item tint stays in both.
+   Current: the proposed words go, the going words read as plain text. */
+.editor-body.review-view-now .line-edit-added {
+  display: none;
+}
+.editor-body.review-view-now .line-edit.r-now,
+.editor-body.review-view-now .line-edit .r-now {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+/* Proposed: the going words go, the coming ones read as plain prose. */
+.editor-body.review-view-proposed .line-edit.r-now,
+.editor-body.review-view-proposed .line-edit .r-now {
+  display: none;
+}
+.editor-body.review-view-proposed .line-edit-added {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  cursor: inherit;
+}
+.editor-body.review-view-now .line-edit-current.r-now,
+.editor-body.review-view-now .line-edit-current .r-now {
+  background: var(--accent-soft);
+}
+
 /* The current edit's decision card (#2460; editor-core/lineEditCard.ts). Narrow
    pane: a block under the paragraph, in the flow. `-wide` (set by the plugin when
    the frame has room right of the prose column): out of flow in the margin, at

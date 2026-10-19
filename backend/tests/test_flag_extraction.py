@@ -206,6 +206,13 @@ class FlagExtractionTests(unittest.TestCase):
         self.assertIn(f"<scene_text>\n{SCENE}\n</scene_text>", cue)
         self.assertIn("LAST reply", cue)
 
+    def test_the_cue_has_the_alternatives_rule(self) -> None:
+        _, mock_chat = self._extract(_reply(_flags()))
+        cue = mock_chat.await_args.args[1].messages[-1].content
+        self.assertIn("offered alternatives for the same problem", cue)
+        self.assertIn("make no edit for any of them", cue)
+        self.assertIn("put ONE note on the passage", cue)
+
     def test_one_trace_record_per_call(self) -> None:
         self._extract(_reply(_flags(edits=[{"find": "a", "replace": "b", "reason": ""}])))
         traces = self._traces()

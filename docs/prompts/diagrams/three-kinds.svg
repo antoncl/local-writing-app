@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 296" role="img" aria-label="Three columns. Read: entry(x).rank reads a value and you print it, the value lands in your text. Choose: use(x) prints nothing; the app adds the entry to what the AI sees, in its own place, once. Print: story_so_far(scene) prints a ready-made block of text where you write it."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="356" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Three kinds of call</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">what each leaves behind where you write it</text>
+<text x="0" y="68" class="l" font-size="12.5" fill="var(--text,#242424)" font-weight="600">Read a value</text>
+<rect x="0" y="80" width="270" height="40" rx="5" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="12" y="105" class="m" font-size="11" fill="var(--text,#242424)">{{ entry(inputs.character).rank }}</text>
+<path d="M135 120 V146" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<path d="M130 140 L135 148 L140 140" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<rect x="0" y="150" width="270" height="66" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="12" y="174" class="l" font-size="11.5" fill="var(--text,#242424)">The value lands in your text</text>
+<text x="12" y="196" class="m" font-size="10.5" fill="var(--text-3,#74817b)">… ranked Captain …</text>
+<text x="0" y="242" class="m" font-size="10.5" fill="var(--text-3,#74817b)">also original, fields, pov, todos …</text>
+<text x="295" y="68" class="l" font-size="12.5" fill="var(--accent-strong,#234e43)" font-weight="600">Choose what the AI sees</text>
+<rect x="295" y="80" width="270" height="40" rx="5" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="307" y="105" class="m" font-size="11" fill="var(--text,#242424)">{% do use(inputs.character) %}</text>
+<path d="M430 120 V146" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<path d="M425 140 L430 148 L435 140" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<rect x="295" y="150" width="270" height="66" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="307" y="174" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)">Nothing here — the app places the entry</text>
+<text x="307" y="196" class="m" font-size="10.5" fill="var(--text-3,#74817b)">with the lore, sent once</text>
+<text x="295" y="242" class="m" font-size="10.5" fill="var(--text-3,#74817b)">also auto_lore, no_lore, lore_as_of …</text>
+<text x="590" y="68" class="l" font-size="12.5" fill="var(--text,#242424)" font-weight="600">Print a ready-made block</text>
+<rect x="590" y="80" width="270" height="40" rx="5" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="602" y="105" class="m" font-size="11" fill="var(--text,#242424)">{{ story_so_far(scene) }}</text>
+<path d="M725 120 V146" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<path d="M720 140 L725 148 L730 140" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<rect x="590" y="150" width="270" height="66" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="602" y="174" class="l" font-size="11.5" fill="var(--text,#242424)">A whole block lands in your text</text>
+<text x="602" y="196" class="m" font-size="10.5" fill="var(--text-3,#74817b)">&lt;story_so_far&gt; … &lt;/story_so_far&gt;</text>
+<text x="590" y="242" class="m" font-size="10.5" fill="var(--text-3,#74817b)">also plot_context, character_turns …</text>
+<text x="0" y="282" class="l" font-size="11" fill="var(--text-2,#4d5753)">Choosing calls print nothing, so write them as {% do … %}. The reference groups every call under one of these three.</text>
+</svg>

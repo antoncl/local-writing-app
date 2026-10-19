@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 326" role="img" aria-label="A template on the left with a system block and a user block. Arrows lead to two messages on the right: a system message holding the instructions and the lore the app chose, and a user message holding the request and the scene. Unmarked text joins the system message."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="386" fill="var(--diagram-bg,#ffffff)"/>
+<text x="0" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">From template to messages</text>
+<text x="0" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">what you write, and what the AI receives</text>
+<text x="0" y="62" class="l" font-size="12.5" fill="var(--text,#242424)" font-weight="600">Your template</text>
+<rect x="0" y="72" width="350" height="208" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<rect x="12" y="84" width="326" height="40" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)" stroke-dasharray="4 3"/>
+<text x="24" y="108" class="m" font-size="11" fill="var(--text,#242424)">You are a careful line editor.</text>
+<text x="326" y="108" text-anchor="end" class="m" font-size="10.5" fill="var(--text-3,#74817b)">no role</text>
+<rect x="12" y="134" width="326" height="66" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="24" y="154" class="m" font-size="11" fill="var(--accent-strong,#234e43)">{% role "system" %}</text>
+<text x="24" y="172" class="m" font-size="11" fill="var(--text,#242424)">{% include "Project settings" %}</text>
+<text x="24" y="190" class="m" font-size="11" fill="var(--text,#242424)">{% do use(inputs.lore) %}</text>
+<rect x="12" y="210" width="326" height="58" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="24" y="232" class="m" font-size="11" fill="var(--accent-strong,#234e43)">{% role "user" %}</text>
+<text x="24" y="252" class="m" font-size="11" fill="var(--text,#242424)">Tighten this: {{ selection }}</text>
+<path d="M338 104 H430 M338 166 H430 M430 104 V166 M430 120 H504" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<path d="M498 115 L506 120 L498 125" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<path d="M338 190 H462 V172 H516" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5" stroke-dasharray="5 4"/>
+<path d="M510 167 L518 172 L510 177" fill="none" stroke="var(--accent,#2f6f5e)" stroke-width="1.5"/>
+<text x="352" y="210" class="m" font-size="10.5" fill="var(--accent,#2f6f5e)">placed, not printed</text>
+<path d="M338 242 H504" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<path d="M498 237 L506 242 L498 247" fill="none" stroke="var(--border-strong,#b4c2bc)" stroke-width="1.5"/>
+<text x="510" y="62" class="l" font-size="12.5" fill="var(--text,#242424)" font-weight="600">What the AI receives</text>
+<rect x="510" y="72" width="350" height="136" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="522" y="92" class="m" font-size="10.5" fill="var(--accent-strong,#234e43)" font-weight="600">system</text>
+<text x="522" y="112" class="l" font-size="11.5" fill="var(--text,#242424)">You are a careful line editor.</text>
+<text x="522" y="130" class="l" font-size="11.5" fill="var(--text-2,#4d5753)">Use British spelling. Write in the past tense.</text>
+<rect x="522" y="142" width="326" height="54" rx="5" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="534" y="164" class="l" font-size="11.5" fill="var(--accent-strong,#234e43)" font-weight="600">Lore, added by the app</text>
+<text x="534" y="184" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Honor · the Fearless — each entry once</text>
+<rect x="510" y="218" width="350" height="50" rx="5" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="522" y="238" class="m" font-size="10.5" fill="var(--accent-strong,#234e43)" font-weight="600">user</text>
+<text x="522" y="256" class="l" font-size="11.5" fill="var(--text,#242424)">Tighten this: The rain came down hard on the deck…</text>
+<text x="0" y="300" class="l" font-size="11" fill="var(--text-2,#4d5753)">Text with no role joins the default one, usually system. Lore you choose is added after your instructions,</text>
+<text x="0" y="318" class="l" font-size="11" fill="var(--text-2,#4d5753)">so what rarely changes is sent first and can be reused cheaply from one run to the next.</text>
+</svg>

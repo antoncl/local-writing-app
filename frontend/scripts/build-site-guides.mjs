@@ -20,7 +20,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Marked } from "marked";
+import { Marked, Parser } from "marked";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, ".."); // frontend/
@@ -47,8 +47,11 @@ function slugify(text) {
     .replace(/^-+|-+$/g, "");
 }
 
-const ENTITIES = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" };
-const textOf = (html) => html.replace(/<[^>]+>/g, "").replace(/&(amp|lt|gt|quot|#39);/g, (e) => ENTITIES[e]);
+// Plain text always comes from marked's text renderer over the tokens, never by
+// stripping tags out of rendered HTML — that is an incomplete sanitizer (CodeQL
+// js/incomplete-multi-character-sanitization). Text reaching a page is escaped.
+const plainParser = new Parser();
+const plainText = (tokens) => plainParser.parseInline(tokens, plainParser.textRenderer);
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 const ids = new Set(guides.map((g) => g.id));
@@ -72,7 +75,7 @@ function render(markdown) {
     renderer: {
       heading({ tokens, depth }) {
         const inner = this.parser.parseInline(tokens);
-        const base = slugify(textOf(inner));
+        const base = slugify(plainText(tokens));
         const n = seen.get(base) ?? 0;
         seen.set(base, n + 1);
         const id = n === 0 ? base : `${base}-${n}`;
@@ -149,10 +152,11 @@ ${body}
 }
 
 /** A guide's pitch for the index: its first prose paragraph (a boxed aside such
- *  as "> User guide." is skipped), cut at a sentence end near 200 characters. */
-function pitch(html) {
-  const p = html.replace(/<blockquote>[\s\S]*?<\/blockquote>/g, "").match(/<p>([\s\S]*?)<\/p>/);
-  const text = p ? textOf(p[1]).replace(/\s+/g, " ").trim() : "";
+ *  as "> User guide." is nested in a blockquote token, so it is skipped), cut at
+ *  a sentence end near 200 characters. */
+function pitch(markdown) {
+  const p = new Marked().lexer(markdown).find((token) => token.type === "paragraph");
+  const text = p ? plainText(p.tokens).replace(/\s+/g, " ").trim() : "";
   if (text.length <= 220) return text;
   const cut = text.slice(0, 220).match(/^.*[.!?](?=\s)/);
   return cut ? cut[0] : `${text.slice(0, 200).trimEnd()}…`;
@@ -164,7 +168,7 @@ mkdirSync(outDir, { recursive: true });
 const cards = [];
 for (const guide of guides) {
   const body = render(guide.markdown);
-  const description = pitch(body);
+  const description = pitch(guide.markdown);
   writeFileSync(resolve(outDir, `${guide.id}.html`), page({ title: guide.title, description, body, currentId: guide.id }));
   cards.push({ guide, description });
 }

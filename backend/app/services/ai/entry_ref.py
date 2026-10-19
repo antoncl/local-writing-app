@@ -453,12 +453,12 @@ def template_json_value(value: Any) -> Any:
     value. One rule: **a node expands unless it is inside another node.** The node
     you pipe — alone, or in a list or dict you built — is an object of the fields
     a template can read off it (`id`, `title`, `entry_type`, `metadata`, `body`);
-    the project is its `title` and `metadata`. Inside a node's metadata a
-    referenced node is its title, which keeps the dump bounded and cycle-free
-    (pipe that field to see it). An unresolved node is its id."""
+    the project is its `title` and `metadata`. Inside a node's metadata — and for
+    a node that no longer resolves — a node is just its `id` and `title`, which
+    keeps the dump bounded and cycle-free (pipe that field to see it)."""
     if isinstance(value, EntryRef):
         if not value.found:
-            return value.id
+            return _json_node_stub(value)
         return {
             "id": value.id,
             "title": value.title,
@@ -474,12 +474,21 @@ def template_json_value(value: Any) -> Any:
 
 
 def _json_inside_node(value: Any) -> Any:
-    """A value inside a node's metadata: a referenced node is its title."""
-    if isinstance(value, (EntryRef, ProjectInfoRef)):
+    """A value inside a node's metadata: a referenced node is its stub."""
+    if isinstance(value, EntryRef):
+        return _json_node_stub(value)
+    if isinstance(value, ProjectInfoRef):
         return str(value)
     if isinstance(value, (_EntryMetadataView, _GroupView)):
         return {key: _json_inside_node(value[key]) for key in value}
     return _json_container(value, _json_inside_node)
+
+
+def _json_node_stub(ref: EntryRef) -> dict[str, str]:
+    """A node in brief: the first two keys of its full dump, and both paths a
+    template can read off it (`scene.pov.id`, `scene.pov.title`). An unresolved
+    node's title falls back to its id, as `.title` does."""
+    return {"id": ref.id, "title": ref.title}
 
 
 def _json_container(value: Any, item: Callable[[Any], Any]) -> Any:

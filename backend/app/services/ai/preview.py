@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date as _date_cls
@@ -44,7 +43,6 @@ from app.services.ai.selector_eval import (
 )
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
-from app.services.error_log import append_error_line
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore_mutations import SELECTION_START
 from app.services.tree_structure import TreeStructureService
@@ -668,7 +666,7 @@ def build_preview(
     }
 
     rendered = _render_or_preview_error(
-        project_service, template_source, context, env=env, default_role=default_role
+        template_source, context, env=env, default_role=default_role
     )
 
     # #1544 option c: the coercion chain's soft-fail warnings (an unsupported
@@ -936,7 +934,6 @@ def _include_line(source: str, name: str | None) -> int | None:
 
 
 def _render_or_preview_error(
-    project_service: Any,
     template_source: str,
     context: dict[str, Any],
     *,
@@ -954,24 +951,18 @@ def _render_or_preview_error(
     except ProjectServiceError:
         raise
     except Exception as exc:  # noqa: BLE001 — a template is author code (#2552)
-        _raise_preview_error_from_render(exc, project_service)
+        _raise_preview_error_from_render(exc)
 
 
-def _raise_preview_error_from_render(exc: Exception, project_service: Any) -> NoReturn:
+def _raise_preview_error_from_render(exc: Exception) -> NoReturn:
     """Translate any non-Jinja exception a render raised into a `PreviewError`
     (#2552). A template is author code: `{{ 1 / 0 }}`, or a helper or filter
     given a value it can't take, is the author's error to see in the pane at its
-    line — never a bare 500. It is still recorded in `errors.log`, so a genuine
-    helper bug surfaced this way stays as visible as the 500 used to make it."""
-    root = project_service.root_path
-    if root is not None:
-        append_error_line(
-            root,
-            origin="backend",
-            message=f"template render raised {type(exc).__name__}: {exc}",
-            detail="".join(traceback.format_exception(exc)),
-            context="build_preview",
-        )
+    line — never a bare 500. Like the other author errors it stays out of the
+    curated `errors.log` (the preview re-renders on every edit); its traceback
+    goes to `app.log`, so a genuine helper bug surfaced this way is still on
+    record."""
+    logger.warning("template render raised %s", type(exc).__name__, exc_info=exc)
     raise PreviewError(
         f"{type(exc).__name__}: {exc}", 422, line=_template_line(exc), kind="other"
     ) from exc

@@ -8,6 +8,7 @@ is part of the public surface.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from app.services.body_text import story_text
@@ -446,16 +447,15 @@ class ProjectInfoRef:
         return self._info is not None
 
 
-
-def template_json_default(value: Any) -> Any:
-    """`json.dumps` fallback for the `| json` filter (#2552): the JSON shape of a
-    template-facing wrapper, so `| json` never fails on a value a template holds
-    and doubles as a way to see what a node offers. The node you pipe is an
-    object of the fields a template can read off it — `id`, `title`,
-    `entry_type`, `metadata`, `body` (the project: its `title` and `metadata`);
-    a node it *references* stays its title, which keeps the dump bounded and
-    cycle-free (pipe that field to see it). A metadata or group view is an
-    object; anything else is what a bare `{{ value }}` prints."""
+def template_json_value(value: Any) -> Any:
+    """The JSON shape of a value a template pipes through `| json` (#2552), built
+    top-down so what expands never depends on how `json.dumps` happens to reach a
+    value. One rule: **a node expands unless it is inside another node.** The node
+    you pipe — alone, or in a list or dict you built — is an object of the fields
+    a template can read off it (`id`, `title`, `entry_type`, `metadata`, `body`);
+    the project is its `title` and `metadata`. Inside a node's metadata a
+    referenced node is its title, which keeps the dump bounded and cycle-free
+    (pipe that field to see it). An unresolved node is its id."""
     if isinstance(value, EntryRef):
         if not value.found:
             return value.id
@@ -463,23 +463,37 @@ def template_json_default(value: Any) -> Any:
             "id": value.id,
             "title": value.title,
             "entry_type": value.entry_type,
-            "metadata": _json_inner(value.metadata),
+            "metadata": _json_inside_node(value.metadata),
             "body": value.body,
         }
     if isinstance(value, ProjectInfoRef):
-        return {"title": value.title, "metadata": _json_inner(value.metadata)}
-    return _json_inner(value)
-
-
-def _json_inner(value: Any) -> Any:
-    """A value inside a node's dump: views become objects, lists and dicts
-    recurse, and a referenced node is its title."""
+        return {"title": value.title, "metadata": _json_inside_node(value.metadata)}
     if isinstance(value, (_EntryMetadataView, _GroupView)):
-        return {key: _json_inner(value[key]) for key in value}
-    if isinstance(value, dict):
-        return {key: _json_inner(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_inner(item) for item in value]
+        return _json_inside_node(value)
+    return _json_container(value, template_json_value)
+
+
+def _json_inside_node(value: Any) -> Any:
+    """A value inside a node's metadata: a referenced node is its title."""
+    if isinstance(value, (EntryRef, ProjectInfoRef)):
+        return str(value)
+    if isinstance(value, (_EntryMetadataView, _GroupView)):
+        return {key: _json_inside_node(value[key]) for key in value}
+    return _json_container(value, _json_inside_node)
+
+
+def _json_container(value: Any, item: Callable[[Any], Any]) -> Any:
+    """Scalars as JSON has them; a mapping is an object and any other iterable
+    (a list, a Jinja `map`/`select` generator, `dict_keys`) an array, each member
+    shaped by `item`; anything else is what a bare `{{ value }}` prints."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, Mapping):
+        return {_json_key(key): item(member) for key, member in value.items()}
+    if isinstance(value, Iterable):
+        return [item(member) for member in value]
     return str(value)
+
+
+def _json_key(key: Any) -> Any:
+    return key if key is None or isinstance(key, (str, int, float, bool)) else str(key)

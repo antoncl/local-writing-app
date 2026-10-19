@@ -578,9 +578,11 @@ Known facts: {{ entry(inputs.character).metadata | json }}
 
 A node prints as an object of everything a prompt can read from it — `id`,
 `title`, `entry_type`, `metadata` and `body` — so `{{ scene | json }}` in the
-preview is a quick way to see what a scene offers. A node it refers to shows as
-that node's title; print that field the same way to see inside it. `project | json`
-gives the project's `title` and `metadata`.
+preview is a quick way to see what a scene offers. That holds wherever the node
+sits in what you print (alone, in a list, in a dict you built), except inside
+another node: a node that a field refers to shows as its title, so print that
+field the same way to see inside it. `project | json` gives the project's `title`
+and `metadata`.
 
 ## Tags
 

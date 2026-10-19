@@ -1158,6 +1158,19 @@ class JsonFilterTests(_HelperFixtureBase):
         nodes = self._json(f"[entry('{self.honor['id']}'), entry('{self.nimitz['id']}')]")
         self.assertEqual([n["title"] for n in nodes], ["Honor Harrington", "Nimitz"])
 
+    def test_a_node_inside_a_dict_you_built_expands_too(self) -> None:
+        # The one rule: a node expands unless it is inside another node.
+        dumped = self._json(f"{{'who': entry('{self.honor['id']}')}}")
+        self.assertEqual(dumped["who"]["title"], "Honor Harrington")
+        self.assertEqual(dumped["who"]["metadata"]["related_entries"], ["Nimitz"])
+
+    def test_generators_and_key_views_dump_as_arrays(self) -> None:
+        # Jinja's map/select return generators and `.keys()` a view — both are
+        # arrays, not their Python repr.
+        nodes = f"[entry('{self.honor['id']}'), entry('{self.nimitz['id']}')]"
+        self.assertEqual(self._json(nodes + " | map(attribute='title')"), ["Honor Harrington", "Nimitz"])
+        self.assertIn("related_entries", self._json(f"entry('{self.honor['id']}').metadata.keys()"))
+
     def test_an_unresolved_node_dumps_as_its_id(self) -> None:
         self.assertEqual(self._json("entry('lore_missing')"), "lore_missing")
 

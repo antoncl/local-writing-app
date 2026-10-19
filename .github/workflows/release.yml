@@ -400,6 +400,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create/update releases and move the `nightly` tag
+      actions: write    # start pages.yml after a stable release (#2556)
     steps:
       - uses: actions/checkout@v5
         with:
@@ -452,6 +453,18 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --title "$GITHUB_REF_NAME" \
             --notes "Frozen builds for $GITHUB_REF_NAME. Unsigned; macOS is experimental."
+
+      # Republish the website so its guides describe this release (#2556). The
+      # github-pages environment deploys from master only, so start pages.yml on
+      # master rather than deploying from this tag's run. A GITHUB_TOKEN may start
+      # a workflow_dispatch; the `release: published` event it raises above would
+      # not start another workflow.
+      - name: Republish the website's guides
+        if: needs.gate.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh workflow run pages.yml --ref master
 
       - name: Publish/update the rolling nightly prerelease
         if: needs.gate.outputs.channel == 'nightly'

@@ -25,7 +25,7 @@
       <a class="btn btn-solid" id="download-cta" href="download.html">Download</a>
       <a class="btn btn-outline" href="https://github.com/antoncl/local-writing-app">View on GitHub</a>
     </div>
-    <p class="cta-note">Free and open source (MIT) · <a href="download.html">Windows, macOS, and Linux</a></p>
+    <p class="cta-note">Free and open source (MIT) · <a href="download.html">Windows, macOS, and Linux</a> · <a href="guides/index.html">Read the guides</a></p>
     <figure class="shot">
       <img src="assets/editor.png" alt="The manuscript tree, a scene open in the editor, and the metadata rail" width="1600" height="1000">
       <figcaption>The manuscript tree, a scene in the editor, and its metadata — all of it plain files on your disk.</figcaption>
@@ -43,7 +43,7 @@
       </div>
       <div class="pillar">
         <h3>Fully offline, plain files</h3>
-        <p>Scenes and lore are Markdown with YAML front matter; structure is a handful of YAML files. You can read, grep, diff, and version-control a project without this app. With a local model via Ollama, even the AI runs with the network switched off.</p>
+        <p>Scenes and lore are Markdown with YAML front matter; settings are a handful of YAML files. You can read, grep, diff, and version-control a project without this app. With a local model via Ollama, even the AI runs with the network switched off.</p>
       </div>
       <div class="pillar">
         <h3>AI as a tool, not a ghostwriter</h3>
@@ -59,27 +59,39 @@
     <div class="features">
       <div class="feature">
         <h3>Manuscript</h3>
-        <p>Acts, chapters, and scenes with drag-reordering. Scenes are Markdown files behind a WYSIWYG editor; identity lives in front matter, so renaming files never breaks anything.</p>
+        <p>Acts, chapters, and scenes — or whatever levels you name — with drag-reordering. Scenes are Markdown files behind a WYSIWYG editor; point of view and tense set on a chapter carry down to its scenes.</p>
       </div>
       <div class="feature">
         <h3>Lore</h3>
-        <p>Characters, places, and anything else — typed entries with fields, tags, references, and backlinks. Mid-scene mutations let a fact change partway through the story, with a timeline showing the effective state at any point.</p>
+        <p>Characters, places, and anything else — typed entries with fields, tags, references, and backlinks. Mutation sets let a fact change partway through the story, with a timeline showing the effective state at any point.</p>
       </div>
       <div class="feature">
         <h3>Plot boards</h3>
-        <p>Plotlines and cards laid out against the manuscript, so structure is something you can see and rearrange, not just imagine.</p>
+        <p>Plotlines and cards laid out against the manuscript, so structure is something you can see and rearrange, not just imagine. Decks and templates give you a starting shape.</p>
       </div>
       <div class="feature">
         <h3>Views</h3>
-        <p>Every list is backed by a small set-algebra query — union, intersection, relational nesting over lore links — authored in a drag-and-drop designer, with parameters, grouping, and trees.</p>
+        <p>Every list is backed by a small set-algebra query — union, intersection, filters, relational nesting over lore links — authored in a drag-and-drop designer, with parameters, grouping, and trees.</p>
       </div>
       <div class="feature">
         <h3>Layered metadata schema</h3>
-        <p>Model world / series / book levels purely by folder depth: nearer schema layers override farther ones, and node types, fields, and inheritance are authored in-app.</p>
+        <p>Model world / series / book levels purely by folder depth: a book inherits the layers it declares, nearer ones override farther ones, and node types, fields, and inheritance are authored in-app.</p>
       </div>
       <div class="feature">
         <h3>AI, when you want it</h3>
-        <p>Anthropic, OpenAI, OpenRouter, or local models via Ollama. Prompts are Jinja2 templates stored as project files; chats are project nodes; per-call token and cost accounting rolls up to a project total.</p>
+        <p>Anthropic, OpenAI, OpenRouter, or local models via Ollama. A built-in library of prompts — Draft scene, Continue, line edits, brainstorms — that are Jinja2 templates you can read and clone. Lore is fitted to a budget you set, and every call's token cost rolls up to a project total.</p>
+      </div>
+      <div class="feature">
+        <h3>Revising</h3>
+        <p>A lore check pins notes to the exact words that contradict your lore, as of that point in the story. Line edits arrive as diffs to accept or reject. Change an entry, and Propagate finds what depends on it.</p>
+      </div>
+      <div class="feature">
+        <h3>Roleplay</h3>
+        <p>Characters take turns in a scene, each in their own voice and with private thoughts; a finalize pass turns the exchange into prose.</p>
+      </div>
+      <div class="feature">
+        <h3>A manual built in</h3>
+        <p><a href="guides/index.html">Guides</a> for everything from your first scene to writing your own prompts — here, and in the app under Help → Guides. Updates arrive in-app on a Stable or Nightly channel.</p>
       </div>
     </div>
     <figure class="shot">
@@ -98,21 +110,21 @@
     <h2>A project is a folder</h2>
     <p class="lede">Everything the app knows about your story lives in files you can open in any editor. Caches are disposable; credentials never enter the project, so a folder is safe to commit or share.</p>
     <pre class="tree">my-novel/
-├─ project.yaml               <span class="c"># manifest: title, AI policy, UI preferences</span>
-├─ manuscript.structure.yaml  <span class="c"># act / chapter / scene ordering</span>
+├─ project.yaml               <span class="c"># manifest: title, what it inherits</span>
+├─ project.md                 <span class="c"># the book itself: blurb, settings</span>
 ├─ metadata.schema.yaml       <span class="c"># this layer's schema contributions</span>
 ├─ todo.yaml
 ├─ scenes/                    <span class="c"># Markdown + YAML front matter</span>
-├─ lore/
+├─ lore/  research/  tags/  plot/
 ├─ prompts/                   <span class="c"># Jinja2 templates, editable in-app</span>
-├─ research/  chats/  views/
+├─ chats/  views/  mutation-sets/  snapshots/
 └─ .cache/                    <span class="c"># disposable, always rebuildable</span></pre>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <p>MIT licensed · <a href="https://github.com/antoncl/local-writing-app">Source on GitHub</a> · <a href="https://github.com/antoncl/local-writing-app/issues">Issues</a></p>
+    <p>MIT licensed · <a href="guides/index.html">Guides</a> · <a href="https://github.com/antoncl/local-writing-app">Source on GitHub</a> · <a href="https://github.com/antoncl/local-writing-app/issues">Issues</a></p>
   </div>
 </footer>
 

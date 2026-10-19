@@ -16,6 +16,7 @@
     <a class="home" href="index.html">Local Writing App</a>
     <nav>
       <a href="download.html">All downloads</a>
+      <a href="guides/index.html">Guides</a>
       <a href="https://github.com/antoncl/local-writing-app">GitHub</a>
     </nav>
   </div>
@@ -54,7 +55,7 @@
 cd local-writing-app-linux-x64-server
 sudo ./install-server.sh</pre>
     <p class="arch-note">On ARM64 (e.g. a Raspberry Pi), replace <code>x64</code> with <code>arm64</code> in both commands.</p>
-    <p style="margin-top: 14px;">When it finishes, it prints the LAN address to open, e.g. <code>http://192.168.1.20:8787</code>. Change the port by exporting <code>LWA_PORT</code> before running the installer.</p>
+    <p style="margin-top: 14px;">When it finishes, it prints the LAN address to open, e.g. <code>http://192.168.1.20:8787</code>. For a different port, run the installer as <code>LWA_PORT=9000 sudo -E ./install-server.sh</code>.</p>
   </div>
 </div>
 
@@ -73,6 +74,7 @@ sudo ./install-server.sh</pre>
     <pre class="cmd">systemctl status local-writing-app      <span class="c"># is it running?</span>
 journalctl -u local-writing-app -f      <span class="c"># follow the logs</span>
 sudo systemctl disable --now local-writing-app   <span class="c"># stop &amp; uninstall service</span></pre>
+    <p style="margin-top: 14px;">AI provider keys normally go in the system keychain. A headless box usually has none, so there they're saved in the app's <code>config.yaml</code> instead; the Settings dialog says which.</p>
   </div>
 </div>
 

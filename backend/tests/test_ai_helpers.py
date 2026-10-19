@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from mutation_helpers import save_scenes_with_mutations
 
@@ -1135,6 +1137,22 @@ class JsonFilterTests(_HelperFixtureBase):
         # Member order preserved (b before a); `<`, `>`, `&`, `'` NOT \uXXXX-escaped
         # the way Jinja's built-in `tojson` would.
         self.assertEqual(out.messages[0].text, '{"b": 1, "a": "<x> & \'y\'"}')
+
+    def _json(self, expr: str) -> Any:
+        env = create_environment_for_project(self.service)
+        out = render_template('{% role "system" %}{{ ' + expr + " | json }}{% endrole %}", context={}, env=env)
+        return json.loads(out.messages[0].text)
+
+    def test_a_node_quotes_as_its_title_like_a_bare_print(self) -> None:
+        # `{{ node }}` prints the title; `{{ node | json }}` quotes the same thing.
+        self.assertEqual(self._json(f"entry('{self.honor['id']}')"), "Honor Harrington")
+
+    def test_metadata_quotes_as_an_object_with_its_references_as_titles(self) -> None:
+        # The reference doc's own example (`entry(x).metadata | json`): the view
+        # is an object, and an entity_ref_list field inside it lists titles.
+        metadata = self._json(f"entry('{self.honor['id']}').metadata")
+        self.assertIsInstance(metadata, dict)
+        self.assertEqual(metadata["related_entries"], ["Nimitz"])
 
 
 class FullOutlineTests(_HelperFixtureBase):

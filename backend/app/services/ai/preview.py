@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date as _date_cls
@@ -43,6 +44,7 @@ from app.services.ai.selector_eval import (
 )
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+from app.services.error_log import append_error_line
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore_mutations import SELECTION_START
 from app.services.tree_structure import TreeStructureService
@@ -665,12 +667,9 @@ def build_preview(
         "date": _DateProxy(_date_cls.today()),
     }
 
-    try:
-        rendered = render_template(
-            template_source, context=context, env=env, default_role=default_role
-        )
-    except TemplateError as exc:
-        _raise_preview_error_from_template(exc, context, template_source)
+    rendered = _render_or_preview_error(
+        project_service, template_source, context, env=env, default_role=default_role
+    )
 
     # #1544 option c: the coercion chain's soft-fail warnings (an unsupported
     # selector expr / roster kind contributed no members) ride along on the
@@ -934,6 +933,61 @@ def _include_line(source: str, name: str | None) -> int | None:
         if "{%" in text and "include" in text and (f'"{name}"' in text or f"'{name}'" in text):
             return i
     return None
+
+
+def _render_or_preview_error(
+    project_service: Any,
+    template_source: str,
+    context: dict[str, Any],
+    *,
+    env: Any,
+    default_role: str | None,
+) -> RenderedTemplate:
+    """Render the template; every author-side failure leaves as a `PreviewError`.
+    Jinja's own errors keep their line/kind translation; any other exception the
+    render raises is author code failing too (#2552). A domain failure passes
+    through untouched — it already has its HTTP response (e.g. ADR-0045's 409)."""
+    try:
+        return render_template(template_source, context=context, env=env, default_role=default_role)
+    except TemplateError as exc:
+        _raise_preview_error_from_template(exc, context, template_source)
+    except ProjectServiceError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a template is author code (#2552)
+        _raise_preview_error_from_render(exc, project_service)
+
+
+def _raise_preview_error_from_render(exc: Exception, project_service: Any) -> NoReturn:
+    """Translate any non-Jinja exception a render raised into a `PreviewError`
+    (#2552). A template is author code: `{{ 1 / 0 }}`, or a helper or filter
+    given a value it can't take, is the author's error to see in the pane at its
+    line — never a bare 500. It is still recorded in `errors.log`, so a genuine
+    helper bug surfaced this way stays as visible as the 500 used to make it."""
+    root = project_service.root_path
+    if root is not None:
+        append_error_line(
+            root,
+            origin="backend",
+            message=f"template render raised {type(exc).__name__}: {exc}",
+            detail="".join(traceback.format_exception(exc)),
+            context="build_preview",
+        )
+    raise PreviewError(
+        f"{type(exc).__name__}: {exc}", 422, line=_template_line(exc), kind="other"
+    ) from exc
+
+
+def _template_line(exc: BaseException) -> int | None:
+    """The template line the exception was raised from: Jinja rewrites a render's
+    traceback so the template's own frames carry the `<template>` filename and
+    its line numbers. The innermost such frame is the failing expression."""
+    line = None
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == "<template>":
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return line
 
 
 def _raise_preview_error_from_template(

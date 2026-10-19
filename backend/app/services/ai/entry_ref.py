@@ -444,3 +444,14 @@ class ProjectInfoRef:
 
     def __bool__(self) -> bool:
         return self._info is not None
+
+
+def template_json_default(value: Any) -> Any:
+    """`json.dumps` fallback for the `| json` filter (#2552): the JSON shape of a
+    template-facing wrapper. A metadata or group view is an object (its values
+    recurse back through here, so a reference inside one lands as a title); any
+    other wrapper — a node (`EntryRef`), the project — quotes as what a bare
+    `{{ value }}` prints, so `| json` never fails on a value a template can hold."""
+    if isinstance(value, (_EntryMetadataView, _GroupView)):
+        return {key: value[key] for key in value}
+    return str(value)

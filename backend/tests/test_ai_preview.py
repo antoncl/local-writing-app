@@ -566,6 +566,23 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(body["error"]["message"], "Write a summary first.")
         self.assertIsNone(body["error"]["line"])
 
+    def test_a_python_error_raised_while_rendering_is_a_template_error_not_a_500(self) -> None:
+        """A template is author code: any exception its render raises — not only
+        Jinja's own — comes back as the pane's error, with the line, never a bare
+        500 (`{{ 1 / 0 }}` stands for every helper/filter that can raise)."""
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}\nfine\n{{ 1 / 0 }}\n{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        error = response.json()["error"]
+        self.assertEqual(error["kind"], "other")
+        self.assertIn("ZeroDivisionError", error["message"])
+        self.assertEqual(error["line"], 3)
+
     def test_template_syntax_error_returns_line_info_on_error(self) -> None:
         # Open `{{` with nothing after it — Jinja parse fails with lineno.
         # The endpoint returns 200 with error.kind="syntax" and error.line

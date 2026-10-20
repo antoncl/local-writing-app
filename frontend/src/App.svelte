@@ -112,6 +112,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { aiSpend } from "@/lib/stores/aiSpend.svelte";
+  import { readAloud } from "@/lib/stores/readAloud.svelte";
   import {
     openPromptsPane,
     openPlotTemplatesPane,
@@ -615,6 +616,8 @@
   // and which chat is currently open in an editor pane (active-row highlight).
   let chatSessionList = $derived($chatSessionsStore);
   let project = $derived(appState.name === "projectOpen" ? appState.project : null);
+  // Read aloud speaks in the project's resolved Language/Spelling, not the system's (#2570).
+  $effect(() => readAloud.setProjectLanguage(project?.metadata));
   // The declaration editor's rows (#417 slice 4b), fed to the breadcrumb popover
   // that replaced the Project pane's Inheritance section. The whole enumeration,
   // not the declared subset — the popover offers exactly the rows the breadcrumb

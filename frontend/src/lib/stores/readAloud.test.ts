@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
 import { ReadAloudHighlight } from "@/lib/editor-core/readAloudHighlight";
-import { FLAG_NOTE, ReadAloudController, type ReadAloudUtterance, type SpeechEngine } from "./readAloud.svelte";
+import { FLAG_NOTE, ReadAloudController, projectSpeechLang, voiceForLang, type ReadAloudUtterance, type SpeechEngine } from "./readAloud.svelte";
 
 const VOICES = [
   { name: "Ada", lang: "en-GB", voiceURI: "voice-ada" },
@@ -27,7 +27,7 @@ function makeHarness(stored: Record<string, string> = {}) {
   };
   const controller = new ReadAloudController({
     engine,
-    makeUtterance: (text) => ({ text, rate: 1, voice: null, onend: null, onerror: null }),
+    makeUtterance: (text) => ({ text, rate: 1, voice: null, lang: "", onend: null, onerror: null }),
     storage,
   });
   const finish = () => spoken[spoken.length - 1].onend?.();
@@ -228,5 +228,40 @@ describe("ReadAloudController", () => {
     reloaded.controller.setRate(0.8);
     reloaded.finish();
     expect(reloaded.spoken[1].rate).toBe(0.8);
+  });
+});
+
+describe("project language (a Danish system must not read English prose in a Danish voice)", () => {
+  it("takes the tag from Spelling first, then Language", () => {
+    expect(projectSpeechLang({ language: "en", spelling: "en_US" })).toBe("en-US");
+    expect(projectSpeechLang({ language: "en" })).toBe("en");
+    expect(projectSpeechLang({ language: "da" })).toBe("da");
+    expect(projectSpeechLang({})).toBeNull();
+    expect(projectSpeechLang(null)).toBeNull();
+  });
+
+  it("picks an exact voice, else the same language, else none", () => {
+    const voices = [
+      { name: "Helle", lang: "da-DK" },
+      { name: "Ada", lang: "en-GB" },
+      { name: "Bo", lang: "en_US" },
+    ];
+    expect(voiceForLang(voices, "en-US")?.name).toBe("Bo");
+    expect(voiceForLang(voices, "en-AU")?.name).toBe("Ada");
+    expect(voiceForLang(voices, "en")?.name).toBe("Ada");
+    expect(voiceForLang(voices, "fr")).toBeNull();
+    expect(voiceForLang(voices, null)).toBeNull();
+  });
+
+  it("speaks in the project's language with a matching voice unless one was picked", () => {
+    const h = makeHarness();
+    h.controller.setProjectLanguage({ language: "en", spelling: "en_US" });
+    const editor = makeEditor();
+    h.controller.start({ editor, docKey: "s1", from: 0, to: editor.state.doc.content.size, canFlag: true, markRange: vi.fn() });
+    expect(h.spoken[0].lang).toBe("en-US");
+    expect(h.spoken[0].voice).toEqual(VOICES[1]); // Bo, en-US — not Ada, who comes first
+    h.controller.setVoice("voice-ada");
+    h.finish();
+    expect(h.spoken[1].voice).toEqual(VOICES[0]); // the picked voice wins from the next sentence
   });
 });

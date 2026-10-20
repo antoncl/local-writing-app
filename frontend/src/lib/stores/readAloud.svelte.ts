@@ -22,6 +22,7 @@ export interface ReadAloudUtterance {
   text: string;
   rate: number;
   voice: unknown;
+  lang: string;
   onend: (() => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
 }
@@ -69,6 +70,32 @@ function defaultDeps(): ReadAloudDeps {
   };
 }
 
+/** The BCP 47 tag a reading speaks in, from the open project's resolved
+ *  Spelling (`en_US` → `en-US`, the more specific) or Language (`en`); null when
+ *  neither is set. Without it the browser falls back to the system language,
+ *  which reads English prose in, say, a Danish voice. */
+export function projectSpeechLang(metadata: Record<string, unknown> | null | undefined): string | null {
+  const spelling = metadata?.spelling;
+  if (typeof spelling === "string" && /^[a-z]{2,3}[_-][A-Za-z]{2}$/.test(spelling)) return spelling.replace("_", "-");
+  const language = metadata?.language;
+  if (typeof language === "string" && /^[a-z]{2,3}$/.test(language)) return language;
+  return null;
+}
+
+/** The first of `voices` that speaks `lang`: an exact tag match (`en-US`), else
+ *  the same language (`en-GB` for `en-US`, any `en-*` for `en`); null if none. */
+export function voiceForLang<V extends { lang: string }>(voices: V[], lang: string | null): V | null {
+  if (!lang) return null;
+  const norm = (tag: string) => tag.replace("_", "-").toLowerCase();
+  const want = norm(lang);
+  const primary = want.split("-")[0];
+  return (
+    voices.find((v) => norm(v.lang) === want) ??
+    voices.find((v) => norm(v.lang).split("-")[0] === primary) ??
+    null
+  );
+}
+
 /** Whether this browser can speak at all - the entries are not offered without it. */
 export function speechAvailable(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -85,6 +112,8 @@ export class ReadAloudController implements ReadAloudInput {
   voiceURI = $state("");
   voices = $state<Array<{ name: string; lang: string; voiceURI: string }>>([]);
   lastFlagAt = $state(0);
+  /** The open project's language as a BCP 47 tag (App sets it), or null. */
+  lang = $state<string | null>(null);
 
   #deps: ReadAloudDeps;
   #editor: Editor | null = null;
@@ -213,6 +242,12 @@ export class ReadAloudController implements ReadAloudInput {
     this.#savePref(RATE_KEY, rate === 1 ? null : String(rate));
   }
 
+  /** The open project's resolved fields (ProjectInfo.metadata): its Spelling /
+   *  Language decide the language a reading speaks in by default. */
+  setProjectLanguage(metadata: Record<string, unknown> | null | undefined): void {
+    this.lang = projectSpeechLang(metadata);
+  }
+
   setVoice(uri: string): void {
     this.voiceURI = uri;
     this.#savePref(VOICE_KEY, uri || null);
@@ -250,7 +285,12 @@ export class ReadAloudController implements ReadAloudInput {
     const generation = this.#generation;
     const utterance = this.#deps.makeUtterance(sentence.text);
     utterance.rate = this.rate;
-    utterance.voice = this.voiceURI ? this.#voiceObject(this.voiceURI) : null;
+    // A voice the writer picked wins; otherwise one that speaks the project's
+    // language, not whatever the system language's default happens to be.
+    utterance.voice = this.voiceURI
+      ? this.#voiceObject(this.voiceURI)
+      : voiceForLang(this.#deps.engine?.getVoices() ?? [], this.lang);
+    if (this.lang) utterance.lang = this.lang;
     utterance.onend = () => {
       if (generation !== this.#generation) return;
       if (this.index + 1 < this.#sentences.length) {

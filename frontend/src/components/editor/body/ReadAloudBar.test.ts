@@ -17,7 +17,7 @@ vi.mock("@/lib/stores/readAloud.svelte", async (importOriginal) => {
     resume: vi.fn(),
     getVoices: () => [{ name: "Ada", lang: "en-GB", voiceURI: "voice-ada" }],
   };
-  const makeUtterance = (text: string) => ({ text, rate: 1, voice: null, onend: null, onerror: null });
+  const makeUtterance = (text: string) => ({ text, rate: 1, voice: null, lang: "", onend: null, onerror: null });
   return { ...real, readAloud: new real.ReadAloudController({ engine, makeUtterance, storage: null }) };
 });
 

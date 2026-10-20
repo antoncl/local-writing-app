@@ -58,7 +58,7 @@
       {#each READ_ALOUD_RATES as rate (rate)}<option value={String(rate)}>{rate}×</option>{/each}
     </select>
     <select class="rab-select" data-testid="read-aloud-voice" aria-label="Voice" value={readAloud.voiceURI} onchange={(e) => readAloud.setVoice(e.currentTarget.value)}>
-      <option value="">System default</option>
+      <option value="">{readAloud.lang ? `Project language (${readAloud.lang})` : "System default"}</option>
       {#each readAloud.voices as voice (voice.voiceURI)}<option value={voice.voiceURI}>{voice.name} ({voice.lang})</option>{/each}
     </select>
   </span>

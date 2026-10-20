@@ -6,6 +6,8 @@
 // Rate and voice changes apply from the NEXT sentence (the one being spoken
 // finishes as it started) - restarting mid-sentence would repeat words.
 import type { Editor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
+import { ReplaceStep } from "@tiptap/pm/transform";
 import type { EditorView } from "@tiptap/pm/view";
 import { collectSentences, type ReadAloudSentence } from "@/lib/editor-core/readAloudText";
 import { setReadAloudHighlight, type ReadAloudInput } from "@/lib/editor-core/readAloudHighlight";
@@ -96,6 +98,13 @@ export function voiceForLang<V extends { lang: string }>(voices: V[], lang: stri
   );
 }
 
+/** Whether `tr` replaced the whole document (TipTap's setContent on a node
+ *  switch) rather than edited part of it. */
+function replacesWholeDoc(tr: Transaction): boolean {
+  const size = tr.before.content.size;
+  return tr.steps.some((step) => step instanceof ReplaceStep && step.from === 0 && step.to === size);
+}
+
 /** Whether this browser can speak at all - the entries are not offered without it. */
 export function speechAvailable(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -114,6 +123,9 @@ export class ReadAloudController implements ReadAloudInput {
   lastFlagAt = $state(0);
   /** The open project's language as a BCP 47 tag (App sets it), or null. */
   lang = $state<string | null>(null);
+  /** The text was edited while reading: the reading is paused, its sentence
+   *  positions are stale, and resuming reads on from the cursor. */
+  edited = $state(false);
 
   #deps: ReadAloudDeps;
   #editor: Editor | null = null;
@@ -122,8 +134,16 @@ export class ReadAloudController implements ReadAloudInput {
   #generation = 0; // bumped whenever speech is cancelled, so a stale `end` is ignored
   #suppress = false; // the flag's own mark must not stop the reading
   #current: ReadAloudUtterance | null = null; // held: some browsers drop a speaking utterance's events if it is collected
-  #onTransaction = ({ transaction }: { transaction: { docChanged: boolean } }) => {
-    if (transaction.docChanged && !this.#suppress) this.stop();
+  #end = 0; // where the reading ends, mapped through edits
+  #onTransaction = ({ transaction }: { transaction: Transaction }) => {
+    if (!transaction.docChanged || this.#suppress) return;
+    // A whole-document replace is a different document (a node switch): stop.
+    if (replacesWholeDoc(transaction)) {
+      this.stop();
+      return;
+    }
+    this.#end = transaction.mapping.map(this.#end, 1);
+    if (!this.edited) this.#pauseForEdit();
   };
   #onDestroy = () => this.stop();
   #onVoices = () => this.#refreshVoices();
@@ -149,6 +169,8 @@ export class ReadAloudController implements ReadAloudInput {
     if (!engine || sentences.length === 0) return false;
     this.#editor = opts.editor;
     this.#sentences = sentences;
+    this.#end = opts.to;
+    this.edited = false;
     this.#markRange = opts.markRange;
     this.docKey = opts.docKey;
     this.canFlag = opts.canFlag;
@@ -170,8 +192,62 @@ export class ReadAloudController implements ReadAloudInput {
 
   resume(): void {
     if (this.status !== "paused") return;
+    if (this.edited) {
+      this.restartFromCursor();
+      return;
+    }
     this.#deps.engine?.resume();
     this.status = "playing";
+  }
+
+  /** Read on from the cursor: from the start of the sentence it sits in, to the
+   *  reading's (edit-mapped) end - or to the end of the document when the cursor
+   *  is past it. Sentences are rebuilt, so edits made meanwhile are read as they
+   *  now stand. Stops when there is nothing left to read. */
+  restartFromCursor(): void {
+    const editor = this.#editor;
+    if (!editor || this.status === "idle") return;
+    // (No `$from` binding: a `$` name is reserved for runes in a .svelte.ts file.)
+    const selection = editor.state.selection;
+    const cursor = selection.from;
+    const paragraphStart = selection.$from.start();
+    const docEnd = editor.state.doc.content.size;
+    const to = cursor < this.#end ? Math.min(this.#end, docEnd) : docEnd;
+    // Collect from the cursor's paragraph so the sentence it sits in is read whole.
+    const sentences = collectSentences(editor.state.doc, paragraphStart, to).filter((s) => s.to > cursor);
+    if (sentences.length === 0) {
+      this.stop();
+      return;
+    }
+    this.#generation++;
+    if (this.status === "paused" && !this.edited) this.#deps.engine?.resume();
+    this.#deps.engine?.cancel();
+    this.#sentences = sentences;
+    this.#end = to;
+    this.total = sentences.length;
+    this.index = 0;
+    this.flaggedIndexes = [];
+    this.edited = false;
+    this.status = "playing";
+    this.#speakCurrent();
+  }
+
+  /** An edit mid-reading: silence the sentence being read and wait. The bar
+   *  stays; Resume (or From cursor) reads on from wherever the writer is now. */
+  #pauseForEdit(): void {
+    if (this.status === "idle") return;
+    this.#generation++;
+    if (this.status === "paused") this.#deps.engine?.resume(); // the engine's pause is global; clear it
+    this.#deps.engine?.cancel();
+    this.#current = null;
+    this.status = "paused";
+    this.edited = true;
+    // The old highlight no longer marks a sentence being read. Cleared after the
+    // edit's own transaction has finished dispatching.
+    const editor = this.#editor;
+    queueMicrotask(() => {
+      if (editor && !editor.isDestroyed && this.#editor === editor && this.edited) setReadAloudHighlight(editor.view, null);
+    });
   }
 
   togglePause(): void {
@@ -196,6 +272,7 @@ export class ReadAloudController implements ReadAloudInput {
     this.#current = null;
     this.#sentences = [];
     this.#markRange = null;
+    this.edited = false;
     this.status = "idle";
     this.docKey = null;
     this.index = 0;
@@ -207,7 +284,8 @@ export class ReadAloudController implements ReadAloudInput {
   /** Mark the sentence being read as a scene TODO; reading goes on. */
   flag(): void {
     const sentence = this.#sentences[this.index];
-    if (this.status === "idle" || !this.canFlag || !sentence || !this.#markRange) return;
+    // After an edit the sentence positions are stale: nothing to flag until reading resumes.
+    if (this.status === "idle" || this.edited || !this.canFlag || !sentence || !this.#markRange) return;
     if (this.flaggedIndexes.includes(this.index)) return;
     this.#suppress = true;
     let id: string | null;
@@ -223,7 +301,8 @@ export class ReadAloudController implements ReadAloudInput {
 
   /** Continue from the sentence containing doc position `pos` (ignored when none does). */
   jumpToPos(pos: number): void {
-    if (this.status === "idle") return;
+    // After an edit the click just places the cursor; Resume reads from there.
+    if (this.status === "idle" || this.edited) return;
     const target = this.#sentences.findIndex((s) => pos >= s.from && pos <= s.to);
     if (target < 0) return;
     this.#generation++;
@@ -264,6 +343,10 @@ export class ReadAloudController implements ReadAloudInput {
     // The key's position, not its character: Alt+Shift turns letters into other characters on macOS.
     if (event.code === "KeyP") {
       this.togglePause();
+      return true;
+    }
+    if (event.code === "KeyR") {
+      this.restartFromCursor();
       return true;
     }
     if (event.code === "KeyF" && this.canFlag) {

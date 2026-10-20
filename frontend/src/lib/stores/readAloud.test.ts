@@ -148,8 +148,8 @@ describe("ReadAloudController", () => {
     expect(markRange).not.toHaveBeenCalled();
   });
 
-  it("the flag's own mark does not stop the reading, but a user edit does", () => {
-    const { controller } = makeHarness();
+  it("the flag's own mark does not pause the reading, but a user edit does (#2572)", () => {
+    const { controller, engine } = makeHarness();
     const editor = makeEditor();
     const markRange = vi.fn((from: number, to: number) => {
       editor.view.dispatch(editor.state.tr.addMark(from, to, editor.state.schema.marks.bold.create()));
@@ -158,7 +158,47 @@ describe("ReadAloudController", () => {
     controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange });
     controller.flag();
     expect(controller.status).toBe("playing");
+    expect(controller.edited).toBe(false);
     editor.commands.insertContentAt(1, "x");
+    expect(controller.status).toBe("paused"); // paused, not stopped: the bar stays
+    expect(controller.edited).toBe(true);
+    expect(controller.docKey).toBe("s1");
+    expect(engine.cancel).toHaveBeenCalled(); // the stale sentence is silenced
+    controller.flag(); // positions are stale: no flag until reading resumes
+    expect(markRange).toHaveBeenCalledTimes(1);
+  });
+
+  it("resuming after an edit reads on from the cursor's sentence, as the text now stands", () => {
+    const { controller, spoken } = makeHarness();
+    const editor = makeEditor("<p>One. Two.</p><p>Three. Four.</p>");
+    controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    // Edit the second paragraph, leaving the cursor inside "Three."
+    editor.commands.setTextSelection(editor.state.doc.content.size - 9); // inside "Three."
+    editor.commands.insertContent("X");
+    expect(controller.edited).toBe(true);
+    controller.resume();
+    expect(controller.status).toBe("playing");
+    expect(controller.edited).toBe(false);
+    expect(spoken.at(-1)?.text).toBe("ThreXe."); // the sentence the cursor is in, whole, as edited
+    expect(controller.total).toBe(2); // that sentence and "Four." — not the start of the reading
+  });
+
+  it("From cursor (Alt+Shift+R) restarts at the cursor at any time", () => {
+    const { controller, spoken } = makeHarness();
+    const editor = makeEditor("<p>One. Two.</p><p>Three.</p>");
+    controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    editor.commands.setTextSelection(editor.state.doc.content.size - 3); // inside "Three."
+    const event = new KeyboardEvent("keydown", { key: "R", code: "KeyR", altKey: true, shiftKey: true });
+    expect(controller.handleKey(editor.view, event)).toBe(true);
+    expect(spoken.at(-1)?.text).toBe("Three.");
+    expect(controller.total).toBe(1);
+  });
+
+  it("a whole-document replace (a node switch) still stops the reading", () => {
+    const { controller } = makeHarness();
+    const editor = makeEditor();
+    controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    editor.commands.setContent("<p>Another document.</p>");
     expect(controller.status).toBe("idle");
   });
 

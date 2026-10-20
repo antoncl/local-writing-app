@@ -6,7 +6,8 @@
 
   Pure presentation over the readAloud controller. mousedown preventDefault
   keeps the editor focused, so the reading keys (Alt+Shift+P pause, Alt+Shift+F
-  flag, Esc stop) keep working after a click here.
+  flag, Alt+Shift+R from cursor, Esc stop) keep working after a click here.
+  An edit pauses the reading (#2572); Resume or From cursor reads on from the cursor.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -33,22 +34,30 @@
   const flagTitle = $derived(
     !readAloud.canFlag
       ? "Flags are scene TODOs — open a scene to flag"
-      : alreadyFlagged ? "This sentence is flagged" : "Flag this sentence as a TODO (Alt+Shift+F)",
+      : readAloud.edited
+        ? "Resume first — the text changed since this sentence was read"
+        : alreadyFlagged ? "This sentence is flagged" : "Flag this sentence as a TODO (Alt+Shift+F)",
+  );
+  const statusText = $derived(
+    readAloud.edited
+      ? "Paused · edited — Resume reads on from the cursor"
+      : `${paused ? "Paused" : "Reading aloud"} · sentence ${readAloud.index + 1} of ${readAloud.total}`,
   );
 </script>
 
 <div class="read-aloud-bar" data-testid="read-aloud-bar" role="toolbar" aria-label="Read aloud">
-  <span class="rab-status" data-testid="read-aloud-status">
-    {paused ? "Paused" : "Reading aloud"} · sentence {readAloud.index + 1} of {readAloud.total}
-  </span>
+  <span class="rab-status" data-testid="read-aloud-status">{statusText}</span>
   <span class="rab-group">
     <button type="button" class="rab-btn" data-testid="read-aloud-toggle" title={paused ? "Resume (Alt+Shift+P)" : "Pause (Alt+Shift+P)"} onmousedown={keepFocus} onclick={() => readAloud.togglePause()}>
       {paused ? "Resume" : "Pause"} <kbd>Alt+Shift+P</kbd>
     </button>
+    <button type="button" class="rab-btn" data-testid="read-aloud-from-cursor" title="Read on from the cursor (Alt+Shift+R)" onmousedown={keepFocus} onclick={() => readAloud.restartFromCursor()}>
+      From cursor <kbd>Alt+Shift+R</kbd>
+    </button>
     <button type="button" class="rab-btn" data-testid="read-aloud-stop" title="Stop reading (Esc)" onmousedown={keepFocus} onclick={() => readAloud.stop()}>
       Stop <kbd>Esc</kbd>
     </button>
-    <button type="button" class="rab-btn" data-testid="read-aloud-flag" title={flagTitle} disabled={!readAloud.canFlag || alreadyFlagged} onmousedown={keepFocus} onclick={() => readAloud.flag()}>
+    <button type="button" class="rab-btn" data-testid="read-aloud-flag" title={flagTitle} disabled={!readAloud.canFlag || readAloud.edited || alreadyFlagged} onmousedown={keepFocus} onclick={() => readAloud.flag()}>
       Flag <kbd>Alt+Shift+F</kbd>
     </button>
     {#if justFlagged}<span class="rab-flagged" data-testid="read-aloud-flagged">Flagged</span>{/if}

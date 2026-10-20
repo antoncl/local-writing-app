@@ -3,6 +3,7 @@ import type { Editor } from "@tiptap/core";
 import type { AIEntryPatch } from "@/lib/types";
 
 import {
+  REVISE_CONTEXT_CHARS,
   inlineHandler,
   inlineEditsHandler,
   inlineNotesHandler,
@@ -161,10 +162,18 @@ describe("inlineHandler.produce — the gather", () => {
       from: 20,
       to: 30,
       selectionText: "T[20,30]",
-      // beforeStart = max(0, 20-600) = 0 ; afterEnd = min(200, 30+600) = 200
+      // A short doc: the window runs past both ends, so it clamps to them.
       textBefore: "T[0,20]",
       textAfter: "T[30,200]",
       markersBefore: [],
+    });
+  });
+
+  it("selection: a long doc sends REVISE_CONTEXT_CHARS of context each side (#2565)", () => {
+    const host = makeInlineHost(fakeEditor({ from: 5000, to: 5010 }, 10000), "selection");
+    expect(inlineHandler.produce(host)).toMatchObject({
+      textBefore: `T[${5000 - REVISE_CONTEXT_CHARS},5000]`,
+      textAfter: `T[5010,${5010 + REVISE_CONTEXT_CHARS}]`,
     });
   });
 

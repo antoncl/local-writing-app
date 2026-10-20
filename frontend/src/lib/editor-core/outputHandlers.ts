@@ -74,9 +74,12 @@ export type OutputActivation = "inline" | "conversation";
 // (was append_to_body vs replace_selection), not two separate handlers (ADR-0065 §3).
 export type InlineDestination = "cursor" | "selection";
 
-// How much surrounding prose a revise (selection) sends as context. Lives with
-// the gather it parameterises.
-export const REVISE_CONTEXT_CHARS = 600;
+// How much surrounding prose a revise (selection) sends as context, each side —
+// about 400 words, enough for a rewrite in place to match the lead-in and meet
+// the text that follows (#2565). A prompt that doesn't print `text_before` /
+// `text_after` sends none of it to the model. Lives with the gather it
+// parameterises.
+export const REVISE_CONTEXT_CHARS = 2400;
 
 // The generic base: the declarative bundle every handler IS, plus the two phases
 // the core drives. `Host` is the state-bound surface a handler needs (an editor

@@ -45,6 +45,8 @@
   import { PendingReveals } from "@/lib/editor-core/pendingReveals";
   import type { SceneFlags } from "@/lib/editor-core/conversationFlags";
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
+  import { ReadAloudHighlight } from "@/lib/editor-core/readAloudHighlight";
+  import { readAloud, speechAvailable } from "@/lib/stores/readAloud.svelte";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import { editorCallback } from "@/lib/editor-core/editorCallback";
   import {
@@ -781,6 +783,15 @@
           }
         },
       },
+      ...(speechAvailable() ? [{
+        group: "Insert",
+        label: "Read aloud from here",
+        description: "Speak the text from the cursor to the end, sentence by sentence.",
+        run: () => {
+          clearSlashTrigger();
+          startReadAloud(editor?.state.selection.from);
+        },
+      }] : []),
       ...inlinePromptsOfferedOn(promptCtx, "cursor", scene?.entry_type)
         .map((entry) => ({
           group: "AI",
@@ -906,6 +917,18 @@
       reviseEntries,
       runPrompt: (entry) => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
       markTodo: () => todoAnchors.markSelection(),
+      readAloud: speechAvailable() ? () => startReadAloud(editor?.state.selection.from, editor?.state.selection.to) : undefined,
+    });
+  }
+
+  // Read aloud (#2570): speak a range sentence by sentence (stores/readAloud).
+  // Flags are scene TODOs, so only a scene can flag.
+  function startReadAloud(from = 0, to = editor?.state.doc.content.size ?? 0) {
+    if (!editor) return;
+    readAloud.start({
+      editor, docKey: scene?.id ?? null, from, to,
+      canFlag: documentKind === "manuscript",
+      markRange: (f, t, note) => todoAnchors.markRange(f, t, note),
     });
   }
 
@@ -1109,6 +1132,7 @@
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher, describe: describeEntry }),
         SearchMatchHighlight,
         LineEditSuggestions,
+        ReadAloudHighlight.configure({ input: readAloud }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

@@ -165,6 +165,20 @@ describe("bodyToolbarActions (ProseBodyView's toolbar, #1893 seam extraction)", 
     expect(runPrompt).toHaveBeenCalledWith(entryA);
   });
 
+  it("offers Read aloud after TODO only when the host passes it, over a text selection", () => {
+    const { editor } = makeEditor();
+    const base = { hasText: true, inTable: false, isScene: true, reviseEntries: [], runPrompt: vi.fn(), markTodo: vi.fn() };
+    expect(actionIds(bodyToolbarActions(editor, base))).not.toContain("read-aloud");
+    const readAloud = vi.fn();
+    const actions = bodyToolbarActions(editor, { ...base, readAloud });
+    expect(actionIds(actions).slice(-2)).toEqual(["todo", "read-aloud"]);
+    expect(actionIds(bodyToolbarActions(editor, { ...base, hasText: false, readAloud }))).not.toContain("read-aloud");
+    const button = actions.find((a) => a.id === "read-aloud");
+    if (!button || button.kind !== "button") throw new Error("expected a button");
+    void button.run();
+    expect(readAloud).toHaveBeenCalled();
+  });
+
   it("two revise entries: a menu with both items", () => {
     const { editor } = makeEditor();
     const runPrompt = vi.fn();

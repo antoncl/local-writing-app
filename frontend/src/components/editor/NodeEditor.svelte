@@ -1119,6 +1119,7 @@
     {lineEditReview}
     sceneTitle={scene ? scene.title : null}
     {dirty}
+    docKey={sceneId}
   />
 </div>
 

@@ -197,3 +197,8 @@
   background: color-mix(in oklab, var(--warn) 38%, transparent);
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--warn) 22%, transparent);
 }
+/* Read aloud (#2570): the sentence being spoken (readAloudHighlight.ts). */
+.read-aloud-current {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  border-radius: var(--r-sm);
+}

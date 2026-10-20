@@ -6,6 +6,15 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import EditorFooter from "./EditorFooter.svelte";
 
+// A stand-in reading: the footer only decides WHICH document's bar shows.
+vi.mock("@/lib/stores/readAloud.svelte", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/stores/readAloud.svelte")>();
+  return {
+    ...real,
+    readAloud: { status: "playing", docKey: "scene_a", index: 0, total: 2, canFlag: true, flaggedIndexes: [], rate: 1, voiceURI: "", voices: [], lastFlagAt: 0 },
+  };
+});
+
 function props(over: Record<string, unknown> = {}) {
   return {
     snapshots: {} as never,
@@ -92,5 +101,12 @@ describe("EditorFooter", () => {
     expect(controller.dismissAllLineNotes).toHaveBeenCalled();
     await fireEvent.click(screen.getByTestId("line-note-retry"));
     expect(controller.retry).toHaveBeenCalled();
+  });
+
+  it("shows the read-aloud bar only in the footer of the document being read", async () => {
+    const { rerender } = render(EditorFooter, { props: props({ docKey: "scene_b" }) });
+    expect(screen.queryByTestId("read-aloud-bar")).toBeNull();
+    await rerender(props({ docKey: "scene_a" }));
+    expect(screen.getByTestId("read-aloud-bar")).toBeTruthy();
   });
 });

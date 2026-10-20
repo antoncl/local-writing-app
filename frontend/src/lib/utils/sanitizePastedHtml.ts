@@ -60,6 +60,14 @@ function unwrap(el: Element): void {
   parent.removeChild(el);
 }
 
+// Chrome/Vivaldi append `<br class="Apple-interchange-newline">` when a copied
+// selection ends at a line end (Firefox does not). It marks a trailing line
+// break, not content, so it must not stop a paste from counting as one whole
+// code block (#2568).
+function isInterchangeNewline(node: Node): boolean {
+  return node instanceof HTMLElement && node.tagName === "BR" && node.classList.contains("Apple-interchange-newline");
+}
+
 // Text selected inside a code block — a "copy markdown source" view, or an AI
 // chat reply that fenced a note as ```xml / ```markdown — arrives as a SINGLE
 // <pre> wrapping the entire paste. Turndown then serializes that <pre> to a fence
@@ -73,7 +81,8 @@ function wholePasteCodeBlockText(body: HTMLElement): string | null {
     (node) =>
       // Chromium wraps clipboard HTML in <!--StartFragment--> comments.
       node.nodeType !== Node.COMMENT_NODE &&
-      !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()),
+      !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()) &&
+      !isInterchangeNewline(node),
   );
   if (kids.length !== 1) return null;
   const pre = kids[0];

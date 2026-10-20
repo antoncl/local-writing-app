@@ -3,18 +3,48 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { proseStarterKit } from "@/lib/editor-core/proseStarterKit";
 import { ReadAloudHighlight } from "@/lib/editor-core/readAloudHighlight";
-import { FLAG_NOTE, ReadAloudController, projectSpeechLang, voiceForLang, type ReadAloudUtterance, type SpeechEngine } from "./readAloud.svelte";
+import { FLAG_NOTE, LEAD_IN_TEXT, ReadAloudController, projectSpeechLang, voiceForLang, type ReadAloudUtterance, type SpeechEngine } from "./readAloud.svelte";
 
 const VOICES = [
   { name: "Ada", lang: "en-GB", voiceURI: "voice-ada" },
   { name: "Bo", lang: "en-US", voiceURI: "voice-bo" },
 ];
 
+/** A fake engine that behaves like the real one (#2574): it keeps a queue,
+ *  plays one utterance at a time, fires `start` as each begins and `end` on
+ *  finish(), and errors every queued utterance on cancel(). The silent lead-in
+ *  (volume 0) plays through at once and is recorded in `leadIns`, so `spoken`
+ *  is the sentences actually started, in order. */
 function makeHarness(stored: Record<string, string> = {}) {
   const spoken: ReadAloudUtterance[] = [];
+  const leadIns: ReadAloudUtterance[] = [];
+  const queued: ReadAloudUtterance[] = [];
+  let current: ReadAloudUtterance | null = null;
+  const startNext = (): void => {
+    current = queued.shift() ?? null;
+    if (!current) return;
+    if (current.volume === 0) {
+      leadIns.push(current);
+      const lead = current;
+      current = null;
+      lead.onstart?.();
+      lead.onend?.();
+      startNext();
+      return;
+    }
+    spoken.push(current);
+    current.onstart?.();
+  };
   const engine: SpeechEngine = {
-    speak: vi.fn((u: never) => void spoken.push(u as ReadAloudUtterance)),
-    cancel: vi.fn(),
+    speak: vi.fn((u: never) => {
+      queued.push(u as ReadAloudUtterance);
+      if (!current) startNext();
+    }),
+    cancel: vi.fn(() => {
+      const dropped = [...(current ? [current] : []), ...queued.splice(0)];
+      current = null;
+      for (const u of dropped) u.onerror?.({ error: "interrupted" });
+    }),
     pause: vi.fn(),
     resume: vi.fn(),
     getVoices: () => VOICES,
@@ -27,11 +57,17 @@ function makeHarness(stored: Record<string, string> = {}) {
   };
   const controller = new ReadAloudController({
     engine,
-    makeUtterance: (text) => ({ text, rate: 1, voice: null, lang: "", onend: null, onerror: null }),
+    makeUtterance: (text) => ({ text, rate: 1, voice: null, lang: "", volume: 1, onstart: null, onend: null, onerror: null }),
     storage,
   });
-  const finish = () => spoken[spoken.length - 1].onend?.();
-  return { controller, engine, spoken, store, finish };
+  /** The utterance being spoken ends; the engine starts the next queued one. */
+  const finish = () => {
+    const done = current;
+    current = null;
+    done?.onend?.();
+    if (!current) startNext();
+  };
+  return { controller, engine, spoken, leadIns, queued, store, finish };
 }
 
 let editors: Editor[] = [];
@@ -303,5 +339,49 @@ describe("project language (a Danish system must not read English prose in a Dan
     h.controller.setVoice("voice-ada");
     h.finish();
     expect(h.spoken[1].voice).toEqual(VOICES[0]); // the picked voice wins from the next sentence
+  });
+});
+
+describe("queued speaking (#2574: no clipped first words)", () => {
+  const range = (editor: Editor) => ({ from: 0, to: editor.state.doc.content.size });
+
+  it("hands the engine a silent lead-in and every remaining sentence up front", () => {
+    const { controller, engine, leadIns, queued, spoken } = makeHarness();
+    const editor = makeEditor(); // One. Two. | Three.
+    controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    expect(engine.speak).toHaveBeenCalledTimes(4); // lead-in + 3 sentences, all at once
+    expect(leadIns).toHaveLength(1);
+    expect(leadIns[0].text).toBe(LEAD_IN_TEXT);
+    expect(leadIns[0].volume).toBe(0);
+    expect(spoken.map((u) => u.text)).toEqual(["One."]); // playing
+    expect(queued.map((u) => u.text)).toEqual(["Two.", "Three."]); // already waiting: no gap
+    expect(spoken[0].volume).toBe(1);
+  });
+
+  it("a speed change re-queues from the current sentence; while paused, on resume", () => {
+    const { controller, spoken, finish, leadIns } = makeHarness();
+    const editor = makeEditor();
+    controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    finish(); // now on "Two."
+    controller.setRate(1.5);
+    expect(spoken.at(-1)?.text).toBe("Two."); // restarted once, at the new speed
+    expect(spoken.at(-1)?.rate).toBe(1.5);
+    expect(leadIns).toHaveLength(2); // a fresh queue gets its lead-in too
+    controller.pause();
+    controller.setRate(0.8);
+    expect(spoken.at(-1)?.rate).toBe(1.5); // nothing re-queued while paused
+    controller.resume();
+    expect(spoken.at(-1)?.text).toBe("Two.");
+    expect(spoken.at(-1)?.rate).toBe(0.8);
+  });
+
+  it("advances on `end` for a voice that never reports `start`", () => {
+    const h = makeHarness();
+    const editor = makeEditor();
+    h.controller.start({ editor, docKey: "s1", ...range(editor), canFlag: true, markRange: vi.fn() });
+    for (const u of [...h.queued]) u.onstart = null; // a voice with no start events
+    h.finish(); // "One." ends; "Two." plays silently-reporting
+    expect(h.controller.index).toBe(1);
+    expect(highlighted(editor)).toBe("Two.");
   });
 });

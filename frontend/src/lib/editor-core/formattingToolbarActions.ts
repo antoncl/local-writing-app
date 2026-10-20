@@ -91,6 +91,8 @@ export type BodyToolbarOptions<T extends ReviseEntry> = {
   reviseEntries: T[];
   runPrompt: (entry: T) => void | Promise<void>;
   markTodo: () => void;
+  /** Read the selection aloud (#2570); omitted where the browser cannot speak. */
+  readAloud?: () => void;
 };
 
 /** ProseBodyView's floating selection toolbar (#1223): the shared formatting
@@ -99,7 +101,7 @@ export type BodyToolbarOptions<T extends ReviseEntry> = {
  *  only the ~6-line call site that computes `isScene`/`reviseEntries` and
  *  wires `runPrompt`/`markTodo`. */
 export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, options: BodyToolbarOptions<T>): ToolbarAction[] {
-  const { hasText, inTable, isScene, reviseEntries, runPrompt, markTodo } = options;
+  const { hasText, inTable, isScene, reviseEntries, runPrompt, markTodo, readAloud } = options;
   const { marks, style, table } = formattingToolbarParts(editor, hasText, inTable);
   const actions: ToolbarAction[] = [];
   if (hasText && style) {
@@ -127,6 +129,7 @@ export function bodyToolbarActions<T extends ReviseEntry>(editor: Editor, option
             };
     actions.push(...marks, ...(reviseAction ? [reviseAction] : []), style);
     if (isScene) actions.push({ kind: "button", id: "todo", label: "TODO", run: markTodo });
+    if (readAloud) actions.push({ kind: "button", id: "read-aloud", label: "Read aloud", run: readAloud });
   }
   if (table) actions.push(table);
   return actions;

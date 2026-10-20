@@ -7,6 +7,8 @@
   import FlagReviewBar from "@/components/editor/body/FlagReviewBar.svelte";
   import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
   import LineNoteReviewBar from "@/components/editor/body/LineNoteReviewBar.svelte";
+  import ReadAloudBar from "@/components/editor/body/ReadAloudBar.svelte";
+  import { readAloud } from "@/lib/stores/readAloud.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
@@ -24,6 +26,8 @@
     // The open document's title, or null when nothing is open.
     sceneTitle: string | null;
     dirty: boolean;
+    // The open document's id: the read-aloud bar shows only for the document being read.
+    docKey?: string | null;
   }
 
   let {
@@ -36,6 +40,7 @@
     lineEditReview,
     sceneTitle,
     dirty,
+    docKey = null,
   }: Props = $props();
 </script>
 
@@ -76,6 +81,11 @@
     onRejectAll={() => lineEditReview?.rejectAllLineEdits()}
     onRetry={() => lineEditReview?.retry()}
   />
+{/if}
+
+<!-- Read aloud (#2570): the player of the reading in THIS document. -->
+{#if readAloud.status !== "idle" && readAloud.docKey === docKey}
+  <ReadAloudBar />
 {/if}
 
 <footer class="status">

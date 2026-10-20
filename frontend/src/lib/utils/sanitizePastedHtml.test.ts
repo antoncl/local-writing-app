@@ -57,6 +57,33 @@ describe("sanitizePastedHtml — a whole paste that is one code block (#1622, #2
     expect(out).toContain("<strong>What the draw buys.</strong>"); // markdown inside is read
   });
 
+  it("unwraps it when Chrome adds a trailing Apple-interchange-newline break (#2568)", () => {
+    // The real shape Chrome/Vivaldi put on the Windows clipboard when the
+    // selection inside the block ends at a line end: inline-styled <pre>/<code>,
+    // then a <br class="Apple-interchange-newline"> after the block. Firefox
+    // adds no such break, which is why only Chromium browsers fenced the paste.
+    const html =
+      "<html>\r\n<body>\r\n<!--StartFragment-->" +
+      '<pre style="box-sizing: border-box; margin: 0.4em 0px; padding: 8px 10px; border-radius: 8px;">' +
+      '<code class="language-xml" style="font-family: Consolas, ui-monospace, monospace; font-size: 14px;">' +
+      "**Cycles** are the hub currency.\n\n**What the draw buys.** Resolution, and *nothing* else.\n" +
+      '</code></pre><br class="Apple-interchange-newline"><!--EndFragment-->\r\n</body>\r\n</html>';
+    const out = sanitizePastedHtml(html);
+    expect(out).not.toContain("<pre>");
+    expect(out).not.toContain("<code>");
+    expect(out).toContain("<p><strong>Cycles</strong> are the hub currency.</p>");
+    expect(out).toContain("<em>nothing</em>");
+  });
+
+  it("still keeps a code sample among prose as code when Chrome adds the break", () => {
+    const html =
+      '<p>Run this:</p><pre><code class="language-python">def f():\n    return 1\n</code></pre>' +
+      '<br class="Apple-interchange-newline">';
+    const out = sanitizePastedHtml(html);
+    expect(out).toContain("<pre>");
+    expect(out).toContain("Run this:");
+  });
+
   it("unwraps a whole-paste code block with no language", () => {
     const out = sanitizePastedHtml("<pre><code>first paragraph\n\nsecond paragraph</code></pre>");
     expect(out).not.toContain("<pre>");

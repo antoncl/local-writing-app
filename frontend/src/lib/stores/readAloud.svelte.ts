@@ -3,8 +3,10 @@
 // spoken. Speech is a single global resource, so this is one app-wide
 // controller: starting a reading anywhere stops the one before it.
 //
-// Rate and voice changes apply from the NEXT sentence (the one being spoken
-// finishes as it started) - restarting mid-sentence would repeat words.
+// Sentences are QUEUED with the engine ahead of time (#2574), so it flows from
+// one to the next without reopening the audio output (which clipped first
+// words on Windows). A rate or voice change re-queues from the current
+// sentence, which restarts once.
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { ReplaceStep } from "@tiptap/pm/transform";
@@ -14,6 +16,9 @@ import { setReadAloudHighlight, type ReadAloudInput } from "@/lib/editor-core/re
 
 export const READ_ALOUD_RATES = [0.8, 1, 1.2, 1.5] as const;
 export const FLAG_NOTE = "Flagged while reading aloud";
+/** Spoken at volume 0 before a fresh queue, so the audio device is awake before
+ *  the first real word (#2574). */
+export const LEAD_IN_TEXT = ".";
 const RATE_KEY = "lwa.readAloud.rate";
 const VOICE_KEY = "lwa.readAloud.voice";
 
@@ -25,6 +30,8 @@ export interface ReadAloudUtterance {
   rate: number;
   voice: unknown;
   lang: string;
+  volume: number;
+  onstart: (() => void) | null;
   onend: (() => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
 }
@@ -133,7 +140,8 @@ export class ReadAloudController implements ReadAloudInput {
   #markRange: ReadAloudStart["markRange"] | null = null;
   #generation = 0; // bumped whenever speech is cancelled, so a stale `end` is ignored
   #suppress = false; // the flag's own mark must not stop the reading
-  #current: ReadAloudUtterance | null = null; // held: some browsers drop a speaking utterance's events if it is collected
+  #queue: ReadAloudUtterance[] = []; // held: some browsers drop a queued utterance's events if it is collected
+  #requeueOnResume = false; // speed/voice changed while paused
   #end = 0; // where the reading ends, mapped through edits
   #onTransaction = ({ transaction }: { transaction: Transaction }) => {
     if (!transaction.docChanged || this.#suppress) return;
@@ -180,7 +188,7 @@ export class ReadAloudController implements ReadAloudInput {
     this.status = "playing";
     opts.editor.on("transaction", this.#onTransaction);
     opts.editor.on("destroy", this.#onDestroy);
-    this.#speakCurrent();
+    this.#speakFrom(0);
     return true;
   }
 
@@ -198,6 +206,13 @@ export class ReadAloudController implements ReadAloudInput {
     }
     this.#deps.engine?.resume();
     this.status = "playing";
+    if (this.#requeueOnResume) {
+      // Speed or voice changed while paused: re-queue so it applies now.
+      this.#requeueOnResume = false;
+      this.#generation++;
+      this.#deps.engine?.cancel();
+      this.#speakFrom(this.index);
+    }
   }
 
   /** Read on from the cursor: from the start of the sentence it sits in, to the
@@ -228,8 +243,9 @@ export class ReadAloudController implements ReadAloudInput {
     this.index = 0;
     this.flaggedIndexes = [];
     this.edited = false;
+    this.#requeueOnResume = false;
     this.status = "playing";
-    this.#speakCurrent();
+    this.#speakFrom(0);
   }
 
   /** An edit mid-reading: silence the sentence being read and wait. The bar
@@ -239,7 +255,8 @@ export class ReadAloudController implements ReadAloudInput {
     this.#generation++;
     if (this.status === "paused") this.#deps.engine?.resume(); // the engine's pause is global; clear it
     this.#deps.engine?.cancel();
-    this.#current = null;
+    this.#queue = [];
+    this.#requeueOnResume = false;
     this.status = "paused";
     this.edited = true;
     // The old highlight no longer marks a sentence being read. Cleared after the
@@ -269,7 +286,8 @@ export class ReadAloudController implements ReadAloudInput {
       if (!editor.isDestroyed) setReadAloudHighlight(editor.view, null);
     }
     this.#editor = null;
-    this.#current = null;
+    this.#queue = [];
+    this.#requeueOnResume = false;
     this.#sentences = [];
     this.#markRange = null;
     this.edited = false;
@@ -311,14 +329,16 @@ export class ReadAloudController implements ReadAloudInput {
       this.#deps.engine?.resume();
       this.status = "playing";
     }
-    this.index = target;
-    this.#speakCurrent();
+    this.#requeueOnResume = false;
+    this.#speakFrom(target);
   }
 
   setRate(rate: number): void {
     if (!READ_ALOUD_RATES.includes(rate as (typeof READ_ALOUD_RATES)[number])) return;
+    if (rate === this.rate) return;
     this.rate = rate;
     this.#savePref(RATE_KEY, rate === 1 ? null : String(rate));
+    this.#requeue();
   }
 
   /** The open project's resolved fields (ProjectInfo.metadata): its Spelling /
@@ -328,8 +348,10 @@ export class ReadAloudController implements ReadAloudInput {
   }
 
   setVoice(uri: string): void {
+    if (uri === this.voiceURI) return;
     this.voiceURI = uri;
     this.#savePref(VOICE_KEY, uri || null);
+    this.#requeue();
   }
 
   // The plugin's seams (ReadAloudInput) - both act only on the view being read.
@@ -360,38 +382,77 @@ export class ReadAloudController implements ReadAloudInput {
     if (this.status !== "idle" && this.#editor?.view === view) this.jumpToPos(pos);
   }
 
-  #speakCurrent(): void {
+  /** Queue the reading from sentence `start` to the end (#2574). The engine
+   *  flows from one queued utterance to the next without closing the audio
+   *  output; speaking one sentence and waiting for its `end` before the next
+   *  started each from silence, and on Windows the device's wake-up clipped
+   *  the first word. A silent lead-in goes first, so the device is awake
+   *  before the first real word. The highlight follows each utterance's
+   *  `start` (with its `end` as a fallback for voices that report no start). */
+  #speakFrom(start: number): void {
     const editor = this.#editor;
     const engine = this.#deps.engine;
-    const sentence = this.#sentences[this.index];
-    if (!editor || !engine || !sentence) return;
+    if (!editor || !engine || !this.#sentences[start]) return;
     const generation = this.#generation;
-    const utterance = this.#deps.makeUtterance(sentence.text);
+    const last = this.#sentences.length - 1;
+    this.#show(editor, start);
+    const queue = [this.#utterance(LEAD_IN_TEXT, 0)];
+    queue[0].onerror = null; // the lead-in's own failure is no reason to stop
+    for (let i = start; i <= last; i++) {
+      const utterance = this.#utterance(this.#sentences[i].text, 1);
+      utterance.onstart = () => {
+        if (generation === this.#generation && this.index !== i) this.#show(editor, i);
+      };
+      utterance.onend = () => {
+        if (generation !== this.#generation) return;
+        if (i === last) this.stop();
+        else if (this.index === i) this.#show(editor, i + 1); // no `start` reported: advance here
+      };
+      // A cancel() ends every queued utterance with an error too; only a
+      // failure of the reading still in progress stops it.
+      utterance.onerror = () => {
+        if (generation === this.#generation) this.stop();
+      };
+      queue.push(utterance);
+    }
+    this.#queue = queue;
+    for (const utterance of queue) engine.speak(utterance as never);
+  }
+
+  /** An utterance at the reading's rate, voice and language. */
+  #utterance(text: string, volume: number): ReadAloudUtterance {
+    const utterance = this.#deps.makeUtterance(text);
     utterance.rate = this.rate;
+    utterance.volume = volume;
     // A voice the writer picked wins; otherwise one that speaks the project's
     // language, not whatever the system language's default happens to be.
     utterance.voice = this.voiceURI
       ? this.#voiceObject(this.voiceURI)
       : voiceForLang(this.#deps.engine?.getVoices() ?? [], this.lang);
     if (this.lang) utterance.lang = this.lang;
-    utterance.onend = () => {
-      if (generation !== this.#generation) return;
-      if (this.index + 1 < this.#sentences.length) {
-        this.index++;
-        this.#speakCurrent();
-      } else {
-        this.stop();
-      }
-    };
-    // A cancel() ends the utterance with an error too; only a failure of the
-    // utterance still being read stops the reading.
-    utterance.onerror = () => {
-      if (generation === this.#generation) this.stop();
-    };
-    this.#current = utterance;
+    return utterance;
+  }
+
+  /** Make sentence `index` the current one: counter, highlight, scroll. */
+  #show(editor: Editor, index: number): void {
+    const sentence = this.#sentences[index];
+    if (!sentence) return;
+    this.index = index;
     setReadAloudHighlight(editor.view, { from: sentence.from, to: sentence.to });
     this.#scrollTo(editor, sentence.from);
-    engine.speak(utterance as never);
+  }
+
+  /** Re-queue from the current sentence so a speed or voice change applies now
+   *  (the current sentence restarts once). While paused, it waits for Resume. */
+  #requeue(): void {
+    if (this.status === "idle" || this.edited) return;
+    if (this.status === "paused") {
+      this.#requeueOnResume = true;
+      return;
+    }
+    this.#generation++;
+    this.#deps.engine?.cancel();
+    this.#speakFrom(this.index);
   }
 
   #scrollTo(editor: Editor, pos: number): void {

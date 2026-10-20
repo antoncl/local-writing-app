@@ -549,9 +549,11 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
         # in the patch decision — and that includes the built-in Library nodes a
         # rebuild re-walks (the prompts and, since ADR-0048 S4b, the 14 plot
         # templates). So the churned set has to exceed half of *that*, not half
-        # of the project's own files; 48 edits clears it with room to spare as
-        # the Library grows.
-        node_count = 48
+        # of the project's own files. Measured, not hard-coded: a fixed count
+        # broke the day the Library gained a snippet (#2565). `units * 2 >
+        # candidates` with `candidates = base + n` holds for any `n > base`.
+        base = len(self._open_index().candidates)
+        node_count = base + 8
         for i in range(node_count):
             self._write_lore(self.root, f"n{i}", f"Node {i}")
         self._open_index()

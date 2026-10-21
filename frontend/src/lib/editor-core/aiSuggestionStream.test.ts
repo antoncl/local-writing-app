@@ -302,7 +302,6 @@ describe("the prompt's assistant reaches the request (#2593)", () => {
 
   it("retry re-resolves rather than replaying the resolved default as a pick", async () => {
     const { ctrl } = setup();
-    fakeStream([DONE]);
     promptEntries.push(SCOPED);
     fakeStream([{ type: "delta", text: "x" }, DONE]);
     await ctrl.runPromptEntryWithInputs(SCOPED, {});

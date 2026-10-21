@@ -85,10 +85,11 @@ export function assistantForPrompt(
   entries: AssistantEntrySummary[],
 ): string {
   if (!entry) return "";
-  // A pin to an assistant the roster no longer holds (deleted) is ignored: sent
-  // as-is it would resolve to nothing and fall to the legacy machine default.
+  // A pin counts only while its assistant is ACTIVE: a deleted one would resolve
+  // to nothing and fall to the legacy machine default, and an un-listed one is
+  // out of the set a prompt may use (ADR-0024 Amendment 1, `activeAssistants`).
   const pin = preferredAssistantForPrompt(entry);
-  if (pin && entries.some((a) => a.id === pin)) return pin;
+  if (pin && activeAssistants(entries).some((a) => a.id === pin)) return pin;
   return topmostMatchingAssistant(entries, assistantScopeTags(entry))?.id ?? "";
 }
 

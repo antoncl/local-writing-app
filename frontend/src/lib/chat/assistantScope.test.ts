@@ -96,6 +96,10 @@ describe("assistantForPrompt", () => {
     expect(assistantForPrompt(prompt(["summary"], "deleted"), ROSTER)).toBe("b");
     expect(assistantForPrompt(prompt(undefined, "deleted"), ROSTER)).toBe("");
   });
+  it("a pin to an un-listed assistant is ignored too", () => {
+    const roster = [...ROSTER, A("off", "Shelved", undefined, "unlisted")];
+    expect(assistantForPrompt(prompt(["summary"], "off"), roster)).toBe("b");
+  });
 });
 
 describe("assistantTitle", () => {

@@ -85,6 +85,7 @@
   } from "@/lib/editor-core/slashMenu";
   import {
     placeSelectionToolbar,
+    runToolbarCommand,
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
@@ -883,15 +884,11 @@
     openToolbarMenuId = null;
   }
 
-  async function focusAndRun(command: () => void | Promise<void>) {
-    try {
-      await command();
-    } catch {
-      // Parent action surfaces failures through app-level error state.
-    } finally {
-      openToolbarMenuId = null;
-      updateSelectionMenu();
-    }
+  function focusAndRun(command: () => void | Promise<void>) {
+    return runToolbarCommand(command, {
+      closeMenu: () => (openToolbarMenuId = null),
+      refresh: updateSelectionMenu,
+    });
   }
 
   function toggleToolbarMenu(actionId: string) {
@@ -1197,10 +1194,18 @@
     const detachDeferredRestore = editorFrame
       ? applyScrollWhenLaidOut(editorFrame, () => pendingScrollTop, () => { pendingScrollTop = null; })
       : null;
+    // The AI toolbar pins to the visible edge while its anchor is scrolled out
+    // of view (#2582), so it re-places as the frame scrolls.
+    const frame = editorFrame;
+    const replaceAiToolbar = () => {
+      if (aiSuggestion.toolbarPosition.visible) aiSuggestion.updateToolbarPosition();
+    };
+    frame?.addEventListener("scroll", replaceAiToolbar, { passive: true });
     const mounted = editor;
     onEditorReady(mounted, "ready");
 
     return () => {
+      frame?.removeEventListener("scroll", replaceAiToolbar);
       detachDeferredRestore?.();
       detachBodyScroll?.();
       onEditorReady(mounted, "destroy");

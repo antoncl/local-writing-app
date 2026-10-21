@@ -118,3 +118,21 @@ export function verticalDropFit(
   const up = below < typical && above > below;
   return { up, maxHeight: Math.max(minHeight, Math.round(up ? above : below)) };
 }
+
+// Run a toolbar command, closing its dropdown FIRST (#2582). A command may be a
+// whole prompt run that resolves only when generation ends; a menu left open
+// that long reads as "nothing happened". `refresh` re-derives the toolbar once
+// the command settles; a failure is the command's own to surface.
+export async function runToolbarCommand(
+  command: () => void | Promise<void>,
+  { closeMenu, refresh }: { closeMenu: () => void; refresh: () => void },
+): Promise<void> {
+  closeMenu();
+  try {
+    await command();
+  } catch {
+    // Parent action surfaces failures through app-level error state.
+  } finally {
+    refresh();
+  }
+}

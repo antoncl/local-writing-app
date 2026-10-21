@@ -20,6 +20,8 @@ import {
   refreshChatSessions,
   setChatSessions,
 } from "@/lib/stores/chats";
+import { assistantEntriesStore } from "@/lib/stores/assistants";
+import { assistantForPrompt } from "@/lib/chat/assistantScope";
 import type { ChatSession, PromptEntrySummary } from "@/lib/types";
 
 // A subject node's display title, or "" when it can't be resolved — naming is
@@ -100,7 +102,10 @@ class ChatSessions {
       titleOverride?: string;
     } = {},
   ): Promise<string> {
-    const { assistantId = "", parentPaneId = null, subjectTitle = "" } = opts;
+    const { parentPaneId = null, subjectTitle = "" } = opts;
+    // No explicit pick → the prompt's own preference (pin, else tag scope),
+    // the same seeding the in-chat prompt picker does (#2593).
+    const assistantId = opts.assistantId || assistantForPrompt(entry, get(assistantEntriesStore));
     // ADR-0090 §4: Propose needs the created session's id back, to prefill its
     // composer once the pane mounts — set from inside the (error-swallowing)
     // `run` action, so a failed create simply leaves this "" for every existing

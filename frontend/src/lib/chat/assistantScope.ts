@@ -74,13 +74,23 @@ export function topmostMatchingAssistant(
   return activeAssistants(entries).find((a) => assistantMatchesScope(a, tags)) ?? null;
 }
 
-// Dynamic default (ADR-0024): topmost matching the scope, else topmost overall.
-export function scopedDefaultAssistantId(
+// The assistant a prompt asks for, or "" when it expresses no preference (or
+// none of its scope matches the active roster): the explicit pin wins, else the
+// topmost active assistant matching its tag scope. The ONE seam every prompt
+// launch goes through (#2593) — the backend resolves "" to the topmost overall
+// and never sees the prompt's scope, so a launch path that skips this silently
+// runs the wrong assistant.
+export function assistantForPrompt(
+  entry: PromptEntrySummary | null,
   entries: AssistantEntrySummary[],
-  tags: string[],
-  fallbackId: string,
 ): string {
-  return topmostMatchingAssistant(entries, tags)?.id ?? fallbackId;
+  if (!entry) return "";
+  // A pin counts only while its assistant is ACTIVE: a deleted one would resolve
+  // to nothing and fall to the legacy machine default, and an un-listed one is
+  // out of the set a prompt may use (ADR-0024 Amendment 1, `activeAssistants`).
+  const pin = preferredAssistantForPrompt(entry);
+  if (pin && activeAssistants(entries).some((a) => a.id === pin)) return pin;
+  return topmostMatchingAssistant(entries, assistantScopeTags(entry))?.id ?? "";
 }
 
 // Partition over the ACTIVE roster: assistants matching the scope first (manual

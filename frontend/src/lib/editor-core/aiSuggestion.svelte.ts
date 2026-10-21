@@ -14,7 +14,10 @@
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
+import { get } from "svelte/store";
 import { api } from "@/lib/api";
+import { assistantEntriesStore } from "@/lib/stores/assistants";
+import { assistantForPrompt } from "@/lib/chat/assistantScope";
 import type { AIStreamEvent } from "@/lib/api/core";
 import { countWords } from "@/lib/utils/wordCount";
 import { placeAiToolbar, type AiSuggestionMeta, type AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
@@ -522,10 +525,15 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
     if (!editor || !scene) return;
+    // No explicit pick → the prompt's own preference (pin, else tag scope);
+    // the backend would otherwise resolve "" to the topmost overall (#2593).
+    // Resolved into its own name so retry replays the caller's pick ("" stays
+    // ""), re-resolving against the prompt and roster as they are then.
+    const runAssistantId = assistantId || assistantForPrompt(entry, get(assistantEntriesStore));
     const ctx = this.#deps.getPromptCtx();
     const surface = promptSurfaceFor(ctx, entry);
     if (surface === "cursor" || surface === "selection") {
-      const run: OutputRun = { entry, inputs, assistantId, scene };
+      const run: OutputRun = { entry, inputs, assistantId: runAssistantId, scene };
       // Both editor handlers share one host; the registry decides which drives it.
       const handler = outputHandlerFor(entry.context_strategy?.output) as OutputHandler<InlineHost, InlineGathered>;
       const host = this.#inlineHost(run, surface);
@@ -548,7 +556,7 @@ export class AiSuggestionController {
       this.#lastInvokedEntryId = entry.id;
       this.#lastInvokedInputs = inputs;
       this.#lastInvokedAssistantId = assistantId;
-      this.#deps.onOpenChat({ entry, inputs, sceneId: scene.id, assistantId });
+      this.#deps.onOpenChat({ entry, inputs, sceneId: scene.id, assistantId: runAssistantId });
       return;
     }
     this.error = `Prompt "${entry.title}" has no output handler and can't be invoked here.`;

@@ -31,10 +31,13 @@ export type PromptTemplateLockResult =
  * written; the caller assigns the six locked fields on success. */
 export async function lockPromptTemplate(
   entry: PromptEntrySummary,
-  { subject, inputs }: { subject: string; inputs: Record<string, unknown> },
+  { subject, inputs, assistantId }: { subject: string; inputs: Record<string, unknown>; assistantId: string },
 ): Promise<PromptTemplateLockResult> {
   try {
     const preview = await api.aiPreview({
+      // The assistant the chat will send on (#2593): its lore budget shapes
+      // this render, so it must be the same one the estimate and send name.
+      assistant_id: assistantId || null,
       template_source: entry.body,
       // ADR-0051 S5: the chat's scene comes from its subject (backend-derived),
       // not a stored target_scene_id. An explicit scene_ref input still wins.

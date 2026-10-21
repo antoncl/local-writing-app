@@ -30,7 +30,8 @@ SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
 STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
 LAYER_GUARD = REPO / "scripts" / "check_layer_imports.py"
-HTTP_CLIENT_GUARD = REPO / "scripts" / "check_http_client.py"
+# The frontend guards (http-client, AI-call flush) share one process (#2598).
+FRONTEND_GUARDS = REPO / "scripts" / "check_frontend_guards.py"
 
 # The hook runs on *every* edit and its stdout is injected into the model's
 # context, so both its wall-clock and its output are on the session's hot path.
@@ -108,8 +109,8 @@ def applicable_guards(path: Path) -> list[list[str]]:
         commands.append([sys.executable, str(STYLE_GUARD), str(path)])
     if path.suffix == ".py" and "/backend/app/services/" in posix and LAYER_GUARD.is_file():
         commands.append([sys.executable, str(LAYER_GUARD), str(path)])
-    if path.suffix in {".ts", ".js", ".svelte"} and "/frontend/src/" in posix and HTTP_CLIENT_GUARD.is_file():
-        commands.append([sys.executable, str(HTTP_CLIENT_GUARD), str(path)])
+    if path.suffix in {".ts", ".js", ".svelte"} and "/frontend/src/" in posix and FRONTEND_GUARDS.is_file():
+        commands.append([sys.executable, str(FRONTEND_GUARDS), str(path)])
     if path.suffix == ".md" and (path.parent / "MEMORY.md").is_file() and MEMORY_GUARD.is_file():
         commands.append([sys.executable, str(MEMORY_GUARD), "--memory-dir", str(path.parent)])
     return commands

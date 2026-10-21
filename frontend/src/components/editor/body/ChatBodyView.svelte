@@ -622,6 +622,7 @@
       chatHistory = chatHistory;
     });
     try {
+      // ai-flush: sendChat runs persistEditsForSend before it calls this (#2587)
       for await (const ev of api.aiChatStream(
         {
           assistant_id: wireAssistantId() || null,

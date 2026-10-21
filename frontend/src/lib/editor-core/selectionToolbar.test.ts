@@ -1,5 +1,32 @@
 import { describe, it, expect } from "vitest";
-import { placeSelectionToolbar, verticalDropFit, type EdgeRect } from "./selectionToolbar";
+import { placeSelectionToolbar, runToolbarCommand, verticalDropFit, type EdgeRect } from "./selectionToolbar";
+
+// #2582: a prompt picked from the Revise dropdown runs for the whole generation;
+// the dropdown must close on invoke, not when the run ends.
+describe("runToolbarCommand", () => {
+  it("closes the menu before the command settles, refreshes after", async () => {
+    const events: string[] = [];
+    let finish!: () => void;
+    const command = () => new Promise<void>((resolve) => { finish = resolve; });
+    const run = runToolbarCommand(command, {
+      closeMenu: () => events.push("close"),
+      refresh: () => events.push("refresh"),
+    });
+    expect(events).toEqual(["close"]);
+    finish();
+    await run;
+    expect(events).toEqual(["close", "refresh"]);
+  });
+
+  it("refreshes even when the command throws", async () => {
+    const events: string[] = [];
+    await runToolbarCommand(() => Promise.reject(new Error("boom")), {
+      closeMenu: () => events.push("close"),
+      refresh: () => events.push("refresh"),
+    });
+    expect(events).toEqual(["close", "refresh"]);
+  });
+});
 
 // #1227: dropdowns must open toward the room and never clip. verticalDropFit is
 // the pure decision behind that — direction + a height cap the CSS applies.

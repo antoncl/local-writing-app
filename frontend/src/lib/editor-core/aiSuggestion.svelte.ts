@@ -17,7 +17,7 @@ import type { EditorView } from "@tiptap/pm/view";
 import { api } from "@/lib/api";
 import type { AIStreamEvent } from "@/lib/api/core";
 import { countWords } from "@/lib/utils/wordCount";
-import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
+import { placeAiToolbar, type AiSuggestionMeta, type AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
 import {
   type PromptResolutionContext,
   promptSurfaceFor,
@@ -248,24 +248,14 @@ export class AiSuggestionController {
       const coords = editor.view.coordsAtPos(pos);
       const frameBounds = editorFrame.getBoundingClientRect();
       const x = coords.left - frameBounds.left + editorFrame.scrollLeft;
-      // The toolbar renders ABOVE the suggestion's first line so it never
-      // occludes the prose (#1275). Clipping by `.editor-wrap`'s `overflow: auto`
-      // happens at the scroll box's VISIBLE edges, so the room-above test is on
-      // the line's viewport-relative offset (as updateSelectionMenu's
-      // `hasRoomAbove` does), not the content-space one; when there's no room,
-      // flip below the line. `y` stays content-space (the toolbar is absolute in
-      // the scroll content). 40px is a conservative one-row toolbar height + gap.
-      const viewportTop = coords.top - frameBounds.top;
-      const TOOLBAR_CLEARANCE = 40;
-      const placeBelow = viewportTop < TOOLBAR_CLEARANCE;
-      this.toolbarPosition = {
-        x,
-        y: placeBelow
-          ? coords.bottom - frameBounds.top + editorFrame.scrollTop
-          : viewportTop + editorFrame.scrollTop,
-        placement: placeBelow ? "below" : "above",
-        visible: true,
-      };
+      // Clipping by `.editor-wrap`'s `overflow: auto` happens at the scroll
+      // box's VISIBLE edges, so placement works on the line's offsets from the
+      // visible top (as updateSelectionMenu's `hasRoomAbove` does).
+      const placed = placeAiToolbar(
+        { top: coords.top - frameBounds.top, bottom: coords.bottom - frameBounds.top },
+        { height: editorFrame.clientHeight, scrollTop: editorFrame.scrollTop },
+      );
+      this.toolbarPosition = { x, ...placed, visible: true };
     } catch {
       this.toolbarPosition = { x: 0, y: 0, visible: false };
     }

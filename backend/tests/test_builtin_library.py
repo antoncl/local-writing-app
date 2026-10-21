@@ -1224,6 +1224,41 @@ class DraftScenePromptTests(unittest.TestCase):
         text = self._preview(self.scene_ids[0])
         self.assertIn("The point-of-view character is **Honor Harrington**", text)
 
+    def test_draft_scene_holds_the_narration_to_one_mind_and_one_moment(self) -> None:
+        """#2604: drafts hopped heads, skipped ahead in time and named people
+        the narrator only learned later. The viewpoint rule names the mind and
+        forbids hindsight; the time and trust rules hold in every mode."""
+        self._set(self.act.scene_id, kind="container", pov_mode="third_limited", pov=self.honor.id)
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("**One mind.** The point-of-view character is **Honor Harrington**", text)
+        self.assertIn("never tell the reader what Honor Harrington learns or understands later", text)
+        self.assertIn("**One continuous stretch of time.**", text)
+        self.assertIn("**Trust the reader.**", text)
+        self.assertIn("_This brief is the author's notes on the scene, for you and not the reader", text)
+        self.assertNotIn("**One narrator.**", text)
+        # Prose style reads the drafted scene's narration, not the editor's
+        # scene, so it agrees with the viewpoint rule (#2604 review).
+        self.assertIn("- Narrative POV: Third person — limited", text)
+
+    def test_draft_scene_without_a_pov_character_asks_the_model_to_choose_one(self) -> None:
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("No point-of-view character is set for this scene: choose", text)
+        self.assertIn("never tell the reader what the viewpoint character learns", text)
+        self.assertNotIn("The point-of-view character is **", text)
+
+    def test_draft_scene_viewpoint_rule_follows_the_narration_mode(self) -> None:
+        self._set(self.act.scene_id, kind="container", pov_mode="third_omniscient", pov=self.honor.id)
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("**One narrator.**", text)
+        self.assertNotIn("**One mind.**", text)  # an omniscient pov is not a limit
+        self._set(self.act.scene_id, kind="container", pov_mode="third_objective")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("**No one's mind.**", text)
+        self.assertNotIn("**One mind.**", text)
+
     def test_draft_scene_lists_the_scenes_anchored_changes_as_its_brief(self) -> None:
         from mutation_helpers import save_scenes_with_mutations
 

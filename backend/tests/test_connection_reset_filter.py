@@ -90,3 +90,48 @@ def test_install_is_a_noop_off_windows(loop, monkeypatch) -> None:
     monkeypatch.setattr(connection_reset_filter.sys, "platform", "linux")
     connection_reset_filter.install(loop)
     assert loop.get_exception_handler() is None
+
+
+def test_missing_stdlib_callback_switches_the_filter_off(loop, monkeypatch) -> None:
+    # A future Python renaming the private callback must not match everything
+    # (None is None) nor break startup: the filter just turns itself off.
+    monkeypatch.setattr(connection_reset_filter.sys, "platform", "win32")
+    monkeypatch.setattr(connection_reset_filter, "_CALL_CONNECTION_LOST", None)
+    ctx = {"message": "x", "exception": ConnectionResetError(), "handle": object()}
+    assert not connection_reset_filter.is_benign_connection_reset(ctx)
+    connection_reset_filter.install(loop)
+    assert loop.get_exception_handler() is None
+
+
+def test_uninstall_restores_the_previous_handler(loop, monkeypatch) -> None:
+    monkeypatch.setattr(connection_reset_filter.sys, "platform", "win32")
+
+    def previous(_loop, _ctx):
+        pass
+
+    loop.set_exception_handler(previous)
+    uninstall = connection_reset_filter.install(loop)
+    assert loop.get_exception_handler() is not previous
+    uninstall()
+    assert loop.get_exception_handler() is previous
+
+
+def test_app_lifespan_installs_and_removes_the_filter(monkeypatch) -> None:
+    from app import main
+
+    monkeypatch.setattr(connection_reset_filter.sys, "platform", "win32")
+    monkeypatch.setattr(main, "migrate_assistant_tags_once", lambda: None)
+    monkeypatch.setattr(main.node_index_gate, "flush", lambda: None)
+
+    async def run() -> None:
+        loop = asyncio.get_running_loop()
+        benign = _context(loop, _CALL_CONNECTION_LOST, ConnectionResetError(10054, "reset"))
+        reached: list[dict] = []
+        loop.set_exception_handler(lambda _loop, ctx: reached.append(ctx))
+        async with main.lifespan(main.app):
+            loop.call_exception_handler(benign)
+            assert reached == []
+        loop.call_exception_handler(benign)
+        assert reached == [benign]
+
+    asyncio.run(run())

@@ -64,8 +64,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     migrate_assistant_tags_once()
     # Windows-only: quiet the benign WinError 10054 traceback a client reset
     # produces after a request has ended (#2576); everything else still logs.
-    connection_reset_filter.install(asyncio.get_running_loop())
+    uninstall_reset_filter = connection_reset_filter.install(asyncio.get_running_loop())
     yield
+    uninstall_reset_filter()
     node_index_gate.flush()
 
 

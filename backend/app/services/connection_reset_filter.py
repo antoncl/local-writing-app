@@ -19,26 +19,36 @@ import asyncio
 import logging
 import sys
 from asyncio import proactor_events
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_CALL_CONNECTION_LOST = proactor_events._ProactorBasePipeTransport._call_connection_lost
+# Private CPython API, so it's looked up defensively: if a future Python renames
+# it, the filter switches itself off instead of breaking backend startup.
+_CALL_CONNECTION_LOST = getattr(
+    getattr(proactor_events, "_ProactorBasePipeTransport", None), "_call_connection_lost", None
+)
 
 
 def is_benign_connection_reset(context: dict[str, Any]) -> bool:
     """True only for a ConnectionResetError raised by `_call_connection_lost`."""
+    if _CALL_CONNECTION_LOST is None:
+        return False
     if not isinstance(context.get("exception"), ConnectionResetError):
         return False
     callback = getattr(context.get("handle"), "_callback", None)
     return getattr(callback, "__func__", None) is _CALL_CONNECTION_LOST
 
 
-def install(loop: asyncio.AbstractEventLoop) -> None:
-    """Wrap `loop`'s exception handler with the filter. A no-op off Windows."""
-    if sys.platform != "win32":
-        return
+def install(loop: asyncio.AbstractEventLoop) -> Callable[[], None]:
+    """Wrap `loop`'s exception handler with the filter; returns an undo.
+
+    A no-op off Windows, or when the stdlib callback can't be found.
+    """
     previous = loop.get_exception_handler()
+    if sys.platform != "win32" or _CALL_CONNECTION_LOST is None:
+        return lambda: None
 
     def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         if is_benign_connection_reset(context):
@@ -50,3 +60,4 @@ def install(loop: asyncio.AbstractEventLoop) -> None:
             loop.default_exception_handler(context)
 
     loop.set_exception_handler(handler)
+    return lambda: loop.set_exception_handler(previous)

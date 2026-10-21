@@ -896,6 +896,163 @@ def test_reaching_for_a_second_http_client_fails(tmp_path):
     assert http_guard.main([f]) == 1
 
 
+# --- AI-call flush guard (#2598) ---
+#
+# A model call reads project files from disk, so it must persist the author's
+# pending edits first (#2587/#2596). The behaviour tests are the guard's own
+# mutation check: each failing case asserts the guard FIRES on a real miss.
+
+flush_guard = _load_script("check_ai_call_flush")
+
+
+def _flush_case(tmp_path, body: str, rel: str = "lib/stores/thing.svelte.ts") -> int:
+    return flush_guard.main([_frontend_file(tmp_path, rel, body)])
+
+
+def test_a_model_call_with_no_flush_fails(tmp_path):
+    for method in flush_guard.model_calls():
+        body = f"async function go() {{\n  await api.{method}({{}});\n}}\n"
+        assert _flush_case(tmp_path, body) == 1, method
+
+
+def test_a_flush_just_above_the_call_passes(tmp_path):
+    body = "async function go() {\n  await editorPanes.flushBeforeAICall();\n  await api.extractFlags({});\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_an_injected_persist_dep_counts_as_a_flush(tmp_path):
+    body = "async function go() {\n  await this.#deps.persistEdits?.();\n  for await (const ev of api.aiGenerateStream({})) {}\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_flush_too_far_above_does_not_count(tmp_path):
+    filler = "  const x = 1;\n" * (flush_guard.WINDOW + 2)
+    body = f"async function go() {{\n  await editorPanes.flushBeforeAICall();\n{filler}  await api.aiChat({{}});\n}}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_reasoned_marker_passes(tmp_path):
+    body = "async function go() {\n  // ai-flush: sendChat persists before calling this\n  await api.aiChatStream({});\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_bare_marker_with_no_reason_fails(tmp_path):
+    body = "async function go() {\n  // ai-flush:\n  await api.aiChatStream({});\n}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_flush_named_only_in_a_comment_does_not_count(tmp_path):
+    body = "async function go() {\n  // we used to call flushBeforeAICall() here\n  await api.aiChat({});\n}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_model_call_inside_a_comment_is_not_a_violation(tmp_path):
+    body = "// legacy: api.aiChatStream(payload) was called here\nconst x = 1;\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_non_model_call_needs_no_flush(tmp_path):
+    """Previews, estimates and health checks call no model over project files."""
+    body = "async function go() {\n  await api.aiPreview({});\n  await api.aiHealth();\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_watched_name_does_not_match_as_a_prefix(tmp_path):
+    """`aiChat` is watched; a longer name it prefixes (`aiChatHistory`, not a
+    model call) must not be read as `aiChat(`."""
+    body = "async function go() {\n  await api.aiChatHistory({});\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_the_client_and_tests_are_exempt_from_the_flush_guard(tmp_path):
+    body = "export const ai = { go: () => api.aiChat({}) };\n"
+    assert _flush_case(tmp_path, body, rel="lib/api/ai.ts") == 0
+    assert _flush_case(tmp_path, body, rel="lib/stores/thing.test.ts") == 0
+
+
+def test_the_watched_set_is_derived_and_fails_closed(tmp_path):
+    """A NEW `/ai/` method is watched the day it lands; only a reasoned
+    NON_MODEL entry unwatches one, and a non-`/ai/` method is never watched."""
+    api_dir = tmp_path / "api"
+    api_dir.mkdir()
+    (api_dir / "ai.ts").write_text(
+        "export const ai = {\n"
+        "  summarizeScene(body: X) {\n    return request(\"/ai/summarize\", { method: \"POST\" });\n  },\n"
+        "  aiPreview(p: P) {\n    return request(\"/ai/preview\", { body: p });\n  },\n"
+        "  listThings() {\n    return request(\"/things\");\n  },\n"
+        "};\n",
+        encoding="utf-8",
+    )
+    assert flush_guard.model_calls(api_dir) == {"summarizeScene"}
+
+
+def test_the_real_client_watches_the_known_model_calls():
+    expected = {"aiChat", "aiChatStream", "aiGenerateStream", "extractEntryPatch", "extractEntryDraft", "extractFlags"}
+    assert expected <= flush_guard.model_calls()
+
+
+def test_every_non_model_entry_names_a_real_ai_method():
+    """A renamed or removed method must not leave a dead NON_MODEL entry — or its
+    successor would be watched, fine, but the reason text would lie."""
+    stale = flush_guard.NON_MODEL.keys() - flush_guard.ai_route_methods()
+    assert not stale, sorted(stale)
+
+
+def test_only_the_ai_router_calls_a_provider():
+    """The derivation's premise: every route that runs a model lives under /ai/,
+    i.e. in routers/ai.py. A provider call in another router would be a model
+    call the frontend guard cannot see."""
+    provider_use = re.compile(r"\b(?:ai_providers|run_chat_turn|achat|chat_stream)\b")
+    offenders = [
+        p.name
+        for p in (REPO / "backend" / "app" / "routers").glob("*.py")
+        if p.name != "ai.py" and provider_use.search(p.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, offenders
+
+
+def test_a_marker_covers_only_the_call_directly_below_it(tmp_path):
+    two_calls = (
+        "async function go() {\n  // ai-flush: sendChat persists before calling this\n"
+        "  await api.aiChatStream({});\n  await api.aiChat({});\n}\n"
+    )
+    assert _flush_case(tmp_path, two_calls) == 1  # the second call isn't covered
+    code_between = (
+        "async function go() {\n  // ai-flush: runExtraction persists before calling this\n"
+        "  const f = () =>\n    api.extractEntryPatch(id, {});\n}\n"
+    )
+    assert _flush_case(tmp_path, code_between) == 1
+    block_above = (
+        "async function go() {\n  // ai-flush: runExtraction persists before calling this\n"
+        "  // (see #2596)\n  await api.extractEntryPatch(id, {});\n}\n"
+    )
+    assert _flush_case(tmp_path, block_above) == 0
+
+
+def test_a_marker_inside_a_string_does_not_count(tmp_path):
+    body = 'async function go() {\n  const s = "// ai-flush: not a real comment";\n  await api.aiChat({});\n}\n'
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_strings_are_not_comments_and_not_code(tmp_path):
+    # `//` inside "http://" must not swallow the flush after it on the line.
+    url_then_flush = (
+        'async function go() {\n  const u = "http://x"; await editorPanes.flushBeforeAICall();\n'
+        "  await api.aiChat({});\n}\n"
+    )
+    assert _flush_case(tmp_path, url_then_flush) == 0
+    # A `/*` inside a string must not open a comment that hides a later call.
+    glob_then_call = 'async function go() {\n  const g = "src/**/*.ts";\n  await api.aiChat({});\n}\n'
+    assert _flush_case(tmp_path, glob_then_call) == 1
+    # A call spelled inside a string is text, not a call.
+    assert _flush_case(tmp_path, 'const help = "use api.aiChat( to ask";\n') == 0
+
+
+def test_a_call_inside_a_template_expression_is_code(tmp_path):
+    body = "async function go() {\n  const t = `${await api.aiChat({ q: `inner` })}`;\n}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
 # --- the new gates are enforced at every layer, like the older guards (#687) ---
 #
 # Same superset contract: the scripts own the selection rule; the CI pathspecs,
@@ -907,10 +1064,13 @@ def test_ci_pathspecs_cover_the_new_guards():
     tracked = _tracked_files()
     layer_truth = {f for f in tracked if layer_guard.is_service_file(Path(f))}
     http_truth = {f for f in tracked if http_guard.is_checked(Path(f))}
+    flush_truth = {f for f in tracked if flush_guard.is_checked(Path(f))}
     layer_selected = _tracked_files(*_ci_pathspecs("check_layer_imports.py"))
     http_selected = _tracked_files(*_ci_pathspecs("check_http_client.py"))
+    flush_selected = _tracked_files(*_ci_pathspecs("check_ai_call_flush.py"))
     assert layer_truth <= layer_selected, sorted(layer_truth - layer_selected)
     assert http_truth <= http_selected, sorted(http_truth - http_selected)
+    assert flush_truth <= flush_selected, sorted(flush_truth - flush_selected)
 
 
 def test_precommit_filters_cover_the_new_guards():
@@ -922,22 +1082,40 @@ def test_precommit_filters_cover_the_new_guards():
         if "files" in hook
     }
     layer_re, http_re = patterns["layer-import-guard"], patterns["http-client-guard"]
+    flush_re = patterns["ai-call-flush-guard"]
     for f in _tracked_files():
         if layer_guard.is_service_file(Path(f)):
             assert layer_re.search(f), f"pre-commit layer filter misses {f}"
         if http_guard.is_checked(Path(f)):
             assert http_re.search(f), f"pre-commit http filter misses {f}"
+        if flush_guard.is_checked(Path(f)):
+            assert flush_re.search(f), f"pre-commit ai-call flush filter misses {f}"
 
 
 def test_the_hook_feeds_the_new_guards_their_files():
+    """The frontend guards reach the hook through ONE runner process (#2598), so
+    a frontend file must get that runner, and the runner must carry both guards."""
     hook = _load_hook("check_edited_file")
+    frontend_runner = _load_script("check_frontend_guards")
+    assert {"check_http_client", "check_ai_call_flush"} <= set(frontend_runner.GUARDS)
     for f in _tracked_files():
         if layer_guard.is_service_file(Path(f)):
             commands = hook.applicable_guards(REPO / f)
             assert any("check_layer_imports" in " ".join(cmd) for cmd in commands), f
-        if http_guard.is_checked(Path(f)):
+        if http_guard.is_checked(Path(f)) or flush_guard.is_checked(Path(f)):
             commands = hook.applicable_guards(REPO / f)
-            assert any("check_http_client" in " ".join(cmd) for cmd in commands), f
+            assert any("check_frontend_guards" in " ".join(cmd) for cmd in commands), f
+
+
+def test_the_frontend_runner_reports_every_guards_failure(tmp_path, capsys):
+    """One process, but no guard swallows another: a file breaking both guards
+    fails, and both guards print their finding."""
+    runner = _load_script("check_frontend_guards")
+    body = "async function go() {\n  await fetch(`/api/x`);\n  await api.aiChat({});\n}\n"
+    assert runner.main([_frontend_file(tmp_path, "lib/stores/thing.svelte.ts", body)]) == 1
+    out = capsys.readouterr().out
+    assert "route it through lib/api.ts" in out
+    assert "no pending-edits flush" in out
 
 
 def test_the_guards_have_no_grandfather_escape_hatch():
@@ -954,6 +1132,7 @@ def test_the_guards_have_no_grandfather_escape_hatch():
         "check_layer_imports",
         "check_http_client",
         "check_svelte_runes",
+        "check_ai_call_flush",
     ):
         module = _load_script(name)
         assert not hasattr(module, "GRANDFATHERED"), f"{name} still has a GRANDFATHERED set"

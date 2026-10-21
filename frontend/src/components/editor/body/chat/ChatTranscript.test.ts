@@ -257,6 +257,23 @@ describe("ChatTranscript", () => {
     expect(clicked).toBe(true);
   });
 
+  // #2586: an entry re-sent because it changed since the AI last saw it.
+  it("shows an Updated since last turn row only when lore_updated is set", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "Noted.",
+        lore_updated: [{ entry_id: "x", title: "The Departure" }],
+      },
+      { role: "assistant", content: "Plain." },
+    ] as ChatMessage[];
+    render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    const rows = screen.getAllByTestId("cbv-lore-updated");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("Updated since last turn:");
+    expect(screen.getByTestId("lore-updated-chip")).toHaveTextContent("The Departure");
+  });
+
   // #2206: an auto-added chip the lore budget left out of the send renders
   // "not sent" — detection noticed it, the model never received it.
   it("marks an auto-added chip the budget left out, and only that one", () => {

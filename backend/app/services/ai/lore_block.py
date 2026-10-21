@@ -108,6 +108,25 @@ def _wrap_lore_block(entries: list[tuple[str, str]]) -> str:
     return "<lore>\n" + "\n\n".join(xml for _, xml in entries) + "\n</lore>"
 
 
+def _changed_note(entries: list[tuple[str, str]]) -> str:
+    """#2586: tell the model which `(id, title)` entries changed since it last
+    saw them, so it works from the current version rather than from an earlier
+    turn's quote. It says what changed, never who: a revision also moves on a
+    move, a status change or an accepted AI patch. Trails the placed lore, so it
+    points back at it. Empty string when none changed."""
+    if not entries:
+        return ""
+    lines = "\n".join(f"- {xml_escape(title or entry_id)}" for entry_id, title in entries)
+    return (
+        "<changed_since_you_last_saw_them>\n"
+        "These entries have changed since you last saw them. The versions in the "
+        "context above are current: work from them, not from anything quoted "
+        "earlier in the conversation.\n"
+        f"{lines}\n"
+        "</changed_since_you_last_saw_them>"
+    )
+
+
 def _format_lore_block(
     project: ProjectService,
     entry_ids: list[str],

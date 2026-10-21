@@ -423,6 +423,7 @@
       stopped: !!m.stopped,
       thinking: m.thinking || undefined,
       journal_added: m.journal_added,
+      lore_updated: m.lore_updated,
       usage: m.usage ?? null,
       cost_usd: m.cost_usd ?? null,
       // ADR-0076 decision 3: per-turn provenance, so it renders on the
@@ -647,6 +648,7 @@
             chatHistory[idx].journal_added = ev.journal_added;
             record.appendJournal(ev.journal_added);
           }
+          if (Array.isArray(ev.lore_updated) && ev.lore_updated.length > 0) chatHistory[idx].lore_updated = ev.lore_updated;
           if (ev.usage) chatHistory[idx].usage = ev.usage;
           if (typeof ev.cost_usd === "number") chatHistory[idx].cost_usd = ev.cost_usd;
           // #1877: the server recorded this turn's row before emitting `done`

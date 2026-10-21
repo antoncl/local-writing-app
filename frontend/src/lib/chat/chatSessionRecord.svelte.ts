@@ -158,6 +158,7 @@ export class ChatSessionRecord {
         // transcript's ambient auto-context signal now that the journal strip
         // is gone (the door carries the roster; the chips carry the moments).
         journal_added: m.journal_added ?? [],
+        lore_updated: m.lore_updated ?? [],
       })),
       // Persist the per-input drafts so a chat round-trips its inputs across a
       // reload (#654); the view decodes them back on hydrate.

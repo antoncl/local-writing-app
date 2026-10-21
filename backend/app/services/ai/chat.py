@@ -11,13 +11,14 @@ the two share only the system-prompt cache-block via `system_prompt_cache_blocks
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import (
     AIChatRequest,
     AIChatResponse,
     ChatSession,
+    ChatUpdatedEntry,
     ChatUsage,
     LoreFit,
     SaveChatSessionRequest,
@@ -51,16 +52,23 @@ class PreparedChatTurn:
     the stream. `chat` is None for a chat-less call or a missing chat.
     `lore_fit` (ADR-0086 §5) is what the turn's lore budget kept and left
     out; None when no implicit selection ran (chat-less, nothing declared and
-    automatic lore off, the commit's `used` turn)."""
+    automatic lore off, the commit's `used` turn). `lore_updated` (#2586) are
+    the entries re-sent because they changed since the model last saw them;
+    `lore_session` holds the turn's placed set, uncommitted until
+    `commit_chat_lore` runs on a successful send (None when no lore was placed
+    through the tiers)."""
 
     system_blocks: list[dict] | None
     session_id: str | None
     journal_added: list[Any]
     chat: ChatSession | None
     lore_fit: LoreFit | None = None
+    lore_updated: list[ChatUpdatedEntry] = field(default_factory=list)
+    lore_session: AISession | None = None
 
 if TYPE_CHECKING:
     from app.services.ai.lore_selection import SelectMode
+    from app.services.ai.sessions import AISession
     from app.services.ai.templates import RenderedTemplate
     from app.services.project_service import ProjectService
 
@@ -268,7 +276,7 @@ def _lore_cache_blocks(
     *,
     mode: SelectMode = "automatic",
     policies: dict[str, set[str]] | None = None,
-) -> tuple[list[dict], dict[str, str], LoreFit]:
+) -> tuple[list[dict], LoreFit, list[ChatUpdatedEntry], AISession]:
     """The chat's one deduped lore set, fitted to the assistant's budget and
     placed once *per volatility tier* (docs/design/context-caching.md §4).
     `_select_lore` — the single selector — computes the declared set (`use()`
@@ -291,17 +299,21 @@ def _lore_cache_blocks(
 
     `scene` is the chat's resolution scene, already loaded once by the caller
     (`_chat_resolution_scene`) and shared with `_detect_and_persist_journal` —
-    avoids a second `read_scene` for the same turn. Returns the blocks, the
-    session baseline after commit, and the fit report the send hands back (§5).
+    avoids a second `read_scene` for the same turn. Returns the blocks, the fit
+    report the send hands back (§5), the entries changed since the model last
+    saw them (#2586) — named in a note trailing the volatile block — and the
+    chat's lore session, holding this turn's set touched but NOT committed:
+    `commit_chat_lore` promotes it once the model has received the turn, so a
+    failed or stopped send leaves the baseline (and the changed flag) as it was.
 
     ADR-0093 §2: the chat's `use(node, snapshot=id)` picks place their before
     elements as their own entries in the stable tier — key-sorted, ahead of
     the live entries — tiered by the `use(node, "stable")` rule: stable from
     the first turn, volatile only for the one turn its rendered bytes change.
-    `session.commit()` (below) carries their key into the baseline persisted
-    as `seen_revisions`, same as any other lore entry.
+    The commit carries their key into the `seen_revisions` it persists, same
+    as any other lore entry.
     """
-    from app.services.ai.lore_block import _wrap_lore_block
+    from app.services.ai.lore_block import _changed_note, _wrap_lore_block
     from app.services.ai.lore_selection import _budgeted_lore_tiers
     from app.services.ai.sessions import default_registry
 
@@ -311,6 +323,10 @@ def _lore_cache_blocks(
     # signal) survive a restart. Only when cold — never clobber a live baseline.
     if not session.baseline and chat.seen_revisions:
         session.baseline = dict(chat.seen_revisions)
+        session.last_seen = dict(chat.seen_revisions)
+    # #2586: a previous send that never reached the model left its set touched
+    # but uncommitted — drop it, so only this turn's set can be committed.
+    session.discard_pending()
 
     # ADR-0060 §2/§5: one selector, computed ONCE, then split into the two tiers by
     # `_tier_lore_ids` against the same (pre-commit) baseline — so each entry lands
@@ -332,16 +348,24 @@ def _lore_cache_blocks(
         mode=mode,
         policies=policies,
     )
-    session.commit()
+    # Not committed here: `commit_chat_lore` promotes this set once the model
+    # has actually received the turn (#2586).
 
     blocks: list[dict] = []
     stable_xml = _wrap_lore_block(tiers.stable_pairs())
     if stable_xml:
         blocks.append({"text": stable_xml, "tier": "stable"})
     volatile_xml = _wrap_lore_block(tiers.volatile_pairs())
+    # The note trails the lore in the last (volatile) block: a changed entry can
+    # sit in either tier (a "stable"-hinted one that skipped a turn), and the
+    # volatile block re-writes every turn anyway, so the note costs no cache.
+    note = _changed_note(tiers.changed_entries)
+    if note:
+        volatile_xml = f"{volatile_xml}\n{note}" if volatile_xml else note
     if volatile_xml:
         blocks.append({"text": volatile_xml, "tier": "volatile"})
-    return blocks, dict(session.baseline), tiers.report
+    updated = [ChatUpdatedEntry(entry_id=i, title=t) for i, t in tiers.changed_entries]
+    return blocks, tiers.report, updated, session
 
 
 def expand_and_prepare_chat_blocks(
@@ -460,8 +484,10 @@ def expand_and_prepare_chat_blocks(
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
     lore_fit: LoreFit | None = None
+    lore_updated: list[ChatUpdatedEntry] = []
+    lore_session: AISession | None = None
     if lore_mode == "implicit" and (automatic or declared):
-        lore_blocks, seen_revisions, lore_fit = _lore_cache_blocks(
+        lore_blocks, lore_fit, lore_updated, lore_session = _lore_cache_blocks(
             project,
             chat,
             chat_id,
@@ -472,18 +498,6 @@ def expand_and_prepare_chat_blocks(
             policies=policies,
         )
         blocks.extend(lore_blocks)
-        # #1635: persist the last-seen revisions if they changed, so the door's
-        # "edited" badge survives a restart and reflects this turn's send. Carry
-        # the up-to-date journal (journal_for_send) so this save doesn't regress
-        # the entries _detect_and_persist_journal just wrote — for a pick-only
-        # send (no detection) that is just the chat's existing journal, untouched.
-        if seen_revisions != chat.seen_revisions:
-            project.save_chat_session(
-                chat_id,
-                _echo_chat_save_request(
-                    chat, journal=journal_for_send, seen_revisions=seen_revisions
-                ),
-            )
     elif has_picks:
         # The read-only turn (#1874): the chat's own `use()` picks, rendered
         # as-of the chat's scene like any lore, in ONE untiered block — the
@@ -511,12 +525,50 @@ def expand_and_prepare_chat_blocks(
         if picks_xml:
             blocks.append({"text": picks_xml, "tier": "volatile"})
 
-    return PreparedChatTurn(blocks or None, chat_id, list(new_entries), chat, lore_fit)
+    return PreparedChatTurn(
+        blocks or None,
+        chat_id,
+        list(new_entries),
+        chat,
+        lore_fit,
+        lore_updated,
+        lore_session,
+    )
+
+
+def commit_chat_lore(project: ProjectService, prepared: PreparedChatTurn) -> None:
+    """Promote the turn's placed lore to the chat's baseline — call it only once
+    the model has actually received the turn (the stream's `on_done`, an ok
+    non-stream reply). Until then a failed or stopped send leaves the baseline
+    as it was, so the retry still tiers and flags what changed (#2586).
+
+    #1635: persists the cumulative last-seen revisions when they moved, so the
+    door's "edited" badge and the changed flag survive a restart. It echoes a
+    FRESH read of the chat, not `prepared.chat`: detection has saved the
+    journal since, and an echo of the stale copy would regress it. It runs
+    before the `done` line, so the client's own post-turn save comes after.
+
+    Never raises: the reply already happened, so a failed persist is logged and
+    the in-memory baseline still moves on."""
+    session = prepared.lore_session
+    if session is None or prepared.chat is None:
+        return
+    session.commit()
+    seen = dict(session.last_seen)
+    try:
+        chat = project.read_chat_session(prepared.chat.id)
+        if seen != chat.seen_revisions:
+            project.save_chat_session(
+                chat.id,
+                _echo_chat_save_request(chat, journal=list(chat.journal), seen_revisions=seen),
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("chat %s: persisting the turn's seen revisions failed", prepared.chat.id)
 
 
 def record_stream_turn(
     project: ProjectService,
-    chat: ChatSession | None,
+    prepared: PreparedChatTurn,
     ev: ai_providers.StreamDone,
     usage: ChatUsage | None,
     cost_usd: float | None,
@@ -526,9 +578,15 @@ def record_stream_turn(
     THIS call's provenance and usage, never a copy of the transcript's last
     message, and no transcript or ledger re-read inside the stream — and hand
     the chat's new `cost_usd_total` back to ride the `done` line. A chat-less
-    call has no session to attribute to and adds nothing to the line."""
+    call has no session to attribute to and adds nothing to the line.
+
+    #2586: it runs only on a completed stream, so it is also where the turn's
+    lore becomes seen (`commit_chat_lore`, which never raises — a failed
+    commit can't cost the ledger row)."""
+    chat = prepared.chat
     if chat is None:
         return None
+    commit_chat_lore(project, prepared)
     total = project.record_chat_turn_invocation(
         chat, provider=ev.provider, model=ev.model, usage=usage, cost_usd=cost_usd
     )
@@ -617,6 +675,9 @@ async def run_chat_turn(
             usage=usage_wire,
             cost_usd=cost_usd,
         )
+    # #2586: the model received the turn — only now does its lore become seen.
+    if result.ok:
+        commit_chat_lore(project, prepared)
     return AIChatResponse(
         role="assistant",
         content=result.content,
@@ -630,6 +691,7 @@ async def run_chat_turn(
         truncated=truncated,
         input_truncated=result.input_truncated,
         journal_added=prepared.journal_added,
+        lore_updated=prepared.lore_updated,
         usage=usage_wire,
         cost_usd=cost_usd,
         cost_usd_total=cost_usd_total,

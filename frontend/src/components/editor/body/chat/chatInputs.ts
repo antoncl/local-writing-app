@@ -220,7 +220,10 @@ export function decodeChatInputDrafts(
 ): Record<string, string> {
   const drafts: Record<string, string> = {};
   for (const [name, value] of Object.entries(inputs ?? {})) {
-    drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
+    // null = a blank optional input the launch path seeded (#2578): back to the
+    // Unset draft "", never the string "null" (a boolean would read it as False).
+    if (value === null) drafts[name] = "";
+    else drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
   }
   return drafts;
 }

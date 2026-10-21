@@ -576,8 +576,7 @@ export function resolvePromptPositionalArgs(
     if (input.required) continue;
     if (filledNames.has(input.name)) continue;
     if (unresolved.some((u) => u.name === input.name)) continue;
-    inputs[input.name] =
-      input.type === "context_pick" ? encodePickerValue([]) : blankOptionalInputValue(input.type);
+    inputs[input.name] = blankOptionalInputValue(input.type);
   }
   const missingRequired = declared.some(
     (input) => input.required && !filledNames.has(input.name),

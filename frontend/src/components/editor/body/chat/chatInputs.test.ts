@@ -324,6 +324,12 @@ describe("chat input drafts round-trip (#654)", () => {
     });
   });
 
+  it("decode reads a seeded null (a blank optional input, #2578) back as Unset, not \"null\"", () => {
+    // The launch path persists the dialog's values; an Unset boolean / blank
+    // number ships as null. "null" would coerce to False / the string "null".
+    expect(decodeChatInputDrafts({ flag: null, count: null })).toEqual({ flag: "", count: "" });
+  });
+
   it("decode treats absent/null inputs as no drafts", () => {
     expect(decodeChatInputDrafts(undefined)).toEqual({});
     expect(decodeChatInputDrafts(null)).toEqual({});

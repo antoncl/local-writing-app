@@ -237,11 +237,12 @@ export function canonicalizeInputDefinitions(
 /** What a declared OPTIONAL input the user left blank reaches the template as
  * (#2578): defined but empty, never an absent name — the renderer is
  * StrictUndefined, so `{% if inputs.x %}` on a blank the prompt allows would
- * otherwise raise. Text is "", a list-shaped type is [], every other scalar is
- * `none` — so a boolean is tri-state: True / False / none (Unset, #24). A
- * context_pick already coerces blank to its encoded empty list. */
+ * otherwise raise. Text is "", a list-shaped type is [], a context_pick its
+ * encoded empty list (#1482), every other scalar `none` — so a boolean is
+ * tri-state: True / False / none (Unset, #24). */
 export function blankOptionalInputValue(type: PromptInputDefinition["type"]): unknown {
   if (type === "text" || type === "long_text") return "";
+  if (type === "context_pick") return encodePickerValue([]);
   if (isListShapedInputType(type)) return [];
   return null;
 }

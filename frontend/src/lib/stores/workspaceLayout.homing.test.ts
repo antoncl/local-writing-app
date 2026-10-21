@@ -306,6 +306,28 @@ describe("homing when the home group is absent (#2588)", () => {
     expect(columnCount()).toBe(before);
   });
 
+  it("ignores a sibling the user tabbed into the editor group", () => {
+    workspaceLayout.applyPreset("revising");
+    workspaceLayout.moveTab("chats", G_EDITOR);
+    workspaceLayout.ensureVisible("prompts");
+    // Lore (left) is now the only non-editor sibling.
+    expect(workspaceLayout.groupOf("prompts")?.id).not.toBe(G_EDITOR);
+  });
+
+  it("skips a column holding only a detached Details rail", () => {
+    workspaceLayout.applySnapshot({
+      version: 1,
+      root: split("root", "row", [group(G_SIDE, ["lore"]), group(G_EDITOR, [])], [0.5, 0.5]),
+      activeEditorGroupId: G_EDITOR,
+      activePreset: null,
+    });
+    workspaceLayout.ensureVisible("editor_a");
+    workspaceLayout.ensureVisible("details:editor_a");
+    workspaceLayout.dropOnEdge("details:editor_a", G_EDITOR, "right");
+    workspaceLayout.ensureVisible("todo");
+    expect(workspaceLayout.groupOf("todo")?.id).toBe(G_SIDE);
+  });
+
   it("still recreates the home column when only the editor is left (#155)", () => {
     workspaceLayout.applySnapshot({
       version: 1,

@@ -189,12 +189,18 @@ class WorkspaceLayout {
     return fresh;
   }
 
+  // The non-editor groups, in tree order (left → right, top → bottom).
+  #regionGroups(): TabGroup[] {
+    return this.allGroups().filter((g) => g.id !== G_EDITOR);
+  }
+
   // The group holding the most placed regions that share `homeId`; ties go to
-  // the rightmost (later in tree order).
+  // the rightmost (later in tree order). A sibling the user tabbed into the
+  // editor group doesn't pull the region into the centre.
   #groupOfHomeSiblings(homeId: string): TabGroup | null {
     let best: TabGroup | null = null;
     let bestCount = 0;
-    for (const g of this.allGroups()) {
+    for (const g of this.#regionGroups()) {
       const count = g.tabs.filter((t) => HOMES[t] === homeId).length;
       if (count > 0 && count >= bestCount) {
         best = g;
@@ -204,11 +210,12 @@ class WorkspaceLayout {
     return best;
   }
 
-  // The rightmost group outside the editor home that holds at least one region
-  // (a split holding only documents is an editor column, not a side column).
+  // The rightmost group outside the editor home that holds at least one side
+  // region. A column of only documents, or of only detached editor views
+  // (`details:` / `subtab:`, which vanish with their editor), doesn't count.
   #rightmostRegionGroup(): TabGroup | null {
-    const groups = this.allGroups().filter(
-      (g) => g.id !== G_EDITOR && g.tabs.some((t) => !isEditorPanelId(t) && HOMES[t] !== G_EDITOR),
+    const groups = this.#regionGroups().filter((g) =>
+      g.tabs.some((t) => HOMES[t] !== undefined && HOMES[t] !== G_EDITOR),
     );
     return groups[groups.length - 1] ?? null;
   }

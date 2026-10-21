@@ -16,6 +16,7 @@ Find the places where the passage the reader sends states outright what it could
 {% include "Edit list reply format" %}
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% include "Relevant lore" %}
 {% include "Author directions in brackets" %}
 {% endrole %}

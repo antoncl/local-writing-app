@@ -16,6 +16,7 @@ Act as a line editor on the passage the reader sends. Propose only targeted impr
 {% include "Edit list reply format" %}
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}

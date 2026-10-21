@@ -35,6 +35,7 @@ context_strategy:
 Enrich the passage the reader sends with vivid, concrete sensory detail{% if inputs is defined and inputs.senses is defined and inputs.senses %}, drawing especially on {{ inputs.senses | join(", ") }}{% endif %}. Ground the description in the moment; keep the story beats, the author's voice, and the tense, and don't change what happens. Your rewrite replaces the passage exactly where it stands: it follows on from the text before it and leads into the text after it, without repeating either. Return only the revised prose, with no preamble or explanation.
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% include "Project settings" %}
 {% include "Relevant lore" %}
 {% include "Author directions in brackets" %}

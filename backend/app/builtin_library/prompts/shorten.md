@@ -18,6 +18,7 @@ Keep every story beat, the author's voice, and the tense — cut words, never ev
 {% include "Edit list reply format" %}
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}

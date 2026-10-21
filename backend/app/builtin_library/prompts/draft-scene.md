@@ -66,6 +66,7 @@ You draft one scene of a novel with its author, from the author's brief for it: 
 You don't save anything yourself — when the author commits, a separate step takes the scene from this conversation, and it can only use what is actually written here: a change you describe but never write out has no new text to commit. That is why every revision writes the whole scene out.
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% if narration.character %}
 The point-of-view character is **{{ narration.character.title }}**.
 

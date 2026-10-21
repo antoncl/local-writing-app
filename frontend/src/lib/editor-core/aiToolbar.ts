@@ -20,6 +20,25 @@ export type AiToolbarPosition = {
   placement?: "above" | "below";
 };
 
+// Room a one-row toolbar + gap needs above its anchor line before it flips below.
+const TOOLBAR_CLEARANCE = 40;
+
+// Where the AI toolbar goes for an anchor line whose top/bottom are given
+// relative to the scroll frame's VISIBLE top (#2582). The toolbar renders ABOVE
+// the line so it never occludes the prose (#1275), flipping below when there's
+// no room. An anchor scrolled out of the visible box — the start of a selection
+// longer than the viewport — pins the toolbar to the nearest visible edge, so a
+// running prompt is always in view. The returned `y` is content-space (the
+// toolbar is absolute in the scroll content).
+export function placeAiToolbar(
+  line: { top: number; bottom: number },
+  frame: { height: number; scrollTop: number },
+): { y: number; placement: "above" | "below" } {
+  if (line.top > frame.height) return { y: frame.scrollTop + frame.height, placement: "above" };
+  if (line.top < TOOLBAR_CLEARANCE) return { y: frame.scrollTop + Math.max(line.bottom, 0), placement: "below" };
+  return { y: frame.scrollTop + line.top, placement: "above" };
+}
+
 export type AiSuggestionMeta = {
   provider: string;
   model: string;

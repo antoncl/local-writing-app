@@ -85,6 +85,7 @@
   } from "@/lib/editor-core/slashMenu";
   import {
     placeSelectionToolbar,
+    runToolbarCommand,
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
@@ -883,15 +884,11 @@
     openToolbarMenuId = null;
   }
 
-  async function focusAndRun(command: () => void | Promise<void>) {
-    try {
-      await command();
-    } catch {
-      // Parent action surfaces failures through app-level error state.
-    } finally {
-      openToolbarMenuId = null;
-      updateSelectionMenu();
-    }
+  function focusAndRun(command: () => void | Promise<void>) {
+    return runToolbarCommand(command, {
+      closeMenu: () => (openToolbarMenuId = null),
+      refresh: updateSelectionMenu,
+    });
   }
 
   function toggleToolbarMenu(actionId: string) {
@@ -915,7 +912,8 @@
       inTable,
       isScene,
       reviseEntries,
-      runPrompt: (entry) => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
+      // The toolbar's onRun already wraps this in focusAndRun.
+      runPrompt: (entry) => aiSuggestion.runPromptEntry(entry),
       markTodo: () => todoAnchors.markSelection(),
       readAloud: speechAvailable() ? () => startReadAloud(editor?.state.selection.from, editor?.state.selection.to) : undefined,
     });
@@ -1102,7 +1100,8 @@
       publishImplicitContext();
       onBodyChange?.();
     }
-    if (aiSuggestion.suggestionId) aiSuggestion.updateToolbarPosition();
+    // A running stream shifts the content under its toolbar too (#2582).
+    if (aiSuggestion.suggestionId || aiSuggestion.generating) aiSuggestion.updateToolbarPosition();
     refreshSlashFilterText();
   }
 
@@ -1197,10 +1196,25 @@
     const detachDeferredRestore = editorFrame
       ? applyScrollWhenLaidOut(editorFrame, () => pendingScrollTop, () => { pendingScrollTop = null; })
       : null;
+    // The AI toolbar pins to the visible edge while its anchor is scrolled out
+    // of view (#2582), so it re-places as the frame scrolls.
+    // One re-place per frame, not per scroll event (each forces a layout).
+    const frame = editorFrame;
+    let replaceFrame: number | null = null;
+    const replaceAiToolbar = () => {
+      if (replaceFrame !== null || !aiSuggestion.toolbarPosition.visible) return;
+      replaceFrame = requestAnimationFrame(() => {
+        replaceFrame = null;
+        aiSuggestion.updateToolbarPosition();
+      });
+    };
+    frame?.addEventListener("scroll", replaceAiToolbar, { passive: true });
     const mounted = editor;
     onEditorReady(mounted, "ready");
 
     return () => {
+      frame?.removeEventListener("scroll", replaceAiToolbar);
+      if (replaceFrame !== null) cancelAnimationFrame(replaceFrame);
       detachDeferredRestore?.();
       detachBodyScroll?.();
       onEditorReady(mounted, "destroy");

@@ -302,6 +302,11 @@ const SEQUENCE_FIXTURES: { name: string; identity: Fixture; alignment: Fixture }
     identity: identityFixture(["a", "r", "b"], ["b", "n", "a"]),
     alignment: alignmentFixture(["a", "r", "b"], ["b", "n", "a"]),
   },
+  {
+    name: "an interleaved run of rewrites: L=[a,r1,r2,r3,b] O=[a,n1,n2,b]",
+    identity: identityFixture(["a", "r1", "r2", "r3", "b"], ["a", "n1", "n2", "b"]),
+    alignment: alignmentFixture(["a", "r1", "r2", "r3", "b"], ["a", "n1", "n2", "b"]),
+  },
 ];
 
 describe("listSequence / composeList — the §5 sequence fixtures", () => {
@@ -368,18 +373,33 @@ describe("listSequence — exact ordering", () => {
     ]);
   });
 
-  it("an addition before a removal after the same anchor", () => {
+  it("a removal before an addition after the same anchor — the current item first (#2533)", () => {
     const { field: f, L, O } = identityFixture(["a", "r"], ["a", "n"]);
     const pairing = pairListItems(f, L, O);
     const seq = listSequence(pairing, false);
-    expect(seq).toEqual([{ kind: "paired", l: 0, o: 0 }, { kind: "add", o: 1 }, { kind: "remove", l: 1 }]);
+    expect(seq).toEqual([{ kind: "paired", l: 0, o: 0 }, { kind: "remove", l: 1 }, { kind: "add", o: 1 }]);
   });
 
-  it("both first: the addition then the removal, ahead of the pair", () => {
+  it("both first: the removal then the addition, ahead of the pair", () => {
     const { field: f, L, O } = identityFixture(["r", "a"], ["n", "a"]);
     const pairing = pairListItems(f, L, O);
     const seq = listSequence(pairing, false);
-    expect(seq).toEqual([{ kind: "add", o: 0 }, { kind: "remove", l: 0 }, { kind: "paired", l: 1, o: 1 }]);
+    expect(seq).toEqual([{ kind: "remove", l: 0 }, { kind: "add", o: 0 }, { kind: "paired", l: 1, o: 1 }]);
+  });
+
+  it("a run of rewrites interleaves each removal with its replacement, the longer side's rest after (#2599)", () => {
+    const { field: f, L, O } = identityFixture(["a", "r1", "r2", "r3", "b"], ["a", "n1", "n2", "b"]);
+    const pairing = pairListItems(f, L, O);
+    const seq = listSequence(pairing, false);
+    expect(seq).toEqual([
+      { kind: "paired", l: 0, o: 0 },
+      { kind: "remove", l: 1 },
+      { kind: "add", o: 1 },
+      { kind: "remove", l: 2 },
+      { kind: "add", o: 2 },
+      { kind: "remove", l: 3 },
+      { kind: "paired", l: 4, o: 3 },
+    ]);
   });
 });
 

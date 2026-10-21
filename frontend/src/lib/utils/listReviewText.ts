@@ -95,32 +95,37 @@ export function memberDisplayText(
  *  its own markdown (unescaped: it is already prose, and escaping it would
  *  turn the writer's own formatting into literal asterisks), any other
  *  member as its escaped display text. Blank lines separate the blocks so
- *  each renders as its own markdown block. A scalar list's item is its title
- *  alone — nothing else to show. */
+ *  each renders as its own markdown block. A scalar list's item is its one
+ *  value at body weight, with no title to set apart (#2599): a long_text item
+ *  as its own markdown, any other as its display text. */
 export function itemMarkdown(
   field: MetadataFieldDefinition,
   item: MetadataValue,
   index: number,
   resolveTitle?: (id: string) => string | null,
 ): string {
+  const record = itemRecord(field, item);
+  if (field.item_scalar) {
+    const member = visibleItemMembers(field)[0];
+    return member ? memberMarkdown(member, record.value, resolveTitle) : escapeMarkdown(itemTitle(field, item, index));
+  }
   const blocks = [`**${escapeMarkdown(itemTitle(field, item, index))}**`];
-  if (!field.item_scalar) {
-    const record = itemRecord(field, item);
-    const titleKey = titleMemberKey(field);
-    for (const member of visibleItemMembers(field)) {
-      if (member.key === titleKey) continue;
-      const raw = record[member.key];
-      if (isBlankMemberValue(raw)) continue;
-      const body =
-        member.type === "long_text"
-          ? typeof raw === "string"
-            ? raw
-            : String(raw)
-          : memberDisplayText(member, raw, resolveTitle);
-      blocks.push(`*${escapeMarkdown(member.name || member.key)}*\n\n${body}`);
-    }
+  const titleKey = titleMemberKey(field);
+  for (const member of visibleItemMembers(field)) {
+    if (member.key === titleKey) continue;
+    const raw = record[member.key];
+    if (isBlankMemberValue(raw)) continue;
+    blocks.push(`*${escapeMarkdown(member.name || member.key)}*\n\n${memberMarkdown(member, raw, resolveTitle)}`);
   }
   return blocks.join("\n\n");
+}
+
+/** A member value as markdown: a `long_text` value as its own markdown
+ *  (unescaped — it is already prose, and escaping would turn the writer's own
+ *  formatting into literal asterisks), any other as its escaped display text. */
+function memberMarkdown(member: GroupMember, raw: MetadataValue | undefined, resolveTitle?: (id: string) => string | null): string {
+  if (member.type === "long_text") return typeof raw === "string" ? raw : String(raw ?? "");
+  return memberDisplayText(member, raw, resolveTitle);
 }
 
 /** The order unit's two stacked blocks (§6): a numbered list of escaped

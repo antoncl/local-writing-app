@@ -4,8 +4,8 @@ import {
   assistantScopeTags,
   assistantSpeakerName,
   assistantTitle,
+  assistantForPrompt,
   partitionAssistants,
-  scopedDefaultAssistantId,
   topmostMatchingAssistant,
 } from "@/lib/chat/assistantScope";
 
@@ -35,8 +35,16 @@ const ROSTER = [
   A("d", "Recap", "summary, terse"), // CSV form
 ];
 
-const prompt = (assistant_tags?: unknown): PromptEntrySummary =>
-  ({ id: "p", title: "P", entry_type: "prompt:general", metadata: assistant_tags === undefined ? {} : { assistant_tags } }) as PromptEntrySummary;
+const prompt = (assistant_tags?: unknown, preferred_assistant_id?: string): PromptEntrySummary =>
+  ({
+    id: "p",
+    title: "P",
+    entry_type: "prompt:general",
+    metadata: {
+      ...(assistant_tags === undefined ? {} : { assistant_tags }),
+      ...(preferred_assistant_id === undefined ? {} : { preferred_assistant_id }),
+    },
+  }) as PromptEntrySummary;
 
 describe("assistantScopeTags", () => {
   it("reads array and CSV forms; empty when absent", () => {
@@ -68,11 +76,25 @@ describe("partitionAssistants (soft partition)", () => {
 describe("dynamic default (ADR-0024)", () => {
   it("topmost matching the scope", () => {
     expect(topmostMatchingAssistant(ROSTER, ["summary"])?.id).toBe("b");
-    expect(scopedDefaultAssistantId(ROSTER, ["summary"], "a")).toBe("b");
+    expect(assistantForPrompt(prompt(["summary"]), ROSTER)).toBe("b");
   });
-  it("falls back to topmost overall when nothing matches or no scope", () => {
-    expect(scopedDefaultAssistantId(ROSTER, ["nope"], "a")).toBe("a");
-    expect(scopedDefaultAssistantId(ROSTER, [], "a")).toBe("a");
+  it("no preference when nothing matches or no scope (the backend's topmost overall)", () => {
+    expect(assistantForPrompt(prompt(["nope"]), ROSTER)).toBe("");
+    expect(assistantForPrompt(prompt(), ROSTER)).toBe("");
+    expect(assistantForPrompt(null, ROSTER)).toBe("");
+  });
+});
+
+// #2593: every prompt launch resolves through assistantForPrompt, so the pin
+// and the scope reach the run instead of the backend's unscoped default.
+describe("assistantForPrompt", () => {
+  it("the explicit pin wins over the tag scope", () => {
+    expect(assistantForPrompt(prompt(["summary"], "c"), ROSTER)).toBe("c");
+    expect(assistantForPrompt(prompt(undefined, "c"), ROSTER)).toBe("c");
+  });
+  it("a pin to an assistant no longer in the roster is ignored", () => {
+    expect(assistantForPrompt(prompt(["summary"], "deleted"), ROSTER)).toBe("b");
+    expect(assistantForPrompt(prompt(undefined, "deleted"), ROSTER)).toBe("");
   });
 });
 
@@ -110,7 +132,7 @@ describe("un-listed assistants are out of the picker and never the default", () 
     // Pre-amendment this returned `gone`: un-listing was a way to make the app
     // START using something, since the un-listed row still sorts first.
     expect(topmostMatchingAssistant(MIXED, ["summary"])?.id).toBe("keep");
-    expect(scopedDefaultAssistantId(MIXED, ["summary"], "")).toBe("keep");
+    expect(assistantForPrompt(prompt(["summary"]), MIXED)).toBe("keep");
   });
 
   it("the picker omits un-listed assistants entirely, not below a divider", () => {
@@ -122,6 +144,6 @@ describe("un-listed assistants are out of the picker and never the default", () 
   it("an emptied roster yields an empty picker rather than a guess", () => {
     const none = [A("x", "X", undefined, "unlisted")];
     expect(partitionAssistants(none, "", [])).toEqual({ matching: [], rest: [] });
-    expect(scopedDefaultAssistantId(none, ["summary"], "")).toBe("");
+    expect(assistantForPrompt(prompt(["summary"]), none)).toBe("");
   });
 });

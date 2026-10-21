@@ -34,7 +34,7 @@ describe("lockPromptTemplate (#2129)", () => {
       field_contract_stored: [{ id: "bio" }],
     } as never);
 
-    const result = await lockPromptTemplate(entry(), { subject: "chat_1", inputs: {} });
+    const result = await lockPromptTemplate(entry(), { subject: "chat_1", inputs: {}, assistantId: "" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.lock.systemPrompt).toBe("Be terse. Stay in character.\n\nSecond system message.");
@@ -57,7 +57,7 @@ describe("lockPromptTemplate (#2129)", () => {
       char_count: 0,
       rendered: true,
     } as never);
-    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {} });
+    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {}, assistantId: "" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.lock.loreEnabled).toBe(false);
@@ -78,7 +78,7 @@ describe("lockPromptTemplate (#2129)", () => {
       rendered: false,
       error: { message: "undefined variable 'foo'", kind: "undefined" },
     } as never);
-    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {} });
+    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {}, assistantId: "" });
     expect(result).toEqual({
       ok: false,
       error: "Couldn't render prompt template: undefined variable 'foo'",
@@ -87,7 +87,7 @@ describe("lockPromptTemplate (#2129)", () => {
 
   it("a thrown error returns {ok:false} with its message", async () => {
     aiPreview.mockRejectedValue(new Error("network down"));
-    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {} });
+    const result = await lockPromptTemplate(entry(), { subject: "", inputs: {}, assistantId: "" });
     expect(result).toEqual({
       ok: false,
       error: "Couldn't render prompt template: network down",
@@ -97,9 +97,11 @@ describe("lockPromptTemplate (#2129)", () => {
   it("the request carries target_scene_id '', commit false, the subject, and the resolution scene id", async () => {
     aiPreview.mockResolvedValue({ messages: [], warnings: [], char_count: 0, rendered: true } as never);
     const scoped = entry("t", [{ name: "as_of", type: "scene_ref" } as never]);
-    await lockPromptTemplate(scoped, { subject: "chat_9", inputs: { as_of: "scene_42" } });
+    await lockPromptTemplate(scoped, { subject: "chat_9", inputs: { as_of: "scene_42" }, assistantId: "gemma" });
     expect(aiPreview).toHaveBeenCalledWith(
       expect.objectContaining({
+        // #2593: the render runs on the assistant the chat will send on.
+        assistant_id: "gemma",
         template_source: "t",
         target_scene_id: "",
         commit: false,

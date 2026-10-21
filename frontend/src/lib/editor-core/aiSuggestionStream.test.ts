@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import { api } from "@/lib/api";
+import { assistantEntriesStore } from "@/lib/stores/assistants";
 import { AISuggestion } from "./proseMarks";
 import { proseStarterKit } from "./proseStarterKit";
 import { AiSuggestionController } from "./aiSuggestion.svelte";
@@ -29,6 +30,9 @@ const ENTRY = {
   context_strategy: { output: { handler: "inline" } },
 } as never;
 
+// The prompt roster retry looks its entry up in; empty unless a test fills it.
+const promptEntries: unknown[] = [];
+
 function setup(text = "") {
   const editor = new Editor({
     element: document.createElement("div"),
@@ -44,7 +48,7 @@ function setup(text = "") {
     getEditorFrame: () => undefined,
     getScene: () => ({ id: "scene_1" }) as never,
     getDocumentKind: () => "manuscript",
-    getPromptCtx: () => ({ promptEntries: [] }) as never,
+    getPromptCtx: () => ({ promptEntries }) as never,
     onInvocationCost: () => {},
     addCharacterCost: () => {},
     onRequestInputsDialog: () => {},
@@ -264,5 +268,57 @@ describe("a cursor insert is spaced from the words around it (#2459)", () => {
     await ctrl.runPromptEntryWithInputs(ENTRY, {});
     ctrl.accept();
     expect(docText(editor)).toBe("Night fell. The end.");
+  });
+});
+
+// #2593: a toolbar / slash / Ctrl+J run passes no assistant; the prompt's own
+// preference must still reach the wire, or the backend's unscoped default runs.
+describe("the prompt's assistant reaches the request (#2593)", () => {
+  const ROSTER = [
+    { id: "main", title: "Main", metadata: {}, computed_metadata: { listed: "listed" } },
+    { id: "gemma", title: "Gemma4", metadata: { assistant_tags: ["tag_gemma"] }, computed_metadata: { listed: "listed" } },
+  ] as never;
+  const SCOPED = { ...(ENTRY as object), metadata: { assistant_tags: ["tag_gemma"] } } as never;
+  beforeEach(() => assistantEntriesStore.set(ROSTER));
+  afterEach(() => {
+    assistantEntriesStore.set([]);
+    promptEntries.splice(0);
+  });
+  const sentAssistant = () => (vi.mocked(api.aiGenerateStream).mock.calls[0][0] as { assistant_id?: string }).assistant_id;
+
+  it("a tag-scoped prompt run without a pick streams on the matching assistant", async () => {
+    const { ctrl } = setup();
+    fakeStream([DONE]);
+    await ctrl.runPromptEntryWithInputs(SCOPED, {});
+    expect(sentAssistant()).toBe("gemma");
+  });
+
+  it("an explicit pick still wins", async () => {
+    const { ctrl } = setup();
+    fakeStream([DONE]);
+    await ctrl.runPromptEntryWithInputs(SCOPED, {}, "main");
+    expect(sentAssistant()).toBe("main");
+  });
+
+  it("retry re-resolves rather than replaying the resolved default as a pick", async () => {
+    const { ctrl } = setup();
+    fakeStream([DONE]);
+    promptEntries.push(SCOPED);
+    fakeStream([{ type: "delta", text: "x" }, DONE]);
+    await ctrl.runPromptEntryWithInputs(SCOPED, {});
+    expect(sentAssistant()).toBe("gemma");
+    // The retry replays the writer's pick — none — so it re-resolves against the
+    // prompt and roster as they are then, rather than pinning "gemma" as if the
+    // writer had chosen it (an un-listed or re-tagged Gemma4 would still run).
+    const rerun = vi.spyOn(ctrl, "runPromptEntry").mockResolvedValue();
+    await ctrl.retry();
+    expect(rerun).toHaveBeenCalledWith(SCOPED, {}, "");
+  });
+
+  it("an unscoped prompt sends no assistant (the backend's default)", async () => {
+    const { ctrl } = setup();
+    fakeStream([DONE]);
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    expect(sentAssistant()).toBeUndefined();
   });
 });

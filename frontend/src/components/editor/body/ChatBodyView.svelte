@@ -68,11 +68,10 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
+    assistantForPrompt,
     assistantScopeTags,
     assistantSpeakerName,
     preferredAssistantForPrompt,
-    scopedDefaultAssistantId,
-    topmostMatchingAssistant,
   } from "@/lib/chat/assistantScope";
   import {
     cacheTermSecondsFor,
@@ -146,7 +145,7 @@
 
   // ADR-0100: Place flags on a finished reply (its own module: this file's size cap).
   const placeFlags = new PlaceFlagsController({
-    getChat: () => ({ chatId: scene?.id ?? null, assistantId: chatAssistantId || null, history: chatHistory }),
+    getChat: () => ({ chatId: scene?.id ?? null, assistantId: wireAssistantId() || null, history: chatHistory }),
     getScene: () => ({ sceneId: quoteSource.sceneId, plain: quoteSource.plain }),
     hostPaneId: () => hostPaneId,
     setCostTotal: (total) => {
@@ -228,7 +227,7 @@
         ? inputValuesFromDrafts(effectivePromptInputs(activePromptEntry), chatInputDrafts, selectorRoster)
         : {},
     getSubject: () => record.subject,
-    getAssistantId: () => chatAssistantId,
+    getAssistantId: wireAssistantId,
     mayCaptureLoreGate: () => !isLocked && !chatRunning && !chatSystemPrompt,
     setLoreEnabled: (v) => {
       record.loreEnabled = v;
@@ -261,7 +260,7 @@
   // history/cost/status, so the cost-total snapshot and the chat status lines
   // stay component-owned.
   const commit = new ChatCommitController({
-    getAssistantId: () => chatAssistantId,
+    getAssistantId: wireAssistantId,
     getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
     // ADR-0067 S2: the chat's own node id — the commit runs as a continuation
     // of this chat, so the server reads back the field set its lock render
@@ -464,12 +463,8 @@
     // Seed the assistant from the prompt: an explicit preferred pin wins;
     // otherwise the dynamic default = topmost assistant matching the prompt's
     // tag scope (ADR-0024). No scope + no pin → leave the current selection.
-    const preferred = preferredAssistantForPrompt(entry);
-    if (preferred) {
-      chatAssistantId = preferred;
-    } else {
-      const tags = assistantScopeTags(entry);
-      if (tags.length > 0) chatAssistantId = topmostMatchingAssistant(assistantEntries, tags)?.id ?? "";
+    if (preferredAssistantForPrompt(entry) || assistantScopeTags(entry).length > 0) {
+      chatAssistantId = assistantForPrompt(entry, assistantEntries);
     }
     // chatSystemPrompt stays empty until first-send; renderAndLockPromptTemplate
     // fills it in from api.aiPreview right before the first user turn ships
@@ -629,7 +624,7 @@
     try {
       for await (const ev of api.aiChatStream(
         {
-          assistant_id: chatAssistantId || null,
+          assistant_id: wireAssistantId() || null,
           system_prompt: chatSystemPrompt,
           messages: outgoingHistory(chatHistory.slice(0, idx)),
           chat_id: scene?.id ?? null,
@@ -807,7 +802,7 @@
   // inputValuesFromDrafts, Seam 0) and assigns the locked fields.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
     const inputs = inputValuesFromDrafts(effectivePromptInputs(entry), chatInputDrafts, selectorRoster);
-    const result = await lockPromptTemplate(entry, { subject: record.subject, inputs });
+    const result = await lockPromptTemplate(entry, { subject: record.subject, inputs, assistantId: wireAssistantId() });
     if (!result.ok) {
       chatError = result.error;
       return false;
@@ -946,7 +941,15 @@
     commit.subjectEntryType = subjectLoreEntryType;
   });
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
-  let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
+  // What the empty ("Default") selection resolves to for this prompt: its pin,
+  // else its tag scope, else "" (the backend's topmost overall).
+  let promptAssistantId = $derived(assistantForPrompt(activePromptEntry, assistantEntries));
+  let scopedDefaultId = $derived(promptAssistantId || defaultAssistantId);
+  // The id every request carries — the assistant the chip and speaker header
+  // name, not a bare "" the backend would resolve without the prompt (#2593).
+  function wireAssistantId(): string {
+    return chatAssistantId || promptAssistantId;
+  }
   let declaredInputs = $derived(activePromptEntry ? effectivePromptInputs(activePromptEntry) : []);
   // ADR-0046 §6.4 create mode: the revise-target picker (`entry`) is meaningless
   // when drafting a NEW entry — and filling it would silently flip the flow to

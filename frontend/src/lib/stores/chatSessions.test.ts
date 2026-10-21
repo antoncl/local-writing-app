@@ -14,6 +14,7 @@ vi.mock("@/lib/stores/references", async (importOriginal) => ({
 }));
 
 import { api } from "@/lib/api";
+import { assistantEntriesStore } from "@/lib/stores/assistants";
 import { chatSessions, uniqueChatTitle } from "@/lib/stores/chatSessions.svelte";
 import { chatSessionsStore } from "@/lib/stores/chats";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -124,6 +125,33 @@ describe("openChatFromPromptEntry — chat title (#695)", () => {
     await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subject: "lysandra", subjectTitle: "Lys" });
     expect(api.resolveReferences).not.toHaveBeenCalled();
     expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Lys — Revise entry" }));
+  });
+});
+
+// #2593: a launch with no explicit assistant carries the prompt's own
+// preference to the wire — the backend resolves "" without seeing the prompt.
+describe("openChatFromPromptEntry — the prompt's assistant (#2593)", () => {
+  const ROSTER = [
+    { id: "main", title: "Main", metadata: {}, computed_metadata: { listed: "listed" } },
+    { id: "gemma", title: "Gemma4", metadata: { assistant_tags: ["tag_gemma"] }, computed_metadata: { listed: "listed" } },
+  ] as never;
+  const SCOPED = { ...PROMPT, metadata: { assistant_tags: ["tag_gemma"] } } as unknown as PromptEntrySummary;
+  beforeEach(() => assistantEntriesStore.set(ROSTER));
+  afterEach(() => assistantEntriesStore.set([]));
+
+  it("a tag-scoped prompt launches on the matching assistant", async () => {
+    await chatSessions.openChatFromPromptEntry(SCOPED, {}, null, {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ assistant_id: "gemma" }));
+  });
+
+  it("an explicit pick still wins", async () => {
+    await chatSessions.openChatFromPromptEntry(SCOPED, {}, null, { assistantId: "main" });
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ assistant_id: "main" }));
+  });
+
+  it("an unscoped prompt leaves the choice to the backend", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ assistant_id: "" }));
   });
 });
 

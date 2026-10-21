@@ -14,6 +14,8 @@
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
+  import { assistantEntriesStore } from "@/lib/stores/assistants";
+  import { assistantForPrompt } from "@/lib/chat/assistantScope";
   import { finalizePromptRoster, type PromptResolutionContext } from "@/lib/editor-core/promptResolution";
   import { formatCostEur } from "@/lib/utils/money";
   import type { EditableDocument, FinalizeSceneResponse, LoreEntrySummary, PromptEntrySummary } from "@/lib/types";
@@ -101,8 +103,12 @@
       // Push the editor's latest words to disk first, so the projection (and the
       // safety-net snapshot it takes on Apply) sees them, not the stale copy.
       await onFlush?.(scene.id);
+      // The prompt's own assistant (pin, else tag scope) — "" leaves the
+      // backend's default, which never sees the prompt (#2593).
+      const assistantId = assistantForPrompt(entry, $assistantEntriesStore);
       for await (const ev of api.aiGenerateStream(
         {
+          ...(assistantId ? { assistant_id: assistantId } : {}),
           template_source: entry.body,
           target_scene_id: scene.id,
           session_id: scene.id,

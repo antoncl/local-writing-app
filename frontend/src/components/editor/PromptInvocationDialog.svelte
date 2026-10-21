@@ -23,6 +23,7 @@
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { isInputMissing } from "@/lib/utils/promptInputs";
+  import { assistantForPrompt } from "@/lib/chat/assistantScope";
   import { buildSelectorRoster } from "@/lib/views/pickerSelectors";
   import { api } from "@/lib/api";
   import type {
@@ -82,8 +83,12 @@
   // opened instead of firing directly.
   let error: string | null = $state(null);
   let drafts: Record<string, string> = $state({});
-  // "" means: use the user's default assistant (resolved server-side).
+  // "" means: use the default — the prompt's own preference (pin, else tag
+  // scope), else the user's default (resolved server-side).
   let assistantId: string = $state("");
+  // What "" resolves to for this prompt, so the label and the estimate name the
+  // assistant that will actually run (#2593).
+  const promptAssistantId = $derived(assistantForPrompt(entry, assistantEntries));
   // Tracked so the "previously used" path can pre-fill drafts.
   let lastInvokedEntryId: string | null = null;
   let lastInvokedInputs: Record<string, unknown> = {};
@@ -166,7 +171,7 @@
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(current, inputs),
         commit: false,
-        assistant_id: assistantId || null,
+        assistant_id: assistantId || promptAssistantId || null,
       });
       if (ourToken !== estimateToken) return;
       // Render errors come back as 200 + preview.error (the endpoint is
@@ -235,7 +240,7 @@
     declaredInputs={effectivePromptInputs(entry).filter((input) => !input.hidden)}
     drafts={drafts}
     assistantId={assistantId}
-    defaultAssistantLabel={assistantDisplayName(defaultAssistantId) || "use machine default"}
+    defaultAssistantLabel={assistantDisplayName(promptAssistantId || defaultAssistantId) || "use machine default"}
     assistantEntries={assistantEntries}
     error={error}
     estimate={estimate}

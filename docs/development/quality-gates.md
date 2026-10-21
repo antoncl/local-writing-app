@@ -71,10 +71,45 @@ on since 2026-10-02). Without it, a PR's checks test the branch as it forked, no
 the merge result: on 2026-10-01 two PRs that each passed (#2389, #2391) merged
 into a red master, because git's textual merge attached one PR's
 `field_overrides` block to the other's new entry type. The cost is a rebase or
-"Update branch" plus a CI rerun whenever master moved under an open PR. Still:
+"Update branch" plus a CI rerun whenever master moved under an open PR — which
+is why a PR only pays for the jobs its files can affect (next section). Still:
 **never report "green" without opening the run.** `gh pr checks` can report a
 full green table for an *earlier* commit — filter runs by `head_sha` and check
 per-job status.
+
+### Path-aware jobs — a PR pays only for what it can break
+
+A first `changes` job pipes the PR's changed files (its merge commit against the
+base tip, renames counted as delete + add) through
+`scripts/ci_changed_areas.py`, which names the areas they can affect. Each heavy
+job skips an untouched area. **A job skipped by its `if` reports as passed**, so
+the four required checks always report and never sit pending. A push to master
+and a manual run gate everything.
+
+| Changed path | backend pytest (Linux + Windows) | frontend | e2e |
+|---|---|---|---|
+| `backend/app/builtin_library/` (built-in prompts), `backend/tests/` | ✓ | | |
+| rest of `backend/` (incl. `pyproject.toml`, `requirements.lock`) | ✓ | | ✓ |
+| `docs/` | ✓ | | |
+| `frontend/` | | ✓ | ✓ |
+| `frontend/src/lib/views/__fixtures__/`, `viewGrammar.generated.ts` (parity fixtures pytest reads) | ✓ | ✓ | ✓ |
+| `gates.yml`, `scripts/`, `.claude/`, `spec/`, `.ruff.toml`, `.pre-commit-config.yaml`, `.gitattributes` | ✓ | ✓ | ✓ |
+| other `.github/`, `packaging/`, `site/`, root `*.md`, `LICENSE`, `.gitignore` | | | |
+| **anything not listed** | ✓ | ✓ | ✓ |
+
+The `backend` job's ruff, guard, drift and ratchet steps are cheap and
+repo-wide, so they run on every PR; only its pytest step skips.
+
+The mapping is **fail-open**, and that is the invariant to keep when editing it:
+a wrong guess may cost a slower run, never a skipped job that should have gone
+red. So an unmapped path runs everything; an empty diff runs everything; and the
+consumers test `!= 'false'` rather than `== 'true'`, so a failed `changes` job
+leaves empty outputs and every heavy job runs (`!cancelled()` keeps them going
+past it). `test_ci_changed_areas.py` pins the rules and fails when a tracked
+path matches no rule, so a new top-level folder gets mapped on purpose. **When a
+test starts reading a file outside its area** (a backend test opening a
+frontend fixture, say), add that path to the rules — otherwise a change to it
+skips the test that reads it.
 
 ## The exemption ratchet — the guard on the guards
 

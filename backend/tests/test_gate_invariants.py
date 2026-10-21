@@ -896,6 +896,83 @@ def test_reaching_for_a_second_http_client_fails(tmp_path):
     assert http_guard.main([f]) == 1
 
 
+# --- AI-call flush guard (#2598) ---
+#
+# A model call reads project files from disk, so it must persist the author's
+# pending edits first (#2587/#2596). The behaviour tests are the guard's own
+# mutation check: each failing case asserts the guard FIRES on a real miss.
+
+flush_guard = _load_script("check_ai_call_flush")
+
+
+def _flush_case(tmp_path, body: str, rel: str = "lib/stores/thing.svelte.ts") -> int:
+    return flush_guard.main([_frontend_file(tmp_path, rel, body)])
+
+
+def test_a_model_call_with_no_flush_fails(tmp_path):
+    for method in flush_guard.MODEL_CALLS:
+        body = f"async function go() {{\n  await api.{method}({{}});\n}}\n"
+        assert _flush_case(tmp_path, body) == 1, method
+
+
+def test_a_flush_just_above_the_call_passes(tmp_path):
+    body = "async function go() {\n  await editorPanes.flushBeforeAICall();\n  await api.extractFlags({});\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_an_injected_persist_dep_counts_as_a_flush(tmp_path):
+    body = "async function go() {\n  await this.#deps.persistEdits?.();\n  for await (const ev of api.aiGenerateStream({})) {}\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_flush_too_far_above_does_not_count(tmp_path):
+    filler = "  const x = 1;\n" * (flush_guard.WINDOW + 2)
+    body = f"async function go() {{\n  await editorPanes.flushBeforeAICall();\n{filler}  await api.aiChat({{}});\n}}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_reasoned_marker_passes(tmp_path):
+    body = "async function go() {\n  // ai-flush: sendChat persists before calling this\n  await api.aiChatStream({});\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_bare_marker_with_no_reason_fails(tmp_path):
+    body = "async function go() {\n  // ai-flush:\n  await api.aiChatStream({});\n}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_flush_named_only_in_a_comment_does_not_count(tmp_path):
+    body = "async function go() {\n  // we used to call flushBeforeAICall() here\n  await api.aiChat({});\n}\n"
+    assert _flush_case(tmp_path, body) == 1
+
+
+def test_a_model_call_inside_a_comment_is_not_a_violation(tmp_path):
+    body = "// legacy: api.aiChatStream(payload) was called here\nconst x = 1;\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_a_non_model_call_needs_no_flush(tmp_path):
+    """Previews and estimates call no model; aiChat must not match aiChatStream's prefix either way."""
+    body = "async function go() {\n  await api.aiPreview({});\n  await api.aiHealth();\n}\n"
+    assert _flush_case(tmp_path, body) == 0
+
+
+def test_the_client_and_tests_are_exempt_from_the_flush_guard(tmp_path):
+    body = "export const ai = { go: () => api.aiChat({}) };\n"
+    assert _flush_case(tmp_path, body, rel="lib/api/ai.ts") == 0
+    assert _flush_case(tmp_path, body, rel="lib/stores/thing.test.ts") == 0
+
+
+def test_every_listed_model_call_exists_on_the_client():
+    """A renamed or removed API method must not leave a dead name in MODEL_CALLS,
+    or the guard would silently stop watching its successor."""
+    client = "".join(
+        p.read_text(encoding="utf-8") for p in (REPO / "frontend" / "src" / "lib" / "api").glob("*.ts")
+    )
+    for method in flush_guard.MODEL_CALLS:
+        assert re.search(rf"^\s*{method}\s*\(", client, flags=re.MULTILINE), method
+
+
 # --- the new gates are enforced at every layer, like the older guards (#687) ---
 #
 # Same superset contract: the scripts own the selection rule; the CI pathspecs,
@@ -907,10 +984,13 @@ def test_ci_pathspecs_cover_the_new_guards():
     tracked = _tracked_files()
     layer_truth = {f for f in tracked if layer_guard.is_service_file(Path(f))}
     http_truth = {f for f in tracked if http_guard.is_checked(Path(f))}
+    flush_truth = {f for f in tracked if flush_guard.is_checked(Path(f))}
     layer_selected = _tracked_files(*_ci_pathspecs("check_layer_imports.py"))
     http_selected = _tracked_files(*_ci_pathspecs("check_http_client.py"))
+    flush_selected = _tracked_files(*_ci_pathspecs("check_ai_call_flush.py"))
     assert layer_truth <= layer_selected, sorted(layer_truth - layer_selected)
     assert http_truth <= http_selected, sorted(http_truth - http_selected)
+    assert flush_truth <= flush_selected, sorted(flush_truth - flush_selected)
 
 
 def test_precommit_filters_cover_the_new_guards():
@@ -922,11 +1002,14 @@ def test_precommit_filters_cover_the_new_guards():
         if "files" in hook
     }
     layer_re, http_re = patterns["layer-import-guard"], patterns["http-client-guard"]
+    flush_re = patterns["ai-call-flush-guard"]
     for f in _tracked_files():
         if layer_guard.is_service_file(Path(f)):
             assert layer_re.search(f), f"pre-commit layer filter misses {f}"
         if http_guard.is_checked(Path(f)):
             assert http_re.search(f), f"pre-commit http filter misses {f}"
+        if flush_guard.is_checked(Path(f)):
+            assert flush_re.search(f), f"pre-commit ai-call flush filter misses {f}"
 
 
 def test_the_hook_feeds_the_new_guards_their_files():
@@ -938,6 +1021,9 @@ def test_the_hook_feeds_the_new_guards_their_files():
         if http_guard.is_checked(Path(f)):
             commands = hook.applicable_guards(REPO / f)
             assert any("check_http_client" in " ".join(cmd) for cmd in commands), f
+        if flush_guard.is_checked(Path(f)):
+            commands = hook.applicable_guards(REPO / f)
+            assert any("check_ai_call_flush" in " ".join(cmd) for cmd in commands), f
 
 
 def test_the_guards_have_no_grandfather_escape_hatch():
@@ -954,6 +1040,7 @@ def test_the_guards_have_no_grandfather_escape_hatch():
         "check_layer_imports",
         "check_http_client",
         "check_svelte_runes",
+        "check_ai_call_flush",
     ):
         module = _load_script(name)
         assert not hasattr(module, "GRANDFATHERED"), f"{name} still has a GRANDFATHERED set"

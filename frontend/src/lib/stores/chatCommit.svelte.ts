@@ -279,6 +279,7 @@ export class ChatCommitController {
     followUps = false,
   ): Promise<AIEntryPatch | null> {
     return this.runExtraction(
+      // ai-flush: runExtraction persists before it calls this (#2596)
       () =>
         api.extractEntryPatch(entryId, {
           messages: this.deps.getHistory(),
@@ -489,6 +490,7 @@ export class ChatCommitController {
     return {
       extract: () =>
         this.runExtraction(
+          // ai-flush: runExtraction persists before it calls this (#2596)
           () =>
             api.extractEntryDraft(entryType, {
               messages: this.deps.getHistory(),

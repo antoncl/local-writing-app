@@ -791,6 +791,7 @@ export class AiSuggestionController {
       // and stops it (#2464). The terminal `done` carries the parsed edits.
       let res: Extract<AIStreamEvent, { type: "done" }> | null = null;
       let streamError: string | null = null;
+      // ai-flush: runPromptEntryWithInputs persists before `produce` (#2596)
       for await (const ev of api.aiGenerateStream({
         template_source: entry.body,
         target_scene_id: this.#sceneIdForWire(scene),
@@ -1181,6 +1182,7 @@ export class AiSuggestionController {
     };
 
     try {
+      // ai-flush: runPromptEntryWithInputs persists before `produce` (#2596)
       for await (const ev of api.aiGenerateStream({
         template_source: entry.body,
         target_scene_id: this.#sceneIdForWire(scene),

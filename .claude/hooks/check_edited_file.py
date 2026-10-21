@@ -31,6 +31,7 @@ STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
 LAYER_GUARD = REPO / "scripts" / "check_layer_imports.py"
 HTTP_CLIENT_GUARD = REPO / "scripts" / "check_http_client.py"
+AI_CALL_FLUSH_GUARD = REPO / "scripts" / "check_ai_call_flush.py"
 
 # The hook runs on *every* edit and its stdout is injected into the model's
 # context, so both its wall-clock and its output are on the session's hot path.
@@ -110,6 +111,8 @@ def applicable_guards(path: Path) -> list[list[str]]:
         commands.append([sys.executable, str(LAYER_GUARD), str(path)])
     if path.suffix in {".ts", ".js", ".svelte"} and "/frontend/src/" in posix and HTTP_CLIENT_GUARD.is_file():
         commands.append([sys.executable, str(HTTP_CLIENT_GUARD), str(path)])
+    if path.suffix in {".ts", ".js", ".svelte"} and "/frontend/src/" in posix and AI_CALL_FLUSH_GUARD.is_file():
+        commands.append([sys.executable, str(AI_CALL_FLUSH_GUARD), str(path)])
     if path.suffix == ".md" and (path.parent / "MEMORY.md").is_file() and MEMORY_GUARD.is_file():
         commands.append([sys.executable, str(MEMORY_GUARD), "--memory-dir", str(path.parent)])
     return commands

@@ -35,7 +35,13 @@
  */
 import type { DiffRun, FieldDiff } from "@/lib/types";
 import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
-import { alignSequences, isWhitespaceToken, tokenize, MAX_WORD_DIFF_TOKENS } from "@/lib/utils/sequenceAlign";
+import {
+  alignSequences,
+  BODY_ALIGN_LOOKAHEAD,
+  isWhitespaceToken,
+  tokenize,
+  MAX_WORD_DIFF_TOKENS,
+} from "@/lib/utils/sequenceAlign";
 
 type Interval = [number, number];
 type Region = [number, number, number, number]; // was_start, was_end, now_start, now_end
@@ -300,7 +306,7 @@ export function diffRuns(was: string, now: string): DiffRun[] {
   const wasBlocks = wasChunks.map(([block]) => block);
   const nowBlocks = nowChunks.map(([block]) => block);
   const runs: DiffRun[] = [];
-  for (const op of alignSequences(wasBlocks, nowBlocks)) {
+  for (const op of alignSequences(wasBlocks, nowBlocks, BODY_ALIGN_LOOKAHEAD)) {
     if (op.op === "equal") {
       for (let k = 0; k < op.wasEnd - op.wasStart; k++) {
         runs.push(run("equal", wasBlocks[op.wasStart + k]));

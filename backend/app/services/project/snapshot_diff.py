@@ -131,10 +131,13 @@ MAX_WORD_DIFF_TOKENS = 2000
 # length threshold §F rules out.
 SAME_BLOCK_RATIO = 0.5
 
-# How far ahead `_align_blocks` looks for the block a block became. Small on
-# purpose: splitting or merging a paragraph moves its neighbours by one or two,
-# and a wider search starts pairing blocks that merely resemble each other.
-ALIGN_LOOKAHEAD = 4
+# How far ahead `_align_blocks` looks for the block a block became, in
+# paragraphs. Small on purpose: splitting or merging a paragraph moves its
+# neighbours by one or two, and a wider search starts pairing blocks that merely
+# resemble each other. It was 4 while the separators were aligned as blocks too,
+# which reached 2 paragraphs — the reach this was tested at; #2591 dropped the
+# separators and kept the reach.
+ALIGN_LOOKAHEAD = 2
 
 
 class SnapshotDiffMixin:

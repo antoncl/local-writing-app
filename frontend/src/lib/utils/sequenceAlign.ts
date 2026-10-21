@@ -70,8 +70,8 @@ function alignReplaceSpan(was: string[], now: string[], i1: number, i2: number, 
       j++;
       continue;
     }
-    const aheadNow = firstMatchIndex(was[i], now, j + 1, Math.min(j2, j + 1 + ALIGN_LOOKAHEAD));
-    const aheadWas = firstMatchIndex(now[j], was, i + 1, Math.min(i2, i + 1 + ALIGN_LOOKAHEAD));
+    const aheadNow = firstMatchIndex((c) => isARewriteOf(was[i], c), now, j + 1, Math.min(j2, j + 1 + ALIGN_LOOKAHEAD));
+    const aheadWas = firstMatchIndex((c) => isARewriteOf(c, now[j]), was, i + 1, Math.min(i2, i + 1 + ALIGN_LOOKAHEAD));
     if (aheadNow !== null && (aheadWas === null || aheadNow - j <= aheadWas - i)) {
       ops.push({ op: "insert", nowStart: j, nowEnd: aheadNow });
       j = aheadNow;
@@ -89,9 +89,16 @@ function alignReplaceSpan(was: string[], now: string[], i1: number, i2: number, 
   return ops;
 }
 
-function firstMatchIndex(block: string, candidates: string[], start: number, stop: number): number | null {
+/** `isARewriteOf` is not symmetric (`isjunk` applies to its second sequence
+ *  only), so each side's look-ahead asks it in was-then-now order (#2591). */
+function firstMatchIndex(
+  matches: (candidate: string) => boolean,
+  candidates: string[],
+  start: number,
+  stop: number,
+): number | null {
   for (let index = start; index < stop; index++) {
-    if (isARewriteOf(block, candidates[index])) return index;
+    if (matches(candidates[index])) return index;
   }
   return null;
 }

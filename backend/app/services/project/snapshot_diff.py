@@ -101,6 +101,7 @@ def _is_whitespace(token: str) -> bool:
 
 Interval = tuple[int, int]
 Region = tuple[int, int, int, int]  # (was start, was end, now start, now end)
+Chunk = tuple[str, str]  # (block, the separator after it)
 
 # How many passes `_settle` may take before giving up and stacking the block.
 # Each pass only ever grows the changed regions, so a handful is generous — this
@@ -262,24 +263,55 @@ class SnapshotDiffMixin:
 
 
 def diff_runs(was: str, now: str) -> list[DiffRun]:
-    """Provenance-tagged runs over two markdown bodies, oldest state first."""
-    was_blocks = BLOCK_SPLIT.split(was)
-    now_blocks = BLOCK_SPLIT.split(now)
+    """Provenance-tagged runs over two markdown bodies, oldest state first.
+
+    The alignment runs over the **content** blocks only; each separator rides
+    with the block before it (#2591). Aligning the separators too handed
+    difflib a blank line between every pair of paragraphs, all equal, and it
+    anchored on every one of them: a changed region was chopped into 1x1 spans,
+    so `_align_blocks` never saw a span wide enough to look ahead in, and one
+    removed paragraph paired every later paragraph with its neighbour.
+    """
+    was_chunks = _chunks(was)
+    now_chunks = _chunks(now)
     runs: list[DiffRun] = []
-    matcher = difflib.SequenceMatcher(None, was_blocks, now_blocks, autojunk=False)
+    matcher = difflib.SequenceMatcher(
+        None, [block for block, _ in was_chunks], [block for block, _ in now_chunks], autojunk=False
+    )
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
         if op == "equal":
-            runs.append(DiffRun(kind="equal", text="".join(was_blocks[i1:i2])))
+            for (was_block, was_sep), (_, now_sep) in zip(was_chunks[i1:i2], now_chunks[j1:j2], strict=True):
+                runs.append(DiffRun(kind="equal", text=was_block))
+                runs.extend(_separator_runs(was_sep, now_sep))
         elif op == "insert":
-            runs.append(DiffRun(kind="now", text="".join(now_blocks[j1:j2]), stacked=True))
+            runs.append(DiffRun(kind="now", text=_join(now_chunks[j1:j2]), stacked=True))
         elif op == "delete":
-            runs.append(DiffRun(kind="was", text="".join(was_blocks[i1:i2]), stacked=True))
+            runs.append(DiffRun(kind="was", text=_join(was_chunks[i1:i2]), stacked=True))
         else:
-            runs.extend(_align_blocks(was_blocks[i1:i2], now_blocks[j1:j2]))
+            runs.extend(_align_blocks(was_chunks[i1:i2], now_chunks[j1:j2]))
     return _coalesce(runs)
 
 
-def _align_blocks(was_blocks: list[str], now_blocks: list[str]) -> list[DiffRun]:
+def _chunks(body: str) -> list[Chunk]:
+    """The body as (block, following separator) pairs; the last separator is ``""``."""
+    parts = BLOCK_SPLIT.split(body)
+    return list(zip(parts[0::2], [*parts[1::2], ""], strict=True))
+
+
+def _join(chunks: list[Chunk]) -> str:
+    return "".join(block + sep for block, sep in chunks)
+
+
+def _separator_runs(was_sep: str, now_sep: str) -> list[DiffRun]:
+    """A separator that changed (CRLF vs LF, a blank line added, the last block
+    gaining a successor) stacks, as it did when separators were aligned as
+    blocks: an inline run of bare newlines reads as a raw-HTML block."""
+    if was_sep == now_sep:
+        return [DiffRun(kind="equal", text=was_sep)]
+    return [DiffRun(kind="was", text=was_sep, stacked=True), DiffRun(kind="now", text=now_sep, stacked=True)]
+
+
+def _align_blocks(was_chunks: list[Chunk], now_chunks: list[Chunk]) -> list[DiffRun]:
     """Pair the blocks of a changed region by *similarity*, not by position.
 
     difflib gives the region; it cannot say which block became which, because at
@@ -295,39 +327,56 @@ def _align_blocks(was_blocks: list[str], now_blocks: list[str]) -> list[DiffRun]
     block with no counterpart is what it looks like — inserted or deleted — and
     stacks alone. Found by driving the app, which is the only place it shows.
     """
+    was_blocks = [block for block, _ in was_chunks]
+    now_blocks = [block for block, _ in now_chunks]
     runs: list[DiffRun] = []
     i = 0
     j = 0
     while i < len(was_blocks) and j < len(now_blocks):
         if _is_a_rewrite_of(was_blocks[i], now_blocks[j]):
             runs.extend(_block_runs(was_blocks[i], now_blocks[j]))
+            runs.extend(_separator_runs(was_chunks[i][1], now_chunks[j][1]))
             i, j = i + 1, j + 1
             continue
         # Bounded, because "the block it became" is a local question: an author
         # splits or merges a paragraph, they do not move one to the far end of
         # the scene. An unbounded search would pair across the whole region and
         # produce a worse answer than admitting there is no counterpart.
-        ahead_now = _first_match(was_blocks[i], now_blocks, j + 1, j + 1 + ALIGN_LOOKAHEAD)
-        ahead_was = _first_match(now_blocks[j], was_blocks, i + 1, i + 1 + ALIGN_LOOKAHEAD)
+        ahead_now = _first_now_match(was_blocks[i], now_blocks, j + 1, j + 1 + ALIGN_LOOKAHEAD)
+        ahead_was = _first_was_match(now_blocks[j], was_blocks, i + 1, i + 1 + ALIGN_LOOKAHEAD)
         if ahead_now is not None and (ahead_was is None or ahead_now - j <= ahead_was - i):
-            runs.append(DiffRun(kind="now", text="".join(now_blocks[j:ahead_now]), stacked=True))
+            runs.append(DiffRun(kind="now", text=_join(now_chunks[j:ahead_now]), stacked=True))
             j = ahead_now
         elif ahead_was is not None:
-            runs.append(DiffRun(kind="was", text="".join(was_blocks[i:ahead_was]), stacked=True))
+            runs.append(DiffRun(kind="was", text=_join(was_chunks[i:ahead_was]), stacked=True))
             i = ahead_was
         else:
             runs.extend(_stacked_pair(was_blocks[i], now_blocks[j]))
+            runs.extend(_separator_runs(was_chunks[i][1], now_chunks[j][1]))
             i, j = i + 1, j + 1
     if i < len(was_blocks):
-        runs.append(DiffRun(kind="was", text="".join(was_blocks[i:]), stacked=True))
+        runs.append(DiffRun(kind="was", text=_join(was_chunks[i:]), stacked=True))
     if j < len(now_blocks):
-        runs.append(DiffRun(kind="now", text="".join(now_blocks[j:]), stacked=True))
+        runs.append(DiffRun(kind="now", text=_join(now_chunks[j:]), stacked=True))
     return runs
 
 
-def _first_match(block: str, candidates: list[str], start: int, stop: int) -> int | None:
-    for index in range(start, min(stop, len(candidates))):
-        if _is_a_rewrite_of(block, candidates[index]):
+def _first_now_match(was_block: str, now_blocks: list[str], start: int, stop: int) -> int | None:
+    for index in range(start, min(stop, len(now_blocks))):
+        if _is_a_rewrite_of(was_block, now_blocks[index]):
+            return index
+    return None
+
+
+def _first_was_match(now_block: str, was_blocks: list[str], start: int, stop: int) -> int | None:
+    """The look-ahead on the `was` side, asking the question in the same order.
+
+    `_is_a_rewrite_of` is not symmetric — difflib applies `isjunk` to its second
+    sequence only — so asking "is this now-block a rewrite of that was-block"
+    backwards missed a paragraph that scored 0.74 the right way round (#2591).
+    """
+    for index in range(start, min(stop, len(was_blocks))):
+        if _is_a_rewrite_of(was_blocks[index], now_block):
             return index
     return None
 

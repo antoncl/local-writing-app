@@ -286,19 +286,55 @@ const SETTLE_PASSES = 12;
  *  on `alignSequences` (ADR-0096 §3, S2): phase 1's equal/insert/delete ops
  *  become runs directly; a `replace` span's `rewrite` pairs go through
  *  `blockRuns` (the body's own scalar-region diff) and its `unpaired` pairs
- *  stack, exactly as `alignBlocks` did before the extraction. */
+ *  stack, exactly as `alignBlocks` did before the extraction.
+ *
+ *  The alignment runs over the **content** blocks only; each separator rides
+ *  with the block before it (#2591). Aligning the separators too handed phase 1
+ *  a blank line between every pair of paragraphs, all equal, and it anchored on
+ *  every one: a changed region was chopped into 1×1 spans, so phase 2 could
+ *  never look ahead, and one removed paragraph paired every later paragraph
+ *  with its neighbour. */
 export function diffRuns(was: string, now: string): DiffRun[] {
-  const wasBlocks = was.split(BLOCK_SPLIT);
-  const nowBlocks = now.split(BLOCK_SPLIT);
+  const wasChunks = chunks(was);
+  const nowChunks = chunks(now);
+  const wasBlocks = wasChunks.map(([block]) => block);
+  const nowBlocks = nowChunks.map(([block]) => block);
   const runs: DiffRun[] = [];
   for (const op of alignSequences(wasBlocks, nowBlocks)) {
-    if (op.op === "equal") runs.push(run("equal", wasBlocks.slice(op.wasStart, op.wasEnd).join("")));
-    else if (op.op === "insert") runs.push(run("now", nowBlocks.slice(op.nowStart, op.nowEnd).join(""), true));
-    else if (op.op === "delete") runs.push(run("was", wasBlocks.slice(op.wasStart, op.wasEnd).join(""), true));
-    else if (op.op === "rewrite") runs.push(...blockRuns(wasBlocks[op.was], nowBlocks[op.now]));
-    else runs.push(...stackedPair(wasBlocks[op.was], nowBlocks[op.now]));
+    if (op.op === "equal") {
+      for (let k = 0; k < op.wasEnd - op.wasStart; k++) {
+        runs.push(run("equal", wasBlocks[op.wasStart + k]));
+        runs.push(...separatorRuns(wasChunks[op.wasStart + k][1], nowChunks[op.nowStart + k][1]));
+      }
+    } else if (op.op === "insert") runs.push(run("now", join(nowChunks.slice(op.nowStart, op.nowEnd)), true));
+    else if (op.op === "delete") runs.push(run("was", join(wasChunks.slice(op.wasStart, op.wasEnd)), true));
+    else {
+      if (op.op === "rewrite") runs.push(...blockRuns(wasBlocks[op.was], nowBlocks[op.now]));
+      else runs.push(...stackedPair(wasBlocks[op.was], nowBlocks[op.now]));
+      runs.push(...separatorRuns(wasChunks[op.was][1], nowChunks[op.now][1]));
+    }
   }
   return coalesce(runs);
+}
+
+type Chunk = [block: string, separator: string];
+
+/** The body as (block, following separator) pairs; the last separator is `""`. */
+function chunks(body: string): Chunk[] {
+  const parts = body.split(BLOCK_SPLIT);
+  const out: Chunk[] = [];
+  for (let k = 0; k < parts.length; k += 2) out.push([parts[k], parts[k + 1] ?? ""]);
+  return out;
+}
+
+const join = (cs: Chunk[]): string => cs.map(([block, sep]) => block + sep).join("");
+
+/** A separator that changed (CRLF vs LF, a blank line added, the last block
+ *  gaining a successor) stacks, as it did when separators were aligned as
+ *  blocks: an inline run of bare newlines reads as a raw-HTML block. */
+function separatorRuns(wasSep: string, nowSep: string): DiffRun[] {
+  if (wasSep === nowSep) return [run("equal", wasSep)];
+  return [run("was", wasSep, true), run("now", nowSep, true)];
 }
 
 function tooLargeToDiff(...blocks: string[]): boolean {

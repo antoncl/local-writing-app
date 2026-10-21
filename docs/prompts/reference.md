@@ -199,8 +199,20 @@ Focus on {{ entry(inputs.character).title }}.
 ```
 
 - `entry(inputs.character)` takes the first pick; `use(inputs.lore)` takes them all.
-- The built-in prompts guard an optional input like this:
-  `{% if inputs.note is defined and inputs.note %}`.
+- An optional input the user left blank is still there, just empty: `""` for
+  text, an empty list for a picker or list, and `None` for everything else — a
+  yes/no, a number, a choice. So `{% if inputs.note %}` is all the guard it needs.
+- A blank required input is not there at all; the app won't run the prompt
+  until it's filled in.
+- **Watch out — a yes/no input has three values, not two:** `True`, `False`,
+  or `None` when the user left it Unset. `{% if inputs.flag %}` treats Unset as
+  no. To tell "didn't choose" from "chose no", test `inputs.flag is none`.
+- **Watch out — `default()` doesn't replace `None`.** `{{ inputs.length |
+  default(1200) }}` prints `None` when the input is left blank; write
+  `default(1200, true)`, which replaces any empty value. Don't use that on a
+  yes/no input: it would replace `False` too. Write
+  `{% if inputs.flag is not false %}` for "yes unless they said no".
+- `{{ inputs.flag }}` on a blank input prints the word `None`.
 
 #### selection, text_before, text_after
 

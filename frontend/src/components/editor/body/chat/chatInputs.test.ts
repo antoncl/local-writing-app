@@ -4,6 +4,7 @@ import {
   cacheTermSecondsFor,
   carrySubjectSeeds,
   decodeChatInputDrafts,
+  defaultDraftFor,
   displayInputValues,
   encodeChatInputDrafts,
   endsInUserTurn,
@@ -31,6 +32,17 @@ const SUBJECT = { id: "plot_abc", kind: "plot" as const, title: "Rescue arc", en
 // coerceChatInputValue is gone (#1482) — chat coerces through the shared
 // coerceInputValue; its behavior (incl. keeping context_pick values as the
 // encoded wire string) is covered in lib/utils/promptInputs.test.ts.
+
+describe("defaultDraftFor (#2578 — chat seeds like the dialog and preview)", () => {
+  it("an unset boolean seeds Unset, not \"false\"", () => {
+    expect(defaultDraftFor(input("boolean"))).toBe("");
+  });
+
+  it("an author's default still wins", () => {
+    expect(defaultDraftFor(input("boolean", { default: false }))).toBe("false");
+    expect(defaultDraftFor(input("text", { default: "calm" }))).toBe("calm");
+  });
+});
 
 describe("isInputMissing", () => {
   it("scalar types: missing when blank/whitespace only", () => {
@@ -310,6 +322,12 @@ describe("chat input drafts round-trip (#654)", () => {
       count: "3",
       flag: "true",
     });
+  });
+
+  it("decode reads a seeded null (a blank optional input, #2578) back as Unset, not \"null\"", () => {
+    // The launch path persists the dialog's values; an Unset boolean / blank
+    // number ships as null. "null" would coerce to False / the string "null".
+    expect(decodeChatInputDrafts({ flag: null, count: null })).toEqual({ flag: "", count: "" });
   });
 
   it("decode treats absent/null inputs as no drafts", () => {

@@ -234,6 +234,19 @@ export function canonicalizeInputDefinitions(
   return defs.map((d) => inputDraftToDefinition(inputDefinitionToDraft(d, "")));
 }
 
+/** What a declared OPTIONAL input the user left blank reaches the template as
+ * (#2578): defined but empty, never an absent name — the renderer is
+ * StrictUndefined, so `{% if inputs.x %}` on a blank the prompt allows would
+ * otherwise raise. Text is "", a list-shaped type is [], a context_pick its
+ * encoded empty list (#1482), every other scalar `none` — so a boolean is
+ * tri-state: True / False / none (Unset, #24). */
+export function blankOptionalInputValue(type: PromptInputDefinition["type"]): unknown {
+  if (type === "text" || type === "long_text") return "";
+  if (type === "context_pick") return encodePickerValue([]);
+  if (isListShapedInputType(type)) return [];
+  return null;
+}
+
 export function coerceInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
   const trimmed = raw.trim();
   if (type === "number") {
@@ -286,9 +299,9 @@ export function coerceInputValue(raw: string, type: PromptInputDefinition["type"
  * fact that the render stopped at the first undefined and tricked the
  * author into thinking later refs were OK.
  *
- * Three undefined-name cases worth distinguishing:
+ * Two undefined-name cases worth distinguishing (a blank OPTIONAL input is
+ * never undefined — it ships defined-but-empty, #2578):
  *   - declared & currently empty (required)  → "fill it in" (render blocked here)
- *   - declared & currently empty (optional)  → "fill in or guard with `is defined`"
  *   - undeclared                             → "no such input" — real authoring bug
  *
  * The render context binds the input namespace as plural `inputs` under
@@ -325,11 +338,8 @@ export function friendlyTemplateError(
         const draft = drafts[missing];
         const isEmpty =
           draft === undefined || draft === null || (typeof draft === "string" && !draft.trim());
-        if (isEmpty) {
-          if (decl.required) {
-            return `Preview blocked: required input \`${decl.label || missing}\` isn't set. Fill it in above to render the rest of the template.`;
-          }
-          return `Template references \`inputs.${missing}\`, but the input is optional and no value is set. Either fill it in above, or guard with \`{% if inputs.${missing} is defined %}…{% endif %}\`.`;
+        if (isEmpty && decl.required) {
+          return `Preview blocked: required input \`${decl.label || missing}\` isn't set. Fill it in above to render the rest of the template.`;
         }
         // Declared and filled — shouldn't normally happen; fall through.
       } else {

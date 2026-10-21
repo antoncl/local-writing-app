@@ -49,13 +49,6 @@ describe("friendlyTemplateError", () => {
     expect(msg).not.toContain("plural");
   });
 
-  it("suggests the plural accessor in the optional-input guard hint", () => {
-    const declared = [input("tone", { required: false })];
-    const msg = friendlyTemplateError(undef("tone"), declared, { tone: "" });
-    expect(msg).toContain("`inputs.tone`");
-    expect(msg).toContain("{% if inputs.tone is defined %}");
-    expect(msg).not.toContain("input.tone");
-  });
 
   it("names required inputs by label without an accessor prefix", () => {
     const declared = [input("brief", { required: true, label: "Brief" })];

@@ -1088,6 +1088,19 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertNotIn("Where the previous scene left off", text)
         self.assertIn("Honor leaves the station.", text)
 
+    def test_draft_scene_unset_inputs_arrive_as_none_and_keep_their_defaults(self) -> None:
+        # #2578: a blank optional input reaches the template as `none`, which
+        # Jinja's plain `default()` doesn't replace — Unset must still mean
+        # "continue from the previous scene" and "about 1200 words".
+        self._set(self.scene_ids[0], body="She crossed the bridge at dusk.",
+                  summary="Honor leaves the station.")
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1],
+                             {"include_previous_scene": None, "length": None})
+        self.assertIn("crossed the bridge", text)
+        self.assertIn("about 1200 words", text)
+        self.assertNotIn("None", text)
+
     def _add_scene_design_fields(self) -> None:
         """#2511: the author's own scene fields, as a user schema adds them."""
         schema_path = self.root / "metadata.schema.yaml"

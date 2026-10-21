@@ -5,9 +5,11 @@ import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
 import { coerceInputValue, decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
 import type { ChatEstimate, NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
+// No default seeds Unset ("") for every type, boolean included — the same as
+// the invocation dialog and the prompt preview (#24, #2578).
 export function defaultDraftFor(input: PromptInputDefinition): string {
   if (input.default !== undefined && input.default !== null) return String(input.default);
-  return input.type === "boolean" ? "false" : "";
+  return "";
 }
 
 export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
@@ -218,7 +220,10 @@ export function decodeChatInputDrafts(
 ): Record<string, string> {
   const drafts: Record<string, string> = {};
   for (const [name, value] of Object.entries(inputs ?? {})) {
-    drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
+    // null = a blank optional input the launch path seeded (#2578): back to the
+    // Unset draft "", never the string "null" (a boolean would read it as False).
+    if (value === null) drafts[name] = "";
+    else drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
   }
   return drafts;
 }

@@ -82,7 +82,7 @@ The point-of-view character is **{{ narration.character.title }}**.
 {{ story_so_far(e) }}
 
 {% endif %}
-{% if inputs.include_previous_scene | default(true) and previous and previous.body %}
+{% if inputs.include_previous_scene is not false and previous and previous.body %}
 ## Where the previous scene left off
 The last lines of the previous scene, as written. Pick up from here, and match its voice.
 
@@ -113,5 +113,5 @@ Redraft it to the brief: keep what already works, and rewrite what doesn't.
 {{ e.body | trim }}
 {% endif %}
 
-Draft the scene, about {{ inputs.length | default(1200) }} words.
+Draft the scene, about {{ inputs.length | default(1200, true) }} words.
 {% endrole %}

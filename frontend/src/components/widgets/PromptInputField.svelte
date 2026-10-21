@@ -159,8 +159,8 @@
   />
 {:else if input.type === "boolean"}
   <!-- Tri-state: Unset / True / False. Unset is a real persisted state
-       (#24, #42) — preview and runtime both treat it as undefined so the
-       template can guard with `is defined` and fail fast otherwise.
+       (#24, #42) — an optional input left Unset reaches the template as
+       `none`, distinct from False (#2578).
        Replaces the 2-state checkbox that silently coerced "untouched"
        into `false` and disagreed with the preview. -->
   <select

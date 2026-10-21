@@ -269,12 +269,42 @@ function insertAfterNearest(seq: SeqEntry[], entry: SeqEntry, index: number, coo
   seq.splice(anchorPos + 1, 0, entry);
 }
 
-/** §5 steps 1–3: paired items first (in O's order if the order unit is
+/** §5 step 4 (Amendment 1, #2599): within each run of unpaired entries that
+ *  follow the same item, alternate removal and addition — the current item
+ *  first (#2533), the one that replaced it next — with the longer side's
+ *  remainder after. Removals keep L's order and additions O's, and the run
+ *  stays between the same paired items, so neither §5 invariant moves: they
+ *  only ever see one side of a run. */
+function interleaveUnpaired(seq: SeqEntry[]): SeqEntry[] {
+  const out: SeqEntry[] = [];
+  let removals: SeqEntry[] = [];
+  let additions: SeqEntry[] = [];
+  const flush = () => {
+    for (let i = 0; i < Math.max(removals.length, additions.length); i++) {
+      if (i < removals.length) out.push(removals[i]);
+      if (i < additions.length) out.push(additions[i]);
+    }
+    removals = [];
+    additions = [];
+  };
+  for (const entry of seq) {
+    if (entry.kind === "remove") removals.push(entry);
+    else if (entry.kind === "add") additions.push(entry);
+    else {
+      flush();
+      out.push(entry);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** §5 steps 1–4: paired items first (in O's order if the order unit is
  *  adopted or there is none, else L's), then removals one at a time in L's
  *  order, then additions one at a time in O's order — each of the latter two
  *  placed immediately after its nearest already-placed predecessor, or
- *  first. Both what is shown and what is saved (`composeList`) come from
- *  this one sequence. */
+ *  first — then each run of them interleaved. Both what is shown and what is
+ *  saved (`composeList`) come from this one sequence. */
 export function listSequence(pairing: ListPairing, orderAdopted: boolean): SeqEntry[] {
   const useOOrder = orderAdopted || !pairing.reordered;
   const paired = [...pairing.pairs].sort((a, b) => (useOOrder ? a.o - b.o : a.l - b.l));
@@ -285,7 +315,7 @@ export function listSequence(pairing: ListPairing, orderAdopted: boolean): SeqEn
   for (const o of [...pairing.additions].sort((a, b) => a - b)) {
     insertAfterNearest(seq, { kind: "add", o }, o, oIndexOf);
   }
-  return seq;
+  return interleaveUnpaired(seq);
 }
 
 function effectiveMemberValue(member: GroupMember, record: ItemRecord): MetadataValue {

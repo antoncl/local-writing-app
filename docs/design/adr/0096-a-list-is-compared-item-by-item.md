@@ -299,7 +299,8 @@ Both what is shown and what is saved come from one sequence, built in this order
    it in L that is already in the sequence, or first if there is none.
 3. **Additions**, one at a time in O's order, each placed immediately after the nearest item
    before it in O that is already in the sequence, or first if there is none. When an addition
-   and a removal follow the same item, the addition comes first.
+   and a removal follow the same item, the addition comes first. *(Amendment 1 adds a step 4
+   that then interleaves each such run, removal first.)*
 
 With the order declined, an included addition therefore sits after the item that precedes it in
 O — the closest L's order can come to where O put it.
@@ -507,3 +508,37 @@ fields. *Done when:* the snapshot journey works in the browser on a copy of a re
 
 - **The plot kinds' compare view.** Plot nodes have snapshots but no compare view; when they gain
   one, their lists compare per item by §8 with nothing further to decide here.
+
+## Amendment 1 — a rewrite reads old above new, and a scalar item is its own text
+
+- **Status:** **Accepted** — 2026-10-21 (Anton, in conversation, on the design below). Issue:
+  #2599. Text by Claude.
+- **Amends:** §5 (adds step 4), §6 (edited item, addition and removal for a scalar list; the
+  column).
+
+### What prompted it
+
+A scene-design brainstorm rewrote a scene's 14 beats (`scene_beats`, a scalar `long_text` list).
+Most rewrites fell below the alignment's rewrite ratio, so they became unpaired removals and
+additions. §5 step 3 put every addition after an anchor ahead of every removal after it, so each
+stretch read *all the new beats, then all the old ones*. That separated each old beat from its
+replacement by up to three rows, and inverted the older-first order the body follows (#2533). §6
+also rendered a scalar item as a bold title (the whole beat in bold), printed an edited scalar
+item's L text as a title line above its own diff, and headed the diff with the member's name,
+which for the scalar sugar is the field's own name. The single-version read had a different
+column and leading from *Both*.
+
+### Decision
+
+1. **§5 step 4.** After step 3, each run of unpaired entries between two paired items (or at
+   either end) is interleaved: removal, addition, removal, addition, in L's and O's order
+   respectively, then the longer side's rest. Both invariants hold unchanged. A run sits between
+   the same paired items, and each invariant only ever keeps one side of it, in that side's own
+   order.
+2. **§6, scalar list.** The item's run text is its value at body weight: a `long_text` item as
+   its own markdown, any other as its display text. An edited scalar item shows its one member's
+   diff with no title line and no member heading, since both would only repeat the item. A group
+   item keeps §6 as written: bold title, then each unit under its member's name.
+3. **§6, the column.** Every row and the single-version reads sit on the body's prose column, so
+   *Current*, *Proposed* and *Both* never move the text. A row is an item, not a page of prose:
+   no first-line indent, and no page padding around each row.

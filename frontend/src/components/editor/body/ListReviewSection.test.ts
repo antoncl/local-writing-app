@@ -155,3 +155,67 @@ describe("ListReviewSection — the ADR-0096 seeded beats journey", () => {
     expect(was.container.textContent).toContain("chooses");
   });
 });
+
+// #2599: a scalar long_text list (the default scene `scene_beats` shape) reviews
+// as rows — each item its own text at body weight, an edited item one diff with
+// no title line or member heading repeating it, and each removed item directly
+// above the item that replaced it.
+describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () => {
+  const scalarField = {
+    name: "Beats",
+    type: "list",
+    options: [],
+    item_scalar: true,
+    item_members: [{ key: "value", name: "Beats", type: "long_text" }],
+  } as unknown as MetadataFieldDefinition;
+  const sL: MetadataValue[] = [
+    "He arrives at the bath and is told where to sit.",
+    "The guards argue about the weather until the bell rings twice over the yard.",
+    "She remarks on the wound, a remark and not a question.",
+  ];
+  const sO: MetadataValue[] = [
+    "He arrives at the bath and is told where to sit.",
+    "Maro carries linen past the door; nobody looks up from the dice.",
+    "She remarks on the wound, a remark and never a question.",
+  ];
+
+  function scalarProps(view: "both" | "now") {
+    const pairing = pairListItems(scalarField, sL, sO);
+    return {
+      field: scalarField,
+      label: "Beats",
+      pairing,
+      units: listUnits(scalarField, pairing),
+      L: sL,
+      O: sO,
+      resolution: {},
+      view,
+      onSettleUnit: vi.fn(),
+    };
+  }
+
+  it("an edited item is its diff alone, with no title line or member heading", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both") });
+    const edited = container.querySelector(".lrs-edited");
+    expect(edited).not.toBeNull();
+    expect(edited!.querySelector(".lrs-item-title")).toBeNull();
+    expect(edited!.querySelector(".flip-label")).toBeNull();
+    await waitFor(() => expect(edited!.querySelector(".r-was, .r-now")).not.toBeNull());
+  });
+
+  it("a removed item sits directly above its replacement, neither in bold", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both") });
+    const kinds = [...container.querySelectorAll(".lrs-item, .lrs-unit")].map((el) =>
+      el.classList.contains("lrs-remove") ? "remove" : el.classList.contains("lrs-add") ? "add" : "item",
+    );
+    expect(kinds).toEqual(["item", "remove", "add", "item"]);
+    await waitFor(() => expect(container.querySelector(".blk-was")?.textContent).toContain("Maro carries linen"));
+    expect(container.querySelector(".lrs-unit strong")).toBeNull();
+  });
+
+  it("Current reads in the same overlay column as Both, at body weight", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("now") });
+    await waitFor(() => expect(container.querySelectorAll(".lrs-single .effective-body-content.prose-column p")).toHaveLength(3));
+    expect(container.querySelector(".lrs-single strong")).toBeNull();
+  });
+});

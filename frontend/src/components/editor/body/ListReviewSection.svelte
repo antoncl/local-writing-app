@@ -12,6 +12,13 @@
   // in — built by reusing `composeList` itself with the undecided units
   // defaulted to declined (Current) or adopted (Proposed), so a version read
   // can never disagree with what a settled unit will actually save.
+  //
+  // One column for every row and every view (#2599): the quiet lines and
+  // titles carry `.prose-column` themselves, the units' overlays already do,
+  // and the single-version read is the same overlay — so A/S/B never shift the
+  // text sideways. A scalar item is its one member, so an edited one shows no
+  // title line and no member heading, only its diff.
+  import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
   import RunFlip from "@/components/editor/body/RunFlip.svelte";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
@@ -135,7 +142,9 @@
         {@const pair = pairFor(row.l, row.o)}
         {#if pair && pair.edited}
           <div class="lrs-item lrs-edited">
-            <div class="lrs-item-title">{itemTitle(field, L[pair.l], rowIndex)}</div>
+            {#if !field.item_scalar}
+              <div class="lrs-item-title prose-column">{itemTitle(field, L[pair.l], rowIndex)}</div>
+            {/if}
             {#each pair.members as memberKey (memberKey)}
               {@const member = memberOf(memberKey)}
               {#if member}
@@ -153,17 +162,18 @@
                       currentText={typeof lRecord[member.key] === "string" ? (lRecord[member.key] as string) : ""}
                       proposedText={typeof oRecord[member.key] === "string" ? (oRecord[member.key] as string) : ""}
                       label={member.name || member.key}
+                      showLabel={!field.item_scalar}
                       {view}
                       onResolved={(v) => onSettleUnit(unitKey, v ?? false)}
                     />
                   {:else if settled !== undefined}
-                    <div class="lrs-member-name">{member.name || member.key}</div>
+                    {#if !field.item_scalar}<div class="lrs-member-name prose-column">{member.name || member.key}</div>{/if}
                     <!-- Settled: its side, without a clickable region (§4). -->
                     {#await sceneMarkdownToHtml(settledMemberMarkdown(member, settled, lRecord[member.key], oRecord[member.key])) then html}
                       <div class="lrs-settled prose-column">{@html html}</div>
                     {/await}
                   {:else}
-                    <div class="lrs-member-name">{member.name || member.key}</div>
+                    {#if !field.item_scalar}<div class="lrs-member-name prose-column">{member.name || member.key}</div>{/if}
                     <RunFlip
                       {adoptable}
                       label={member.name || member.key}
@@ -177,7 +187,7 @@
             {/each}
           </div>
         {:else}
-          <div class="lrs-item lrs-quiet">{itemTitle(field, L[row.l], rowIndex)}</div>
+          <div class="lrs-item lrs-quiet prose-column">{itemTitle(field, L[row.l], rowIndex)}</div>
         {/if}
       {:else if row.kind === "add"}
         {@const unitKey = `add|${row.o}`}
@@ -185,7 +195,7 @@
         <div class="lrs-unit lrs-add">
           {#if settled === true}
             {#await sceneMarkdownToHtml(itemMarkdown(field, O[row.o], row.o, resolveTitle)) then html}
-              <div class="lrs-settled-block">{@html html}</div>
+              <div class="lrs-settled-block prose-column">{@html html}</div>
             {/await}
           {:else}
             <RunFlip
@@ -218,7 +228,7 @@
     {/each}
   {:else}
     {#await sceneMarkdownToHtml(singleVersionMarkdown ?? "") then html}
-      <div class="lrs-single prose-column">{@html html}</div>
+      <div class="lrs-single"><ReadOnlyBodyOverlay {html} {label} tone="snapshot" /></div>
     {/await}
   {/if}
 </div>
@@ -235,33 +245,46 @@
     color: var(--text-2);
     padding: 8px 24px 2px;
   }
+  /* Rows take the column from `.prose-column` (on the row's own text or its
+     overlay), never a padding of their own — that is what keeps A/S/B on one
+     column (#2599). */
   .lrs-item,
   .lrs-unit {
-    padding: 2px 24px;
+    padding-block: 4px;
   }
   .lrs-quiet {
     color: var(--text-2);
-    font-size: var(--fs-md);
-    padding-block: 4px;
+    line-height: 1.65;
   }
   .lrs-item-title {
-    font-size: var(--fs-md);
     font-weight: 600;
     color: var(--text);
-    padding-top: 6px;
-  }
-  .lrs-member {
-    padding: 2px 0 2px 12px;
+    line-height: 1.65;
   }
   .lrs-member-name {
+    font-family: var(--sans);
     font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .lrs-settled,
   .lrs-settled-block {
     color: var(--text);
+    line-height: 1.65;
   }
   .lrs-single {
-    padding: 4px 24px 12px;
+    padding-block: 4px 12px;
+  }
+  /* A row's overlay is one item, not a document: no page padding around it
+     and no first-line indent — an item is not a prose paragraph. */
+  .list-review-section :global(.effective-body-content) {
+    padding-block: 0;
+  }
+  .list-review-section :global(.effective-body-content > p) {
+    text-indent: 0;
+  }
+  .lrs-item :global(.effective-body-content > p:last-child),
+  .lrs-unit :global(.effective-body-content > p:last-child),
+  .lrs-unit :global(.blk) {
+    margin-bottom: 0;
   }
 </style>

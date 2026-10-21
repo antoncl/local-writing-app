@@ -26,6 +26,7 @@ Rewrite the whole scene as clean, finished narrative prose:
 - Markers like `⟦mut_…⟧` mark changes placed in the scene. Keep each one exactly as written, once, at the same point in the story — they are not shown to the reader.
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 Return only the finished prose.
 {% endrole %}
 

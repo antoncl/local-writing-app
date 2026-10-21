@@ -12,6 +12,7 @@ a `services/` module imports FastAPI, starlette, or a router (ADR-0056, #977).
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -38,6 +39,7 @@ from app.routers import (
     updates,
 )
 from app.runtime import root_from_header
+from app.services import connection_reset_filter
 from app.services.error_log import append_error_line
 from app.services.frontend_assets import frontend_dist_dir
 from app.services.machine_settings import error_log_dir, migrate_assistant_tags_once
@@ -60,7 +62,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # first (`migrate_assistant_tags_once`'s own docstring covers the second
     # trigger — a project opened without the app ever starting).
     migrate_assistant_tags_once()
+    # Windows-only: quiet the benign WinError 10054 traceback a client reset
+    # produces after a request has ended (#2576); everything else still logs.
+    uninstall_reset_filter = connection_reset_filter.install(asyncio.get_running_loop())
     yield
+    uninstall_reset_filter()
     node_index_gate.flush()
 
 

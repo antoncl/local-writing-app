@@ -371,10 +371,12 @@ function changedRegions(was: string, now: string): Region[] | null {
 }
 
 /** Hand whitespace both sides end a region with back to the equal text after
- *  it. Whitespace is junk to the token matcher, so it can never anchor: when
- *  the last sentence of a block changes, the block's trailing newline is
- *  swallowed into the region (#2591). Never released into a protected
- *  construct, which would undo `settle`. */
+ *  it. Whitespace rides on the token before it, so a region ending on a
+ *  changed token ends with its whitespace: when the last sentence of a block
+ *  changes, the block's trailing newline is swallowed into the region (#2591).
+ *  `tokenRegions` trims that before `settle`; this catches what a construct
+ *  snap pulls back in. Never released into a protected construct, which would
+ *  undo `settle`. */
 function releaseSharedTrailingWhitespace(
   regions: Region[],
   was: string,

@@ -73,12 +73,22 @@
       },
       {
         "kind": "now",
-        "text": "**very** tired indeed",
+        "text": "**very**",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": " by the end of it.",
+        "text": " ",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "tired indeed ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "by the end of it.",
         "stacked": false
       }
     ]

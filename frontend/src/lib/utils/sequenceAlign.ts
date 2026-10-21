@@ -14,7 +14,9 @@
  */
 import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
 
-export const MAX_WORD_DIFF_TOKENS = 2000;
+/** ~1000 words of prose at ~1.15 tokens a word (#2600) — the backend's
+ *  `MAX_WORD_DIFF_TOKENS`, whose note says why it exists. */
+export const MAX_WORD_DIFF_TOKENS = 1200;
 const SAME_BLOCK_RATIO = 0.5;
 const ALIGN_LOOKAHEAD = 4;
 /** The body's look-ahead, in paragraphs. Until #2591 the body aligned its
@@ -32,13 +34,18 @@ export const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
 /** What the matcher compares: the token without its trailing whitespace (a
  *  leading-whitespace token is its own key). */
 export const tokenKey = (t: string): string => t.trimEnd() || t;
-/** The matcher's `isjunk`: a key with no letter or digit (punctuation, leading
- *  whitespace) may not anchor a match — except a table's `|`, which is
- *  structure an in-cell edit must anchor on. The backend's `_is_junk`. */
-export const isJunkKey = (key: string): boolean => key !== "|" && !/[\p{L}\p{N}_]/u.test(key);
+/** Markdown's structural marks (table bar, bullet, emphasis, quote, heading):
+ *  they anchor like words — the backend's `STRUCTURAL_MARKS`, which says why. */
+const STRUCTURAL_MARKS = new Set(["|", "-", "*", "+", ">", "#"]);
+/** A key with a letter or digit (`_is_word`). */
+const isWordKey = (key: string): boolean => /[\p{L}\p{N}_]/u.test(key);
+/** The matcher's `isjunk`: prose punctuation and leading whitespace may not
+ *  anchor a match — the backend's `_is_junk`. */
+export const isJunkKey = (key: string): boolean => !STRUCTURAL_MARKS.has(key) && !isWordKey(key);
 
-/** Whether `now` reads as a rewrite of `was`: at least half their words (by
- *  `SequenceMatcher` ratio over word keys; punctuation is left out) are shared. Empty
+/** Whether `now` reads as a rewrite of `was`: at least half their words and
+ *  structural marks (by `SequenceMatcher` ratio; prose punctuation is left
+ *  out) are shared. Empty
  *  strings and anything past `MAX_WORD_DIFF_TOKENS` are never a rewrite of
  *  anything.
  *
@@ -47,7 +54,7 @@ export const isJunkKey = (key: string): boolean => key !== "|" && !/[\p{L}\p{N}_
  *  one way round and under 0.5 the other. `quickRatio` is a bag count and
  *  already symmetric, so only the real ratio is asked again. */
 export function isARewriteOf(was: string, now: string): boolean {
-  // Words only (#2600) — the backend's `_is_a_rewrite_of` says why.
+  // Only what anchors (#2600) — the backend's `_is_a_rewrite_of` says why.
   const wasTokens = tokenize(was).map(tokenKey).filter((key) => !isJunkKey(key));
   const nowTokens = tokenize(now).map(tokenKey).filter((key) => !isJunkKey(key));
   if (wasTokens.length === 0 || nowTokens.length === 0) return false;

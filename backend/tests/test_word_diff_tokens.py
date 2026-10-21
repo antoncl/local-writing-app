@@ -56,6 +56,15 @@ def test_an_insertion_before_a_list_line_break_does_not_stack_the_list() -> None
     assert _changed(was, now) == [("now", " at once")]
 
 
+def test_every_line_of_a_list_edited_still_diffs_per_line() -> None:
+    # The bullets anchor (STRUCTURAL_MARKS); junked, the two edits would merge
+    # across the line break and the list would stack.
+    was = "- run\n- hide\n"
+    now = "- walk\n- fight\n"
+    assert not any(run.stacked for run in diff_runs(was, now))
+    assert _changed(was, now) == [("was", "run"), ("now", "walk"), ("was", "hide"), ("now", "fight")]
+
+
 def test_shared_punctuation_does_not_make_two_unrelated_paragraphs_a_rewrite() -> None:
     assert not _is_a_rewrite_of(
         "Maren did not run, not yet. She stood, counted, and waited.",

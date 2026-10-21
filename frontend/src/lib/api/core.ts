@@ -10,7 +10,7 @@
 // The network primitives live here; the domain method objects that call them
 // live in the sibling modules under lib/api/ and are composed into `api` in
 // lib/api.ts.
-import type { ChatSessionJournalEntry, ChatUsage, CheckedEntry, HistoryFit, LineEdit, LineNote, LoreFit } from "@/lib/types";
+import type { ChatSessionJournalEntry, ChatUpdatedEntry, ChatUsage, CheckedEntry, HistoryFit, LineEdit, LineNote, LoreFit } from "@/lib/types";
 
 // Backend base URL. Defaults to a same-origin relative path (ADR-0072 §1): in
 // the packaged product the backend serves this bundle, so `/api` reaches it
@@ -201,6 +201,7 @@ export type AIStreamEvent =
       // server before `done` was emitted. Absent on a chat-less stream.
       cost_usd_total?: number | null;
       journal_added?: ChatSessionJournalEntry[];
+      lore_updated?: ChatUpdatedEntry[];
       // ADR-0086 §5: what this turn's lore budget kept and left out — the
       // send that did the leaving out reports it. Absent when no implicit
       // selection ran.

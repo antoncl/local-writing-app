@@ -3,8 +3,9 @@ deduped lore set once *per stability tier*, partitioned per turn against the
 chat's in-memory session baseline — unchanged-since-last-turn → a 1h stable
 block, new-or-changed → a 5m volatile block.
 
-`expand_and_prepare_chat_blocks` is pure (it assembles blocks, it doesn't call a
-provider), so these exercise it directly and inspect the returned cache blocks.
+`expand_and_prepare_chat_blocks` assembles blocks without calling a provider, so
+these exercise it directly and inspect the returned cache blocks — through
+`send_turn`, which also commits the turn as a completed send would (#2586).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from _chat_turns import send_turn
 from project_fixtures import open_test_project
 
 from app.models import (
@@ -24,7 +26,6 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
 )
-from app.services.ai.chat import expand_and_prepare_chat_blocks
 from app.services.ai.sessions import default_registry
 
 
@@ -87,7 +88,7 @@ class _LoreCacheFixture(unittest.TestCase):
         return chat.id
 
     def _blocks(self, chat_id: str, messages: list[dict]) -> list[dict]:
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, chat_id, "SYSTEM PROMPT", messages
         )
         return prepared.system_blocks or []
@@ -138,7 +139,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         off = self.service.create_chat_session(
             CreateChatSessionRequest(title="Plain", prompt_entry_id="prompt_y")
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, off.id, "SYSTEM PROMPT", [{"role": "user", "content": "Gaslamp?"}]
         )
         text = "".join(b["text"] for b in prepared.system_blocks or [])
@@ -168,7 +169,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
                     used_node_ids=[picked],
                 ),
             )
-            prepared = expand_and_prepare_chat_blocks(
+            prepared = send_turn(
                 self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "Gaslamp?"}]
             )
             text = "".join(b["text"] for b in prepared.system_blocks or [])
@@ -185,7 +186,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
             chat.id,
             SaveChatSessionRequest(title="Research", prompt_entry_id="prompt_r", lore_free=True),
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
         )
         self.assertEqual([b["tier"] for b in prepared.system_blocks or []], ["stable"])
@@ -199,7 +200,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
             chat = service.create_chat_session(
                 CreateChatSessionRequest(title="Plain", prompt_entry_id="prompt_y")
             )
-            prepared = expand_and_prepare_chat_blocks(
+            prepared = send_turn(
                 service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
             )
             self.assertEqual([b["tier"] for b in prepared.system_blocks or []], ["stable"])
@@ -261,7 +262,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
                 used_node_ids=[picked],
             ),
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
         )
         text = "".join(b["text"] for b in prepared.system_blocks or [])
@@ -303,7 +304,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
                 ],
             ),
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, chat.id, "SYSTEM PROMPT", [{"role": "user", "content": "hi"}]
         )
         text = "".join(b["text"] for b in prepared.system_blocks or [])
@@ -362,7 +363,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
                 used_node_ids=[picked],
             ),
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service,
             chat.id,
             "SYSTEM PROMPT",
@@ -374,7 +375,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         # And the mirror: the flag on with no picks commits no lore block, even
         # though the always-policy Premise exists.
         flagged = self._make_lore_enabled_chat("Flagged", "prompt_z")
-        prepared_flagged = expand_and_prepare_chat_blocks(
+        prepared_flagged = send_turn(
             self.service,
             flagged,
             "SYSTEM PROMPT",
@@ -483,7 +484,7 @@ class LoreCacheBlockTests(_LoreCacheFixture):
         self.assertTrue(before.seen_revisions)
         baseline_before = dict(default_registry.get_or_create(f"chatlore:{self.chat_id}").baseline)
 
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service,
             self.chat_id,
             "SYSTEM PROMPT",
@@ -581,7 +582,7 @@ class LoreBudgetSendTests(_LoreCacheFixture):
     def _prepared(self, chat_id: str, messages: list[dict], **limits):
         from app.services.ai.lore_budget import LoreLimits
 
-        return expand_and_prepare_chat_blocks(
+        return send_turn(
             self.service, chat_id, "SYSTEM PROMPT", messages, lore_limits=LoreLimits(**limits)
         )
 
@@ -596,7 +597,7 @@ class LoreBudgetSendTests(_LoreCacheFixture):
         # Two cold chats with the same prompt and turn: one through the
         # resolver's defaults (no limits given), one with an explicit budget
         # the selection fits in. Same bytes, same order.
-        unbudgeted = expand_and_prepare_chat_blocks(self.service, self.chat_id, "SYSTEM PROMPT", turn)
+        unbudgeted = send_turn(self.service, self.chat_id, "SYSTEM PROMPT", turn)
         other = self._make_lore_enabled_chat("Brainstorm 2", "prompt_x")
         budgeted = self._prepared(other, turn, budget_tokens=400)
         self.assertEqual(budgeted.system_blocks, unbudgeted.system_blocks)
@@ -720,7 +721,7 @@ class LoreBudgetSendTests(_LoreCacheFixture):
                 used_node_ids=[picked],
             ),
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service, self.chat_id, "SYSTEM PROMPT",
             [{"role": "user", "content": "commit"}], lore_mode="used",
         )

@@ -596,6 +596,9 @@ class AIChatResponse(BaseModel):
     # strip). Empty when no detections fired. Snapshots — frontend doesn't
     # need to look up titles separately.
     journal_added: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # #2586: entries re-sent this turn because they changed since the model last
+    # saw them. Additive optional — older chats read empty.
+    lore_updated: list[ChatUpdatedEntry] = Field(default_factory=list)
     # V2: per-call telemetry. Null on failure paths and when the provider
     # response didn't include usage (rare). Cost is null when pricing
     # isn't known (Ollama, descriptor lookup failure). Frontend converts
@@ -726,6 +729,14 @@ class ChatSessionJournalEntry(BaseModel):
     ] = "user_message"
 
 
+class ChatUpdatedEntry(BaseModel):
+    """#2586: an entry this turn re-sent because it changed since the model
+    last saw it (seen on an earlier turn at a different revision). `title` is
+    a snapshot at send time, like a journal entry's."""
+    entry_id: str
+    title: str = ""
+
+
 class ChatSessionMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
@@ -740,6 +751,9 @@ class ChatSessionMessage(BaseModel):
     # Always empty on user messages (detection happens between user and
     # assistant, attributed to the assistant turn).
     journal_added: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # #2586: entries re-sent on this turn because they changed since the model
+    # last saw them. Additive optional — older chats read empty.
+    lore_updated: list[ChatUpdatedEntry] = Field(default_factory=list)
     # V2: per-turn token + cost telemetry, captured from the streamed
     # response. Always null on user messages. Frozen value at time-of-
     # send — historical cost doesn't drift when pricing changes.

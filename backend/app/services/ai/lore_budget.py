@@ -184,6 +184,9 @@ class BudgetedLoreTiers:
     stable_entries: list[tuple[str, str]]
     volatile_entries: list[tuple[str, str]]
     left_out_entries: dict[str, str] = field(default_factory=dict)
+    # (id, title) of kept entries the session saw on an earlier turn at a
+    # different revision (#2586).
+    changed_entries: list[tuple[str, str]] = field(default_factory=list)
     report: LoreFit = field(default_factory=lambda: LoreFit(
         budget_tokens=0, used_tokens=0, declared_tokens=0, kept=0
     ))

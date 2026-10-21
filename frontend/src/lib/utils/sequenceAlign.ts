@@ -8,13 +8,15 @@
  *
  * Phase 1 anchors on exact equality (`SequenceMatcher(null, was, now)`).
  * Phase 2 runs only inside a `replace` span: a greedy left-to-right pass that
- * pairs a "rewrite" of itself (`isARewriteOf`, at least half its tokens
+ * pairs a "rewrite" of itself (`isARewriteOf`, at least half its words
  * shared) ahead of a lookahead match on either side, and falls back to one
  * unpaired stacked pair when neither side has one within the look-ahead.
  */
 import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
 
-export const MAX_WORD_DIFF_TOKENS = 2000;
+/** ~1000 words of prose at ~1.15 tokens a word (#2600) — the backend's
+ *  `MAX_WORD_DIFF_TOKENS`, whose note says why it exists. */
+export const MAX_WORD_DIFF_TOKENS = 1200;
 const SAME_BLOCK_RATIO = 0.5;
 const ALIGN_LOOKAHEAD = 4;
 /** The body's look-ahead, in paragraphs. Until #2591 the body aligned its
@@ -22,13 +24,28 @@ const ALIGN_LOOKAHEAD = 4;
  *  2 paragraphs — the reach the body's pairing was tested at. Lists never had
  *  separators and keep their 4. */
 export const BODY_ALIGN_LOOKAHEAD = 2;
-const TOKEN_RE = /\S+|\s+/g;
+// A word (letters, digits, `_`, joined by an inner apostrophe or hyphen) or one
+// punctuation mark, each carrying the whitespace after it; a block's leading
+// whitespace is a token of its own. The backend's `TOKEN` (snapshot_diff.py),
+// whose note says why (#2600) — `[\p{L}\p{N}_]` is Python's Unicode `\w`.
+const TOKEN_RE = /\s+|[\p{L}\p{N}_]+(?:['’-][\p{L}\p{N}_]+)*\s*|[^\p{L}\p{N}_\s]\s*/gu;
 
-export const isWhitespaceToken = (t: string): boolean => t.length > 0 && !/\S/.test(t);
 export const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
+/** What the matcher compares: the token without its trailing whitespace (a
+ *  leading-whitespace token is its own key). */
+export const tokenKey = (t: string): string => t.trimEnd() || t;
+/** Markdown's structural marks (table bar, bullet, emphasis, quote, heading):
+ *  they anchor like words — the backend's `STRUCTURAL_MARKS`, which says why. */
+const STRUCTURAL_MARKS = new Set(["|", "-", "*", "+", ">", "#"]);
+/** A key with a letter or digit (`_is_word`). */
+const isWordKey = (key: string): boolean => /[\p{L}\p{N}_]/u.test(key);
+/** The matcher's `isjunk`: prose punctuation and leading whitespace may not
+ *  anchor a match — the backend's `_is_junk`. */
+export const isJunkKey = (key: string): boolean => !STRUCTURAL_MARKS.has(key) && !isWordKey(key);
 
-/** Whether `now` reads as a rewrite of `was`: at least half their tokens (by
- *  `SequenceMatcher` ratio, ignoring whitespace tokens) are shared. Empty
+/** Whether `now` reads as a rewrite of `was`: at least half their words and
+ *  structural marks (by `SequenceMatcher` ratio; prose punctuation is left
+ *  out) are shared. Empty
  *  strings and anything past `MAX_WORD_DIFF_TOKENS` are never a rewrite of
  *  anything.
  *
@@ -37,14 +54,15 @@ export const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
  *  one way round and under 0.5 the other. `quickRatio` is a bag count and
  *  already symmetric, so only the real ratio is asked again. */
 export function isARewriteOf(was: string, now: string): boolean {
-  const wasTokens = tokenize(was);
-  const nowTokens = tokenize(now);
+  // Only what anchors (#2600) — the backend's `_is_a_rewrite_of` says why.
+  const wasTokens = tokenize(was).map(tokenKey).filter((key) => !isJunkKey(key));
+  const nowTokens = tokenize(now).map(tokenKey).filter((key) => !isJunkKey(key));
   if (wasTokens.length === 0 || nowTokens.length === 0) return false;
   if (Math.max(wasTokens.length, nowTokens.length) > MAX_WORD_DIFF_TOKENS) return false;
-  const matcher = new SequenceMatcher(isWhitespaceToken, wasTokens, nowTokens);
+  const matcher = new SequenceMatcher(isJunkKey, wasTokens, nowTokens);
   if (matcher.quickRatio() < SAME_BLOCK_RATIO) return false;
   if (matcher.ratio() >= SAME_BLOCK_RATIO) return true;
-  return new SequenceMatcher(isWhitespaceToken, nowTokens, wasTokens).ratio() >= SAME_BLOCK_RATIO;
+  return new SequenceMatcher(isJunkKey, nowTokens, wasTokens).ratio() >= SAME_BLOCK_RATIO;
 }
 
 /** One step of the alignment, in output order. `equal`/`insert`/`delete` carry

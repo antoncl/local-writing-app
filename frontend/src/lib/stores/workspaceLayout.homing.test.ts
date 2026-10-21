@@ -11,6 +11,7 @@ import {
   group,
   G_EDITOR,
   G_SIDE,
+  G_TOOLS,
   serialize,
   split,
 } from "./workspaceLayout.serialize";
@@ -261,5 +262,81 @@ describe("the Revising preset (ADR-0100 §10)", () => {
     const restored = deserialize(JSON.stringify(serialize(workspaceLayout.root, G_EDITOR, "revising")));
     expect(restored).not.toBeNull();
     expect(flattenPanels(restored!.root)).toEqual(flattenPanels(workspaceLayout.root));
+  });
+});
+
+// #2588: a region whose home group is absent — left out by a preset, or merged
+// away by the user — follows the regions that share its home instead of
+// spawning an extra column.
+describe("homing when the home group is absent (#2588)", () => {
+  beforeEach(() => workspaceLayout.reset());
+
+  const columnCount = () => workspaceLayout.root.children.length;
+
+  it("opens Prompts beside Chats in the Revising preset, not in a fourth column", () => {
+    workspaceLayout.applyPreset("revising");
+    const before = columnCount();
+    workspaceLayout.ensureVisible("prompts");
+    // Lore (left) and Chats (right) both home to the side group; the tie goes right.
+    expect(workspaceLayout.groupOf("prompts")?.id).toBe(G_TOOLS);
+    expect(columnCount()).toBe(before);
+  });
+
+  it("re-opens TODO into the column the user merged TODO + Search into", () => {
+    workspaceLayout.moveTab("todo", G_SIDE);
+    workspaceLayout.moveTab("search", G_SIDE);
+    expect(workspaceLayout.groupById(G_TOOLS)).toBeNull();
+    const before = workspaceLayout.allGroups().length;
+
+    workspaceLayout.removePanel("todo");
+    workspaceLayout.ensureVisible("todo");
+    workspaceLayout.ensureVisible("aiSpend");
+
+    expect(workspaceLayout.groupOf("todo")?.id).toBe(G_SIDE);
+    expect(workspaceLayout.groupOf("aiSpend")?.id).toBe(G_SIDE);
+    expect(workspaceLayout.allGroups().length).toBe(before);
+  });
+
+  it("falls back to the rightmost region column when no home sibling is placed", () => {
+    // Research preset: no tools group, and neither TODO nor Search is placed.
+    workspaceLayout.applyPreset("research");
+    const before = columnCount();
+    workspaceLayout.ensureVisible("todo");
+    expect(workspaceLayout.groupOf("todo")?.id).toBe(G_SIDE);
+    expect(columnCount()).toBe(before);
+  });
+
+  it("ignores a sibling the user tabbed into the editor group", () => {
+    workspaceLayout.applyPreset("revising");
+    workspaceLayout.moveTab("chats", G_EDITOR);
+    workspaceLayout.ensureVisible("prompts");
+    // Lore (left) is now the only non-editor sibling.
+    expect(workspaceLayout.groupOf("prompts")?.id).not.toBe(G_EDITOR);
+  });
+
+  it("skips a column holding only a detached Details rail", () => {
+    workspaceLayout.applySnapshot({
+      version: 1,
+      root: split("root", "row", [group(G_SIDE, ["lore"]), group(G_EDITOR, [])], [0.5, 0.5]),
+      activeEditorGroupId: G_EDITOR,
+      activePreset: null,
+    });
+    workspaceLayout.ensureVisible("editor_a");
+    workspaceLayout.ensureVisible("details:editor_a");
+    workspaceLayout.dropOnEdge("details:editor_a", G_EDITOR, "right");
+    workspaceLayout.ensureVisible("todo");
+    expect(workspaceLayout.groupOf("todo")?.id).toBe(G_SIDE);
+  });
+
+  it("still recreates the home column when only the editor is left (#155)", () => {
+    workspaceLayout.applySnapshot({
+      version: 1,
+      root: split("root", "row", [group(G_EDITOR, [])], [1]),
+      activeEditorGroupId: G_EDITOR,
+      activePreset: null,
+    });
+    workspaceLayout.ensureVisible("todo");
+    expect(workspaceLayout.groupOf("todo")?.id).toBe(G_TOOLS);
+    expect(columnCount()).toBe(2);
   });
 });

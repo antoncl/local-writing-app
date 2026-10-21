@@ -452,8 +452,10 @@ def _tier_lore_ids(
 
     Order within each tier follows `ids` (already sorted), so a settled block is
     byte-identical turn-to-turn. `changed_ids` (in `ids` order) are the entries
-    the session saw on an earlier turn at a different revision (#2586) — always
-    a subset of the volatile tier, whatever the hint.
+    the session committed on ANY earlier turn at a different revision
+    (`changed_since_seen`, #2586), whichever tier it lands in: an entry absent
+    from the previous turn is "new" to the tiering, so a `"stable"` hint keeps
+    it stable even though the model's history holds an older version.
     """
     hints = hints or {}
     stable_ids: list[str] = []
@@ -467,9 +469,12 @@ def _tier_lore_ids(
         # `changed` (seen before, different revision) vs `new` (never seen) — both
         # are `not is_stable`, but the "stable" prior treats them differently.
         changed = session.seen(entry_id) and not session.is_stable(entry_id, revision)
-        session.snapshot(entry_id, revision)
-        if changed:
+        # #2586: the flag the model and the turn get keys on ANY earlier send,
+        # not just the previous one — an entry that skipped a turn and was
+        # edited meanwhile is still stale in the model's history.
+        if session.changed_since_seen(entry_id, revision):
             changed_ids.append(entry_id)
+        session.snapshot(entry_id, revision)
         hint = hints.get(entry_id)
         if hint == "volatile":
             volatile_ids.append(entry_id)

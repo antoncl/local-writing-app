@@ -184,18 +184,27 @@ Concretely, for a lore-enabled chat, on every send:
      any of them drops back to volatile the turn its entry is edited. This is the
      "*new or changed since the prior call*" rule the partition machinery exists
      for.
-   - **Changed entries are named** (#2586). An entry *seen on an earlier turn at a
-     different revision* is listed in a `<changed_since_your_last_reply>` note
-     leading the volatile block, so the model works from the current version
-     rather than its own earlier quotes. The send returns the same list as
-     `lore_updated`, and the turn shows it as an "Updated since last turn" chip
-     row. The note rides the volatile block, which re-writes that turn anyway,
-     so it costs no cache. A *new* entry is not "changed"; a cross-node mutation
-     that shifts bytes without a revision bump is not named either.
+   - **Changed entries are named** (#2586). An entry the model received on *any*
+     earlier turn at a different revision (`AISession.last_seen`, which, unlike
+     the baseline, survives an entry skipping a turn) is listed in a
+     `<changed_since_you_last_saw_them>` note trailing the volatile block, so
+     the model works from the current version rather than its own earlier
+     quotes. The send returns the same list as `lore_updated`, and the turn
+     shows it as an "Updated since last turn" chip row. The volatile block
+     re-writes every turn, so the note costs no cache. A *new* entry is not
+     "changed"; a cross-node mutation that shifts bytes without a revision bump
+     is not named either.
+   - **Seen means received.** The tiers are computed when the request is built,
+     but the set is committed (`commit_chat_lore`) only once the model has the
+     turn: in the stream's `on_done`, or after an ok non-stream reply. A failed
+     or stopped send leaves the baseline alone, so the retry still tiers and
+     flags what changed. The persisted `seen_revisions` is the cumulative
+     `last_seen`, which seeds both the baseline and `last_seen` on a cold process.
 3. **Rendered once, as-of the chat's scene** (`_format_lore_block(..., scene=…)`)
    so field values are resolved consistently — no two copies with divergent
    `effective_state`.
-4. **Commit:** this turn's set becomes next turn's baseline.
+4. **Commit:** once the model has received the turn, this turn's set becomes
+   the next turn's baseline (see "Seen means received" above).
 
 The template's role shrinks to a **gate declaration**: it calls a gate helper so
 the `lore_enabled` flag is captured at the lock render (ADR-0057 §2), but the

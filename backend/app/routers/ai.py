@@ -683,7 +683,7 @@ async def ai_chat_stream(
                 # ai_invocations row against the chat it already holds — before
                 # `done` reaches the client, with the new total riding on it.
                 on_done=lambda ev, usage, cost_usd: record_stream_turn(
-                    project, prepared.chat, ev, usage, cost_usd
+                    project, prepared, ev, usage, cost_usd
                 ),
             ),
             http_request,

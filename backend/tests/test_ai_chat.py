@@ -950,6 +950,59 @@ class ChatEndpointJournalTests(unittest.TestCase):
         done = next(e for e in events if e["type"] == "done")
         self.assertEqual(done["lore_updated"], expected)
 
+    def test_a_failed_stream_leaves_the_change_flagged_for_the_retry(self) -> None:
+        """#2586: a stream that errors never reached the model, so it must not
+        mark the edit as seen — the retry's `done` still names the entry, and
+        the persisted `seen_revisions` doesn't move on the failed send."""
+        from app.models import SaveLoreEntryRequest
+        from app.services.ai import providers as ai_providers
+
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        payload = {
+            "provider": "anthropic",
+            "model": "claude-haiku-4-5-20251001",
+            "system_prompt": "You are a writing assistant.",
+            "messages": [{"role": "user", "content": "Honor walked in."}],
+            "chat_id": self.chat_id,
+        }
+
+        def ok_stream(call):
+            yield ai_providers.StreamDelta(text="Reply.")
+            yield ai_providers.StreamFinal(stop_reason="end_turn")
+
+        def failing_stream(call):
+            yield ai_providers.StreamDelta(text="par")
+            raise RuntimeError("overloaded")
+
+        def stream(fake):
+            with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+                 patch(_ANTHROPIC_STREAM, side_effect=fake):
+                text = self.client.post("/api/ai/chat/stream", json=payload).text
+            return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+        stream(ok_stream)
+        honor = self.service.read_lore_entry(self.honor_id)
+        self.service.save_lore_entry(
+            self.honor_id,
+            SaveLoreEntryRequest(
+                title=honor.title, body="Now an admiral.", base_revision=honor.revision,
+                entry_type="lore:character", metadata={"aliases": ["Honor"]},
+            ),
+        )
+        seen_before = self.service.read_chat_session(self.chat_id).seen_revisions
+
+        failed = stream(failing_stream)
+        self.assertFalse(any(e["type"] == "done" for e in failed), failed)
+        self.assertEqual(self.service.read_chat_session(self.chat_id).seen_revisions, seen_before)
+
+        retry = next(e for e in stream(ok_stream) if e["type"] == "done")
+        self.assertEqual(
+            retry["lore_updated"], [{"entry_id": self.honor_id, "title": "Honor Harrington"}]
+        )
+        self.assertNotEqual(
+            self.service.read_chat_session(self.chat_id).seen_revisions, seen_before
+        )
+
     def test_no_chat_id_skips_journal_path(self) -> None:
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \

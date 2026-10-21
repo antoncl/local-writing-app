@@ -101,6 +101,7 @@ def _is_whitespace(token: str) -> bool:
 
 Interval = tuple[int, int]
 Region = tuple[int, int, int, int]  # (was start, was end, now start, now end)
+Chunk = tuple[str, str]  # (block, the separator after it)
 
 # How many passes `_settle` may take before giving up and stacking the block.
 # Each pass only ever grows the changed regions, so a handful is generous — this
@@ -130,10 +131,13 @@ MAX_WORD_DIFF_TOKENS = 2000
 # length threshold §F rules out.
 SAME_BLOCK_RATIO = 0.5
 
-# How far ahead `_align_blocks` looks for the block a block became. Small on
-# purpose: splitting or merging a paragraph moves its neighbours by one or two,
-# and a wider search starts pairing blocks that merely resemble each other.
-ALIGN_LOOKAHEAD = 4
+# How far ahead `_align_blocks` looks for the block a block became, in
+# paragraphs. Small on purpose: splitting or merging a paragraph moves its
+# neighbours by one or two, and a wider search starts pairing blocks that merely
+# resemble each other. It was 4 while the separators were aligned as blocks too,
+# which reached 2 paragraphs — the reach this was tested at; #2591 dropped the
+# separators and kept the reach.
+ALIGN_LOOKAHEAD = 2
 
 
 class SnapshotDiffMixin:
@@ -262,24 +266,55 @@ class SnapshotDiffMixin:
 
 
 def diff_runs(was: str, now: str) -> list[DiffRun]:
-    """Provenance-tagged runs over two markdown bodies, oldest state first."""
-    was_blocks = BLOCK_SPLIT.split(was)
-    now_blocks = BLOCK_SPLIT.split(now)
+    """Provenance-tagged runs over two markdown bodies, oldest state first.
+
+    The alignment runs over the **content** blocks only; each separator rides
+    with the block before it (#2591). Aligning the separators too handed
+    difflib a blank line between every pair of paragraphs, all equal, and it
+    anchored on every one of them: a changed region was chopped into 1x1 spans,
+    so `_align_blocks` never saw a span wide enough to look ahead in, and one
+    removed paragraph paired every later paragraph with its neighbour.
+    """
+    was_chunks = _chunks(was)
+    now_chunks = _chunks(now)
     runs: list[DiffRun] = []
-    matcher = difflib.SequenceMatcher(None, was_blocks, now_blocks, autojunk=False)
+    matcher = difflib.SequenceMatcher(
+        None, [block for block, _ in was_chunks], [block for block, _ in now_chunks], autojunk=False
+    )
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
         if op == "equal":
-            runs.append(DiffRun(kind="equal", text="".join(was_blocks[i1:i2])))
+            for (was_block, was_sep), (_, now_sep) in zip(was_chunks[i1:i2], now_chunks[j1:j2], strict=True):
+                runs.append(DiffRun(kind="equal", text=was_block))
+                runs.extend(_separator_runs(was_sep, now_sep))
         elif op == "insert":
-            runs.append(DiffRun(kind="now", text="".join(now_blocks[j1:j2]), stacked=True))
+            runs.append(DiffRun(kind="now", text=_join(now_chunks[j1:j2]), stacked=True))
         elif op == "delete":
-            runs.append(DiffRun(kind="was", text="".join(was_blocks[i1:i2]), stacked=True))
+            runs.append(DiffRun(kind="was", text=_join(was_chunks[i1:i2]), stacked=True))
         else:
-            runs.extend(_align_blocks(was_blocks[i1:i2], now_blocks[j1:j2]))
+            runs.extend(_align_blocks(was_chunks[i1:i2], now_chunks[j1:j2]))
     return _coalesce(runs)
 
 
-def _align_blocks(was_blocks: list[str], now_blocks: list[str]) -> list[DiffRun]:
+def _chunks(body: str) -> list[Chunk]:
+    """The body as (block, following separator) pairs; the last separator is ``""``."""
+    parts = BLOCK_SPLIT.split(body)
+    return list(zip(parts[0::2], [*parts[1::2], ""], strict=True))
+
+
+def _join(chunks: list[Chunk]) -> str:
+    return "".join(block + sep for block, sep in chunks)
+
+
+def _separator_runs(was_sep: str, now_sep: str) -> list[DiffRun]:
+    """A separator that changed (CRLF vs LF, a blank line added, the last block
+    gaining a successor) stacks, as it did when separators were aligned as
+    blocks: an inline run of bare newlines reads as a raw-HTML block."""
+    if was_sep == now_sep:
+        return [DiffRun(kind="equal", text=was_sep)]
+    return [DiffRun(kind="was", text=was_sep, stacked=True), DiffRun(kind="now", text=now_sep, stacked=True)]
+
+
+def _align_blocks(was_chunks: list[Chunk], now_chunks: list[Chunk]) -> list[DiffRun]:
     """Pair the blocks of a changed region by *similarity*, not by position.
 
     difflib gives the region; it cannot say which block became which, because at
@@ -295,12 +330,15 @@ def _align_blocks(was_blocks: list[str], now_blocks: list[str]) -> list[DiffRun]
     block with no counterpart is what it looks like — inserted or deleted — and
     stacks alone. Found by driving the app, which is the only place it shows.
     """
+    was_blocks = [block for block, _ in was_chunks]
+    now_blocks = [block for block, _ in now_chunks]
     runs: list[DiffRun] = []
     i = 0
     j = 0
     while i < len(was_blocks) and j < len(now_blocks):
         if _is_a_rewrite_of(was_blocks[i], now_blocks[j]):
             runs.extend(_block_runs(was_blocks[i], now_blocks[j]))
+            runs.extend(_separator_runs(was_chunks[i][1], now_chunks[j][1]))
             i, j = i + 1, j + 1
             continue
         # Bounded, because "the block it became" is a local question: an author
@@ -310,18 +348,19 @@ def _align_blocks(was_blocks: list[str], now_blocks: list[str]) -> list[DiffRun]
         ahead_now = _first_match(was_blocks[i], now_blocks, j + 1, j + 1 + ALIGN_LOOKAHEAD)
         ahead_was = _first_match(now_blocks[j], was_blocks, i + 1, i + 1 + ALIGN_LOOKAHEAD)
         if ahead_now is not None and (ahead_was is None or ahead_now - j <= ahead_was - i):
-            runs.append(DiffRun(kind="now", text="".join(now_blocks[j:ahead_now]), stacked=True))
+            runs.append(DiffRun(kind="now", text=_join(now_chunks[j:ahead_now]), stacked=True))
             j = ahead_now
         elif ahead_was is not None:
-            runs.append(DiffRun(kind="was", text="".join(was_blocks[i:ahead_was]), stacked=True))
+            runs.append(DiffRun(kind="was", text=_join(was_chunks[i:ahead_was]), stacked=True))
             i = ahead_was
         else:
             runs.extend(_stacked_pair(was_blocks[i], now_blocks[j]))
+            runs.extend(_separator_runs(was_chunks[i][1], now_chunks[j][1]))
             i, j = i + 1, j + 1
     if i < len(was_blocks):
-        runs.append(DiffRun(kind="was", text="".join(was_blocks[i:]), stacked=True))
+        runs.append(DiffRun(kind="was", text=_join(was_chunks[i:]), stacked=True))
     if j < len(now_blocks):
-        runs.append(DiffRun(kind="now", text="".join(now_blocks[j:]), stacked=True))
+        runs.append(DiffRun(kind="now", text=_join(now_chunks[j:]), stacked=True))
     return runs
 
 
@@ -369,7 +408,14 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
     matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
     if matcher.quick_ratio() < SAME_BLOCK_RATIO:
         return False
-    return matcher.ratio() >= SAME_BLOCK_RATIO
+    if matcher.ratio() >= SAME_BLOCK_RATIO:
+        return True
+    # Symmetric, so no caller can ask it backwards (#2591): difflib applies
+    # `isjunk` to its second sequence only, and one real paragraph pair scored
+    # 0.74 one way round and under 0.5 the other. `quick_ratio` is a bag count
+    # and already symmetric, so only the real ratio is asked again.
+    reverse = difflib.SequenceMatcher(_is_whitespace, now_tokens, was_tokens, autojunk=False)
+    return reverse.ratio() >= SAME_BLOCK_RATIO
 
 
 def _block_runs(was: str, now: str) -> list[DiffRun]:
@@ -418,9 +464,42 @@ def _changed_regions(was: str, now: str) -> list[Region] | None:
     if is_code_block(was) or is_code_block(now):
         return None
     regions = _settle(_token_regions(was, now), was, now, was_intervals, now_intervals)
-    if regions is None or _needs_stacking(regions, was, now):
+    if regions is None:
+        return None
+    regions = _release_shared_trailing_whitespace(regions, was, now, was_intervals, now_intervals)
+    if _needs_stacking(regions, was, now):
         return None
     return regions
+
+
+def _release_shared_trailing_whitespace(
+    regions: list[Region], was: str, now: str, was_intervals: list[Interval], now_intervals: list[Interval]
+) -> list[Region]:
+    """Hand whitespace both sides end a region with back to the equal text after it.
+
+    Whitespace is junk to the token matcher, so it can never anchor: when the
+    last sentence of a block changes, the block's trailing newline is swallowed
+    into the region and the single-side view ends `came.\\n</span>` instead of
+    `came.</span>` (#2591). Never released into a protected construct, which
+    would undo `_settle`.
+    """
+    released: list[Region] = []
+    for was_start, was_end, now_start, now_end in regions:
+        shared = 0
+        while (
+            shared < min(was_end - was_start, now_end - now_start)
+            and was[was_end - shared - 1] == now[now_end - shared - 1]
+            and was[was_end - shared - 1].isspace()
+        ):
+            shared += 1
+        if (
+            shared
+            and _snap(was_end - shared, was_intervals, left=False) == was_end - shared
+            and _snap(now_end - shared, now_intervals, left=False) == now_end - shared
+        ):
+            was_end, now_end = was_end - shared, now_end - shared
+        released.append((was_start, was_end, now_start, now_end))
+    return released
 
 
 def _token_regions(was: str, now: str) -> list[Region]:

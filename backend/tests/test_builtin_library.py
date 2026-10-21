@@ -1065,6 +1065,14 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("summary", str(ctx.exception))
         self.assertIsNone(ctx.exception.line)
 
+    def test_draft_scene_caps_signature_tics(self) -> None:
+        # A character's listed pet words read as a checklist: without a cap the
+        # drafter put them in nearly every paragraph.
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("they are not a quota", text)
+        self.assertIn("at most once in the scene", text)
+
     def test_draft_scene_renders_summary_previous_prose_and_next_summary(self) -> None:
         self._set(self.scene_ids[0],
                   body="She crossed the bridge at dusk\n<!-- mutate:set=ms_1;id=a1 -->\n"

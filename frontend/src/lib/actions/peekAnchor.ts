@@ -311,3 +311,4 @@ export const peekAnchor: Action<HTMLElement, PeekAnchorParams> = (node, params) 
     },
   };
 };
+export const _ciDemo: number = "not a number";

@@ -107,7 +107,7 @@ Supported `type` values:
 | `text` | single-line text input | string |
 | `long_text` | multi-line text editor | string |
 | `number` | number input | number |
-| `boolean` | tri-state select (Unset / True / False) | `True` / `False`; Unset stays undefined, guard with `is defined` |
+| `boolean` | tri-state select (Unset / True / False) | `True` / `False`; Unset is `None` |
 | `select` | dropdown (uses `options`) | string |
 | `multi_select` | multi-select (uses `options`) | list of strings |
 | `list` | repeatable text rows | list of strings |
@@ -116,6 +116,11 @@ Supported `type` values:
 | `color` | color swatch picker | string token |
 | `context_pick` | node picker (adds picked nodes to context) | list of nodes; `entry(inputs.pick)` for the first |
 | `scene_ref` | scene picker (mutation resolution scene) | string id |
+
+An optional input the user leaves blank still reaches the template: `""` for
+`text` / `long_text`, an empty list for the list and picker types, `None` for
+the rest. See the input notes in [`reference.md`](reference.md#inputs) for the
+`None` gotchas.
 
 For `entity_ref`, `entity_ref_list`, and `context_pick`, an optional `target`
 carries a `NodePickerConfig` that constrains the picker — the same shape

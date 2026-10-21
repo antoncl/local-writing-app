@@ -407,6 +407,20 @@ describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => 
     expect(res.inputs!.character).toBe("[]");
   });
 
+  it("an unsupplied OPTIONAL scalar input reaches the template defined but empty, like the dialog (#2578)", () => {
+    const threeInput = {
+      ...roleplay(),
+      inputs: [
+        { name: "tone", type: "text", required: false },
+        { name: "situation", type: "long_text", required: false },
+        { name: "flag", type: "boolean", required: false },
+      ],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), threeInput, ["gruff"]);
+    expect(res.satisfied).toBe(true);
+    expect(res.inputs).toEqual({ tone: "gruff", situation: "", flag: null });
+  });
+
   it("does NOT backfill a REQUIRED unsupplied context_pick — it stays absent so send is blocked (#1482)", () => {
     const twoInput = {
       ...roleplay(),
@@ -781,7 +795,7 @@ describe("surfaceForStrategy asks the registered handler (#2465)", () => {
 });
 
 describe("inputValuesFromDrafts (#2129/#2130 — the shared coerce+expand loop)", () => {
-  it("coerces a text input, drops an empty one, and expands a context_pick selector", () => {
+  it("coerces a text input, keeps a blank optional one as \"\", and expands a context_pick selector", () => {
     const villain: NodePickerRef = { id: "tagged:lore:villain", kind: "tag", title: "villain", selector: { kind: "lore", expr: { tagged: "villain" } } };
     const roster = buildSelectorRoster({
       loreEntries: [
@@ -801,14 +815,43 @@ describe("inputValuesFromDrafts (#2129/#2130 — the shared coerce+expand loop)"
     };
     const result = inputValuesFromDrafts(declared, drafts, roster);
     expect(result.note).toBe("hello");
-    expect(result.empty).toBeUndefined();
+    expect(result.empty).toBe("");
     expect(JSON.parse(result.picks as string)).toEqual([
       { id: "lore_a", kind: "lore", title: "Vex", entry_type: "lore:character" },
     ]);
   });
 
-  it("returns {} for a prompt with no drafts filled in", () => {
-    const declared = [{ name: "note", type: "text" } as PromptInputDefinition];
+  it("a blank OPTIONAL input reaches the template defined but empty, by type (#2578)", () => {
+    // `{% if inputs.situation %}` on a blank optional long_text raised
+    // UndefinedError: the key was dropped, and the renderer is StrictUndefined.
+    const declared = [
+      { name: "situation", type: "long_text" },
+      { name: "note", type: "text" },
+      { name: "flag", type: "boolean" },
+      { name: "count", type: "number" },
+      { name: "tone", type: "select" },
+      { name: "senses", type: "multi_select" },
+    ] as PromptInputDefinition[];
+    expect(inputValuesFromDrafts(declared, {}, buildSelectorRoster({}))).toEqual({
+      situation: "",
+      note: "",
+      flag: null,
+      count: null,
+      tone: null,
+      senses: [],
+    });
+  });
+
+  it("a boolean is tri-state: True, False, or null when left Unset (#2578)", () => {
+    const declared = [{ name: "flag", type: "boolean" } as PromptInputDefinition];
+    const roster = buildSelectorRoster({});
+    expect(inputValuesFromDrafts(declared, { flag: "true" }, roster)).toEqual({ flag: true });
+    expect(inputValuesFromDrafts(declared, { flag: "false" }, roster)).toEqual({ flag: false });
+    expect(inputValuesFromDrafts(declared, { flag: "" }, roster)).toEqual({ flag: null });
+  });
+
+  it("a blank REQUIRED input stays absent, so the render still fails fast (#2578)", () => {
+    const declared = [{ name: "note", type: "text", required: true } as PromptInputDefinition];
     expect(inputValuesFromDrafts(declared, {}, buildSelectorRoster({}))).toEqual({});
   });
 });

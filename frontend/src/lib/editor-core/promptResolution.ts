@@ -6,7 +6,12 @@
 // pure functions over a context snapshot rather than being duplicated or
 // passed around as a bag of closures.
 
-import { coerceInputValue, decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
+import {
+  blankOptionalInputValue,
+  coerceInputValue,
+  decodePickerValue,
+  encodePickerValue,
+} from "@/lib/utils/promptInputs";
 import { expandSelectorsInEncodedValue, type SelectorRoster } from "@/lib/views/pickerSelectors";
 import {
   outputHandlerFor,
@@ -308,8 +313,9 @@ export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDef
 // `fetchChatEstimate` (chat), the invocation dialog's estimate + submit, and
 // the prompt-author preview. For each of the declared inputs, read the draft
 // (defaulting to ""), coerce it to the input's declared type, expand any
-// selector refs a `context_pick` carries against the surface's roster, and
-// keep only the non-null/non-empty results. Takes the already-resolved
+// selector refs a `context_pick` carries against the surface's roster. A blank
+// optional input ships defined-but-empty (blankOptionalInputValue, #2578); a
+// blank required one stays absent so the render fails fast. Takes the already-resolved
 // declared list (effectivePromptInputs, or a caller's own derived variant —
 // PromptPreviewPane already keeps one) rather than the entry, so a surface
 // with no live `PromptEntrySummary` can still call it.
@@ -325,6 +331,7 @@ export function inputValuesFromDrafts(
     if (input.type === "context_pick")
       coerced = expandSelectorsInEncodedValue(coerced as string, roster);
     if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+    else if (!input.required) inputs[input.name] = blankOptionalInputValue(input.type);
   }
   return inputs;
 }
@@ -560,16 +567,17 @@ export function resolvePromptPositionalArgs(
       filledNames.add(input.name);
     }
   }
-  // Mirror the dialog/preview surface (#1482): an optional context_pick the
-  // user didn't supply reaches the template as a defined empty list, never an
-  // undefined name — otherwise the same prompt's `inputs.x is defined` guard
-  // would flip between the slash and dialog launch paths. Required picks are
-  // left absent so missingRequired can still block.
+  // Mirror the dialog/preview surface (#1482, #2578): an optional input the
+  // user didn't supply reaches the template defined but empty, never an
+  // undefined name — otherwise the same prompt would render on one launch path
+  // and raise on the other. Required inputs are left absent so missingRequired
+  // can still block.
   for (const input of declared) {
-    if (input.type !== "context_pick" || input.required) continue;
+    if (input.required) continue;
     if (filledNames.has(input.name)) continue;
     if (unresolved.some((u) => u.name === input.name)) continue;
-    inputs[input.name] = encodePickerValue([]);
+    inputs[input.name] =
+      input.type === "context_pick" ? encodePickerValue([]) : blankOptionalInputValue(input.type);
   }
   const missingRequired = declared.some(
     (input) => input.required && !filledNames.has(input.name),

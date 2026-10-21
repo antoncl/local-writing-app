@@ -42,6 +42,7 @@ You continue a novel's prose from exactly where the author's cursor is. Pick up 
 - Return only the new prose: no title, no headings, no Markdown, no preamble or comment.
 
 {% include "Prose generation settings" %}
+{% include "Character voice in prose" %}
 {% if narration and narration.character %}
 The point-of-view character is **{{ narration.character.title }}**.
 

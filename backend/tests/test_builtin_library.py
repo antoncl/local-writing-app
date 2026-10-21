@@ -1065,6 +1065,28 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("summary", str(ctx.exception))
         self.assertIsNone(ctx.exception.line)
 
+    def test_draft_scene_renders_the_character_voice_rule(self) -> None:
+        # #2580: a character's listed pet words read as a checklist; without
+        # the rule the drafter put them in nearly every paragraph. It renders
+        # with no POV/tense set, unlike "Prose generation settings".
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("## Character voice", text)
+
+    def test_every_prose_writer_includes_the_character_voice_rule(self) -> None:
+        # #2580: the rule rides next to "Prose generation settings", so every
+        # built-in that writes manuscript prose carries it — not just Draft scene.
+        prompts_dir = Path(__file__).resolve().parents[1] / "app" / "builtin_library" / "prompts"
+        # Whole lines, so a snippet's own usage comment (indented) doesn't count.
+        lines = {p: p.read_text(encoding="utf-8").splitlines()
+                 for p in sorted(prompts_dir.glob("*.md"))}
+        prose_writers = [p for p, ls in lines.items()
+                         if '{% include "Prose generation settings" %}' in ls]
+        self.assertGreaterEqual(len(prose_writers), 9)
+        for path in prose_writers:
+            with self.subTest(prompt=path.name):
+                self.assertIn('{% include "Character voice in prose" %}', lines[path])
+
     def test_draft_scene_renders_summary_previous_prose_and_next_summary(self) -> None:
         self._set(self.scene_ids[0],
                   body="She crossed the bridge at dusk\n<!-- mutate:set=ms_1;id=a1 -->\n"

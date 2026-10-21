@@ -1021,15 +1021,18 @@ class SceneSummaryPromptTests(unittest.TestCase):
 
     def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
         # ADR-0051 S4 / ADR-0067 S2: the goal-directed seed hands the model the
-        # scene's prose and current summary to work from; the JSON format
+        # scene (prose + current summary) to work from; the JSON format
         # envelope is NOT in the seed — it is built at commit from the field
         # set the seed's own `field_contract` loop registered (asserted in
-        # test_ai_extraction).
+        # test_ai_extraction). #2584: the scene arrives as a `use()` pick, never
+        # printed — a chat locks the printed render at its first send, so
+        # printed prose would go stale as the author edits.
         prompt = self.service.read_prompt_entry(builtin_prompt_id(self.service, "Summarize scene"))
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(inputs={"entry": self.scene_id})
-        self.assertIn("chasing the thief", rendered)
-        self.assertIn("Old synopsis.", rendered)
+        self.assertIn(self.scene_id, env.used_nodes)  # type: ignore[attr-defined]
+        self.assertNotIn("chasing the thief", rendered)
+        self.assertNotIn("Old synopsis.", rendered)
         self.assertNotIn('{"fields"', rendered)
 
     def test_summary_patch_validates_on_a_scene(self) -> None:

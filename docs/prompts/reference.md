@@ -26,6 +26,23 @@ most surprises:
 - **Print** a ready-made block of text where you write it — like
   `story_so_far(scene)`.
 
+### In a chat, what you print is fixed at the first message
+
+A chat renders its prompt **once**, when you send the first message, and keeps
+that text for the rest of the conversation. So whatever you **read** or **print**
+(`scene.body`, `scene.summary`, `story_so_far(scene)`) stays as it was then, even
+if you edit the scene mid-chat. What you **choose** with `use()` is different: the
+app fetches it fresh on every turn, so the AI sees your latest saved version.
+
+For a scene the chat should keep up with, choose it instead of printing it:
+
+```jinja
+{% do use(scene) %}
+```
+
+A prompt run once from the editor renders fresh on every run, so this only
+matters in a chat.
+
 ## As of this scene
 
 A prompt runs **on one scene**, and it reads your story as it stands there. When a
@@ -169,6 +186,9 @@ entry, say). Read any of its fields with a dot:
 ```
 
 - `scene.body` is the story text, with the app's markers already removed.
+- **Watch out:** in a chat, a printed `scene.body` stays as it was at the first
+  message. To keep up with edits, write `{% do use(scene) %}` instead
+  ([why](#in-a-chat-what-you-print-is-fixed-at-the-first-message)).
 - A field that points at another entry gives you that entry, so you can keep going:
   `scene.pov.title`.
 - **Watch out:** check `{% if scene %}` first in a prompt that can run without one.
@@ -425,7 +445,9 @@ picker input to add every pick.
 
 - **Watch out:** `use()` doesn't turn automatic lore on — add
   [`auto_lore()`](#auto_lore) for that.
-- `use()` is for lore. For a scene's prose, print `scene.body`.
+- `use()` also takes a scene: `{% do use(scene) %}` sends its prose and fields.
+  In a chat this is how to give the AI a scene you keep editing, because a
+  printed `scene.body` stays as it was at the first message.
 - The optional hint, `"stable"` or `"volatile"`, tells the app whether you expect
   the entry to change during a chat. Leave it off unless you know.
 - `snapshot=` places the entry as it was at a saved snapshot, next to the live one

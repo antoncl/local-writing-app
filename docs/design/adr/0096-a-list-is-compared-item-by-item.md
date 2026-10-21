@@ -511,8 +511,8 @@ fields. *Done when:* the snapshot journey works in the browser on a copy of a re
 
 ## Amendment 1 — a rewrite reads old above new, and a scalar item is its own text
 
-- **Status:** **Proposed** — 2026-10-21. Anton approved the design in conversation; this text
-  awaits his review in PR #2601. Issue: #2599. Text by Claude.
+- **Status:** **Accepted** — 2026-10-21 (Anton, design in conversation, text in PR #2601).
+  Issue: #2599. Text by Claude.
 - **Amends:** §5 (adds step 4), §6 (edited item, addition and removal for a scalar list; the
   column).
 

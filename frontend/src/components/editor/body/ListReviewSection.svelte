@@ -143,7 +143,7 @@
         {#if pair && pair.edited}
           <div class="lrs-item lrs-edited">
             {#if !field.item_scalar}
-              <div class="lrs-item-title prose-column">{itemTitle(field, L[pair.l], rowIndex)}</div>
+              <div class="lrs-item-title prose-column"><div class="lrs-gutter">{itemTitle(field, L[pair.l], rowIndex)}</div></div>
             {/if}
             {#each pair.members as memberKey (memberKey)}
               {@const member = memberOf(memberKey)}
@@ -167,13 +167,13 @@
                       onResolved={(v) => onSettleUnit(unitKey, v ?? false)}
                     />
                   {:else if settled !== undefined}
-                    {#if !field.item_scalar}<div class="lrs-member-name prose-column">{member.name || member.key}</div>{/if}
+                    {#if !field.item_scalar}<div class="lrs-member-name prose-column"><div class="lrs-gutter">{member.name || member.key}</div></div>{/if}
                     <!-- Settled: its side, without a clickable region (§4). -->
                     {#await sceneMarkdownToHtml(settledMemberMarkdown(member, settled, lRecord[member.key], oRecord[member.key])) then html}
-                      <div class="lrs-settled prose-column">{@html html}</div>
+                      <div class="lrs-settled prose-column"><div class="lrs-gutter">{@html html}</div></div>
                     {/await}
                   {:else}
-                    {#if !field.item_scalar}<div class="lrs-member-name prose-column">{member.name || member.key}</div>{/if}
+                    {#if !field.item_scalar}<div class="lrs-member-name prose-column"><div class="lrs-gutter">{member.name || member.key}</div></div>{/if}
                     <RunFlip
                       {adoptable}
                       label={member.name || member.key}
@@ -187,7 +187,15 @@
             {/each}
           </div>
         {:else}
-          <div class="lrs-item lrs-quiet prose-column">{itemTitle(field, L[row.l], rowIndex)}</div>
+          {#if field.item_scalar}
+            <!-- A scalar item is its own text: rendered like every other row of it, so
+                 an unchanged beat reads the same as its edited or added neighbours. -->
+            {#await sceneMarkdownToHtml(itemMarkdown(field, L[row.l], row.l, resolveTitle)) then html}
+              <div class="lrs-item lrs-quiet prose-column"><div class="lrs-gutter">{@html html}</div></div>
+            {/await}
+          {:else}
+            <div class="lrs-item lrs-quiet prose-column"><div class="lrs-gutter">{itemTitle(field, L[row.l], rowIndex)}</div></div>
+          {/if}
         {/if}
       {:else if row.kind === "add"}
         {@const unitKey = `add|${row.o}`}
@@ -195,7 +203,7 @@
         <div class="lrs-unit lrs-add">
           {#if settled === true}
             {#await sceneMarkdownToHtml(itemMarkdown(field, O[row.o], row.o, resolveTitle)) then html}
-              <div class="lrs-settled-block prose-column">{@html html}</div>
+              <div class="lrs-settled-block prose-column"><div class="lrs-gutter">{@html html}</div></div>
             {/await}
           {:else}
             <RunFlip
@@ -282,9 +290,21 @@
   .list-review-section :global(.effective-body-content > p) {
     text-indent: 0;
   }
-  .lrs-item :global(.effective-body-content > p:last-child),
-  .lrs-unit :global(.effective-body-content > p:last-child),
-  .lrs-unit :global(.blk) {
+  /* Scoped from the section root so it outranks the overlay's own `.blk` and
+     `p` margins outright — a tie would leave it to stylesheet order. */
+  .list-review-section .lrs-item :global(.effective-body-content > p:last-child),
+  .list-review-section .lrs-unit :global(.effective-body-content > p:last-child),
+  .list-review-section .lrs-unit :global(.blk) {
+    margin-bottom: 0;
+  }
+  /* Every row's text starts where a boxed (added/removed) row's does: the
+     `.blk` gutter is a 3px edge plus 0.7em, reserved here without the tint. */
+  .lrs-gutter,
+  .list-review-section .lrs-edited :global(.effective-body-content > p) {
+    border-left: 3px solid transparent;
+    padding-left: 0.7em;
+  }
+  .lrs-gutter > :global(p:last-child) {
     margin-bottom: 0;
   }
 </style>

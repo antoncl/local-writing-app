@@ -205,12 +205,25 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
 
   it("a removed item sits directly above its replacement, neither in bold", async () => {
     const { container } = render(ListReviewSection, { props: scalarProps("both") });
-    const kinds = [...container.querySelectorAll(".lrs-item, .lrs-unit")].map((el) =>
-      el.classList.contains("lrs-remove") ? "remove" : el.classList.contains("lrs-add") ? "add" : "item",
-    );
-    expect(kinds).toEqual(["item", "remove", "add", "item"]);
+    const kinds = () =>
+      [...container.querySelectorAll(".lrs-item, .lrs-unit")].map((el) =>
+        el.classList.contains("lrs-remove") ? "remove" : el.classList.contains("lrs-add") ? "add" : "item",
+      );
+    await waitFor(() => expect(kinds()).toEqual(["item", "remove", "add", "item"]));
     await waitFor(() => expect(container.querySelector(".blk-was")?.textContent).toContain("Maro carries linen"));
     expect(container.querySelector(".lrs-unit strong")).toBeNull();
+  });
+
+  it("an unchanged item renders its own markdown, like its changed neighbours", async () => {
+    const field = { ...scalarField };
+    const L2: MetadataValue[] = ["She *wavers* at the door.", "Old line."];
+    const O2: MetadataValue[] = ["She *wavers* at the door.", "Brand new line about something else entirely."];
+    const pairing = pairListItems(field, L2, O2);
+    const { container } = render(ListReviewSection, {
+      props: { ...scalarProps("both"), L: L2, O: O2, pairing, units: listUnits(field, pairing) },
+    });
+    await waitFor(() => expect(container.querySelector(".lrs-quiet em")?.textContent).toBe("wavers"));
+    expect(container.querySelector(".lrs-quiet")?.textContent).not.toContain("*");
   });
 
   it("Current reads in the same overlay column as Both, at body weight", async () => {

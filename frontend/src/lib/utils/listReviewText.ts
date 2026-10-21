@@ -106,7 +106,7 @@ export function itemMarkdown(
 ): string {
   const record = itemRecord(field, item);
   if (field.item_scalar) {
-    const member = field.item_members?.[0];
+    const member = visibleItemMembers(field)[0];
     return member ? memberMarkdown(member, record.value, resolveTitle) : escapeMarkdown(itemTitle(field, item, index));
   }
   const blocks = [`**${escapeMarkdown(itemTitle(field, item, index))}**`];

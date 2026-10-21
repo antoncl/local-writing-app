@@ -511,8 +511,8 @@ fields. *Done when:* the snapshot journey works in the browser on a copy of a re
 
 ## Amendment 1 — a rewrite reads old above new, and a scalar item is its own text
 
-- **Status:** **Accepted** — 2026-10-21 (Anton, in conversation, on the design below). Issue:
-  #2599. Text by Claude.
+- **Status:** **Proposed** — 2026-10-21. Anton approved the design in conversation; this text
+  awaits his review in PR #2601. Issue: #2599. Text by Claude.
 - **Amends:** §5 (adds step 4), §6 (edited item, addition and removal for a scalar list; the
   column).
 
@@ -534,7 +534,14 @@ column and leading from *Both*.
    either end) is interleaved: removal, addition, removal, addition, in L's and O's order
    respectively, then the longer side's rest. Both invariants hold unchanged. A run sits between
    the same paired items, and each invariant only ever keeps one side of it, in that side's own
-   order.
+   order. The saved list follows the sequence, as §5 says, so a mixed settlement (some removals
+   kept, some additions adopted) saves in this interleaved order too: an old item next to the new
+   one that followed the same item, not all the new ones ahead of all the old.
+
+   With the order unit declined, removals anchor on their L predecessor and additions on their O
+   predecessor, so one run can hold items that aren't rewrites of each other. They are still
+   interleaved. Being side by side claims only that they follow the same item, and the order
+   region at the head of the section already shows that the order changed.
 2. **§6, scalar list.** The item's run text is its value at body weight: a `long_text` item as
    its own markdown, any other as its display text. An edited scalar item shows its one member's
    diff with no title line and no member heading, since both would only repeat the item. A group

@@ -251,11 +251,9 @@ function oIndexOf(entry: SeqEntry): number | null {
 
 /** Insert one entry immediately after the entry with the nearest smaller
  *  index already in `seq` (by `coordOf`), or first if there is none. Shared
- *  by the removal and addition passes of `listSequence` (§5 steps 2–3): an
- *  addition and a removal anchored on the same preceding item both insert
- *  "immediately after" it, so processing removals first and always
- *  splicing right after the anchor's CURRENT position naturally puts the
- *  addition ahead of an already-inserted removal at that anchor. */
+ *  by the removal and addition passes of `listSequence` (§5 steps 2–3). An
+ *  addition and a removal anchored on the same item land in one run after it;
+ *  their order inside that run is step 4's (`interleaveUnpaired`), not this. */
 function insertAfterNearest(seq: SeqEntry[], entry: SeqEntry, index: number, coordOf: (e: SeqEntry) => number | null): void {
   let anchorPos = -1;
   let anchorCoord = -1;

@@ -38,10 +38,12 @@ function setup(persistEdits: () => Promise<void>) {
     content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Draft." }] }] },
   });
   editors.push(editor);
+  // Mutable, so a test can move the pane to another document mid-save.
+  const current = { sceneId: "scene_1" };
   const ctrl = new AiSuggestionController({
     getEditor: () => editor,
     getEditorFrame: () => undefined,
-    getScene: () => ({ id: "scene_1", entry_type: "manuscript:scene" }) as never,
+    getScene: () => ({ id: current.sceneId, entry_type: "manuscript:scene" }) as never,
     getDocumentKind: () => "manuscript",
     getPromptCtx: () => ({ promptEntries: [] }) as never,
     onInvocationCost: () => {},
@@ -50,7 +52,16 @@ function setup(persistEdits: () => Promise<void>) {
     onOpenChat: () => {},
     persistEdits,
   });
-  return { editor, ctrl };
+  return { editor, ctrl, current };
+}
+
+const DONE = { type: "done", provider: "p", model: "m", latency_ms: 1, truncated: false } as never;
+
+/** A persist that holds until released, so a test can act mid-save. */
+function heldPersist() {
+  let release: () => void = () => {};
+  const persist = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
+  return { persist, release: () => release() };
 }
 
 describe("inline run persists pending edits first (#2596)", () => {
@@ -89,5 +100,78 @@ describe("inline run persists pending edits first (#2596)", () => {
     release();
     await first;
     expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a double submit straight from the inputs dialog", async () => {
+    // The dialog calls `runPromptEntryWithInputs` directly, past `runPromptEntry`.
+    const { persist, release } = heldPersist();
+    const { ctrl } = setup(persist);
+    const call = vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      yield DONE;
+    });
+
+    const first = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(1));
+    await ctrl.runPromptEntryWithInputs(ENTRY, {});
+    release();
+    await first;
+
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the run when the pane moves to another document during the save", async () => {
+    const { persist, release } = heldPersist();
+    const { editor, ctrl, current } = setup(persist);
+    const call = vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      yield { type: "delta", text: "Scene A's continuation." } as never;
+      yield DONE;
+    });
+
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(persist).toHaveBeenCalled());
+    current.sceneId = "scene_2"; // the writer opened another scene in this pane
+    release();
+    await run;
+
+    expect(call).not.toHaveBeenCalled();
+    expect(editor.state.doc.textContent).toBe("Draft.");
+    expect(ctrl.generating).toBe(false);
+  });
+
+  it("drops the run when the controller is reset during the save", async () => {
+    const { persist, release } = heldPersist();
+    const { ctrl } = setup(persist);
+    const call = vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      yield DONE;
+    });
+
+    const run = ctrl.runPromptEntryWithInputs(ENTRY, {});
+    await vi.waitFor(() => expect(persist).toHaveBeenCalled());
+    ctrl.reset();
+    release();
+    await run;
+
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("line edits save first too — the flush sits ahead of every editor handler", async () => {
+    const order: string[] = [];
+    const { editor, ctrl } = setup(async () => {
+      order.push("persist");
+    });
+    editor.commands.setTextSelection({ from: 1, to: editor.state.doc.content.size - 1 });
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      order.push("call");
+      yield { ...(DONE as object), line_edits: [] } as never;
+    });
+    const lineEdits = {
+      ...(ENTRY as object),
+      context_strategy: { output: { handler: "inline_edits" } },
+    } as never;
+
+    await ctrl.runPromptEntryWithInputs(lineEdits, {});
+
+    expect(order).toEqual(["persist", "call"]);
   });
 });

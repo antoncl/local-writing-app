@@ -119,4 +119,19 @@ describe("editorPanes.flushBeforeSceneRewrite (#2596)", () => {
 
     await expect(editorPanes.flushBeforeSceneRewrite("scene_1")).rejects.toThrow("busy");
   });
+
+  it("saves the scene once, strictly — never through autosave's recovery", async () => {
+    // A forgiving pass over the scene would start the 409 recovery (or a retry)
+    // and then race the strict save; the scene is saved once, and only strictly.
+    editorPanes.panes = [scenePane("p1", "scene_1", true)];
+    const save = vi
+      .spyOn(editorPanes, "saveEditorPane")
+      .mockRejectedValue(new HttpError("busy", 503, null));
+    const retry = vi.spyOn(editorPanes, "scheduleAutosaveRetry").mockImplementation(() => {});
+
+    await expect(editorPanes.flushBeforeSceneRewrite("scene_1")).rejects.toThrow("busy");
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(retry).not.toHaveBeenCalled();
+  });
 });

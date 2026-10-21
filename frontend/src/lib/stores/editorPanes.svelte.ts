@@ -1293,20 +1293,28 @@ class EditorPanesController {
    *  belongs to the review transaction (#634). Chat and view panes no-op in the
    *  save itself. */
   async flushBeforeAICall(): Promise<void> {
-    const dirty = this.panes.filter((pane) => pane.dirty && !this.#reviewLocks.has(pane.id));
+    await this.#flushForgiving(null);
+  }
+
+  /** `flushBeforeAICall`, for a call whose result then REWRITES `sceneId`
+   *  (Finalize roleplay, #2596): every OTHER pane is persisted the forgiving way,
+   *  then the scene once, strictly — a scene whose own edits could not be saved
+   *  throws, so the caller aborts rather than overwrite it. The scene is kept out
+   *  of the forgiving pass so a failed save of it can't start autosave's 409
+   *  recovery and then race the strict save. */
+  async flushBeforeSceneRewrite(sceneId: string): Promise<void> {
+    await this.#flushForgiving(this.paneForScene(sceneId)?.id ?? null);
+    await this.flushSceneIfDirty(sceneId);
+  }
+
+  async #flushForgiving(skipPaneId: string | null): Promise<void> {
+    const dirty = this.panes.filter(
+      (pane) => pane.dirty && pane.id !== skipPaneId && !this.#reviewLocks.has(pane.id),
+    );
     for (const pane of dirty) {
       this.#autosave.cancel(pane.id);
       await autosaveOnce(this, pane.id);
     }
-  }
-
-  /** `flushBeforeAICall`, for a call whose result then REWRITES `sceneId`
-   *  (Finalize roleplay, #2596): everything the prompt reads is persisted the
-   *  forgiving way, then the scene itself strictly — a scene whose own edits
-   *  could not be saved throws, so the caller aborts rather than overwrite it. */
-  async flushBeforeSceneRewrite(sceneId: string): Promise<void> {
-    await this.flushBeforeAICall();
-    await this.flushSceneIfDirty(sceneId);
   }
 
   // Shallow-merge `patch` into one pane by id — the single privileged mutation

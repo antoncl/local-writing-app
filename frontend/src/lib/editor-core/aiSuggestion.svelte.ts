@@ -531,7 +531,9 @@ export class AiSuggestionController {
   ): Promise<void> {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
-    if (!editor || !scene) return;
+    // The in-flight guard lives here, not only in `runPromptEntry`: the inputs
+    // dialog calls this directly, and a double submit must not start two runs.
+    if (!editor || !scene || this.generating || this.#persisting) return;
     // No explicit pick → the prompt's own preference (pin, else tag scope);
     // the backend would otherwise resolve "" to the topmost overall (#2593).
     // Resolved into its own name so retry replays the caller's pick ("" stays
@@ -546,11 +548,22 @@ export class AiSuggestionController {
       const host = this.#inlineHost(run, surface);
       // #2596: before `produce` — nothing in the document has changed yet, so the
       // save carries exactly what the author sees, and the call reads it back.
+      const epoch = this.#runEpoch;
       this.#persisting = true;
       try {
         await this.#deps.persistEdits?.();
       } finally {
         this.#persisting = false;
+      }
+      // The save took real time: if the pane moved to another document meanwhile
+      // (`reset()` bumped the epoch, or the scene/editor changed), this run belongs
+      // to a document the writer has left — drop it rather than write into the new one.
+      if (
+        epoch !== this.#runEpoch
+        || this.#deps.getScene()?.id !== scene.id
+        || this.#deps.getEditor() !== editor
+      ) {
+        return;
       }
       const gathered = await handler.produce(host);
       if (!gathered) return;

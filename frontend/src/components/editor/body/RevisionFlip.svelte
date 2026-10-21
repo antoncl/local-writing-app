@@ -21,6 +21,7 @@
     currentText,
     proposedText,
     label,
+    showLabel = true,
     view = "both",
     adoptable = true,
     onResolved,
@@ -31,6 +32,9 @@
     proposedText: string;
     /** Section heading — "Body", or a long_text field's label. */
     label: string;
+    /** False where the heading would only repeat its container's (a scalar
+     *  list item, #2599): the label then names the overlay for a11y alone. */
+    showLabel?: boolean;
     /** Which whole version to read (#710): `both` interleaves the diff, `now`
      *  shows the current text whole, `was` the proposed text whole. The runs
      *  carry both versions, so a change is a re-render, never a re-diff. */
@@ -72,7 +76,7 @@
 </script>
 
 <div class="revision-flip">
-  <div class="flip-label">{label}</div>
+  {#if showLabel}<div class="flip-label">{label}</div>{/if}
   <ReadOnlyBodyOverlay {html} {label} tone="snapshot" onRunClick={adoptable ? handleRunClick : undefined} />
 </div>
 

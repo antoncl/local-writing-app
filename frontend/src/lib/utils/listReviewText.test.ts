@@ -122,8 +122,17 @@ describe("memberDisplayText", () => {
 });
 
 describe("itemMarkdown", () => {
-  it("renders a scalar item as its title alone", () => {
-    expect(itemMarkdown(scalarField, "a rumour", 0)).toBe("**a rumour**");
+  it("renders a scalar item as its value at body weight, not a bold title (#2599)", async () => {
+    expect(itemMarkdown(scalarField, "a rumour", 0)).toBe("a rumour");
+    expect(await renders(itemMarkdown(scalarField, "1. Setup", 0))).toBe("1. Setup");
+  });
+
+  it("renders a long_text scalar item as its own markdown, unescaped", () => {
+    const proseField = {
+      ...scalarField,
+      item_members: [{ key: "value", name: "Beats", type: "long_text" }],
+    } as unknown as MetadataFieldDefinition;
+    expect(itemMarkdown(proseField, "she *wavers*", 0)).toBe("she *wavers*");
   });
 
   it("renders the title bold, then each non-empty non-title member under its name", () => {

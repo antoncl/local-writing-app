@@ -45,11 +45,10 @@ describe("ChatBodyView send (#2587)", () => {
   it("persists dirty editor panes before the turn is sent", async () => {
     const order: string[] = [];
     let releaseFlush: () => void = () => {};
-    vi.spyOn(editorPanes, "flushDirtyPanes").mockImplementation(async () => {
+    vi.spyOn(editorPanes, "flushBeforeAICall").mockImplementation(async () => {
       order.push("flush:start");
       await new Promise<void>((resolve) => (releaseFlush = resolve));
       order.push("flush:done");
-      return true;
     });
     const stream = vi.spyOn(api, "aiChatStream").mockImplementation(async function* () {
       order.push("stream");
@@ -62,7 +61,7 @@ describe("ChatBodyView send (#2587)", () => {
     }) as never);
     composerPrefills.set(CHAT_ID, "I rewrote the ending. Look again.");
 
-    const { getByText } = render(ChatBodyView, {
+    const { getByText, queryByText } = render(ChatBodyView, {
       scene: { id: CHAT_ID } as unknown as EditableDocument,
     });
     await vi.waitFor(() => expect(api.readNode).toHaveBeenCalled());
@@ -73,12 +72,15 @@ describe("ChatBodyView send (#2587)", () => {
     });
     send.click();
 
-    // The flush is in flight: nothing has been sent yet.
+    // The flush is in flight: nothing has been sent yet, and saving doesn't
+    // dress up as generating (no "Sending…", no Stop that can't stop anything).
     await vi.waitFor(() => expect(order).toContain("flush:start"));
     expect(stream).not.toHaveBeenCalled();
+    expect(queryByText("Sending…")).toBeNull();
 
     releaseFlush();
     await vi.waitFor(() => expect(stream).toHaveBeenCalled());
     expect(order).toEqual(["flush:start", "flush:done", "stream"]);
+    expect(stream).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,13 +14,15 @@ Two modes, one file, so the marker's location and format are defined once:
 
 **The marker** is `<git-dir>/claude-reviewed-sha`: the full SHA of the commit
 the review covered. The git dir is per-worktree, so each worktree carries its
-own record and nothing is ever committed. `mark` refuses while tracked files
-have uncommitted changes — the fixes must be *in* the commit it records.
+own record and nothing is ever committed. `mark` refuses while the worktree has
+uncommitted or untracked changes — the fixes must be *in* the commit it records.
 
 **What the hook accepts**: the recorded SHA is `HEAD`, or `HEAD` descends from
 it through merges and master's own commits only (bringing the branch up to
 date with master is not new work). Any other new commit re-blocks until the
-review is recorded again.
+review is recorded again. A push names only `HEAD` / the current branch: a
+refspec for another branch, or `--all` / `--mirror` / `--branches`, is blocked,
+since the review only ever covers `HEAD`.
 
 **The escape** is visible on purpose: a trailing comment on the command,
 
@@ -32,6 +34,10 @@ in the transcript where Anton can see it.
 Also allowed unconditionally: `--dry-run` and branch deletion (`--delete`,
 `-d`, `:branch`) — neither publishes unreviewed code.
 
+The command is judged one segment at a time (split at `;`, `&&`, `||`, `|`,
+`&` and newlines, outside quotes), so a flag or `-C` in one command cannot
+vouch for a push in another.
+
 The hook blocks with exit 2 and the reason on stderr (PreToolUse semantics:
 stderr is fed back to the model). It only looks at commands that push; any
 other event, or an unparseable one, passes with exit 0.
@@ -42,27 +48,34 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 MARKER_NAME = "claude-reviewed-sha"
 BASE_REF = "origin/master"
 
-# `git [global opts] push`, where global opts may take a value (`-C dir`, `-c k=v`).
-_GIT_PUSH = re.compile(
-    r"(?:^|[\s;&|(])git(?:\.exe)?(?:\s+(?:-[Cc]\s+(?:\"[^\"]*\"|'[^']*'|\S+)|--?[\w-]+(?:=\S+)?))*\s+push\b"
-)
-_GH_PR_CREATE = re.compile(r"(?:^|[\s;&|(])gh(?:\.exe)?\s+pr\s+create\b")
-_GIT_DASH_C = re.compile(r"\bgit(?:\.exe)?\s+-C\s+(\"[^\"]*\"|'[^']*'|\S+)")
-# A git command that moves HEAD, chained with the push in the same tool call:
-# the hook runs before any of it, so it would check the pre-commit HEAD.
-_HEAD_MOVER = re.compile(
-    r"\bgit(?:\.exe)?(?:\s+-\S+(?:\s+\S+)?)*?\s+"
-    r"(?:commit|merge|pull|rebase|cherry-pick|am|revert|reset)\b"
-)
-_ESCAPE = re.compile(r"#\s*review-gate:\s*skip\b[ \t]*(\S.*)?$", re.MULTILINE)
-_SAFE_PUSH = re.compile(r"\s(?:--dry-run|-n|--delete|-d)\b|\s:\S")
+# Commands that move HEAD. Chained with a push in the same tool call, they run
+# after the hook has already judged the pre-move HEAD.
+_HEAD_MOVERS = {
+    "commit", "merge", "pull", "rebase", "cherry-pick", "am", "revert", "reset",
+    "checkout", "switch",
+}
+# git global options that take their value as the next token.
+_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+# push options that take their value as the next token.
+_PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+_PUSH_SAFE_OPTS = {"--dry-run", "-n", "--delete", "-d"}
+_PUSH_ALL_REFS = {"--all", "--mirror", "--branches"}
+
+_QUOTED = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
+_SEPARATOR = re.compile(r"&&|\|\||[;|&\n]")
+# A redirection token (`>`, `2>`, `>>log`); the `2>` left over when `2>&1` is
+# split at its `&` is one too, and the `1` after it a token of its own segment.
+_REDIRECT = re.compile(r"^[\d*&]*(?:>>?|<)")
+_ESCAPE = re.compile(r"#[ \t]*review-gate:[ \t]*skip\b([^\n]*)\Z")
 
 with contextlib.suppress(Exception):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -116,11 +129,13 @@ def mark(cwd: Path) -> int:
     if head is None or path is None:
         print("review_gate: not inside a git checkout", file=sys.stderr)
         return 1
-    dirty = git(cwd, "status", "--porcelain", "--untracked-files=no")
+    # Untracked files count: a review fix is often a new file (a test).
+    dirty = git(cwd, "status", "--porcelain")
     if dirty:
         print(
-            "review_gate: tracked files have uncommitted changes — commit the "
-            "review fixes first, so the recorded commit contains them:\n" + dirty,
+            "review_gate: the worktree has uncommitted or untracked changes — "
+            "commit the review fixes first, so the recorded commit contains "
+            "them:\n" + dirty,
             file=sys.stderr,
         )
         return 1
@@ -130,24 +145,125 @@ def mark(cwd: Path) -> int:
     return 0
 
 
-# --- hook -------------------------------------------------------------------
+# --- hook: reading the command ---------------------------------------------
 
-def push_kind(command: str) -> str | None:
-    if _GH_PR_CREATE.search(command):
-        return "gh pr create"
-    match = _GIT_PUSH.search(command)
-    if match and not _SAFE_PUSH.search(command[match.end():].split("#", 1)[0]):
-        return "git push"
+@dataclass
+class Call:
+    """One `git …` or `gh …` invocation inside the command."""
+
+    program: str          # "git" | "gh"
+    cwd: Path | None      # from `git -C <dir>`, if given
+    args: list[str]       # everything after the global options
+
+
+def _mask_quotes(command: str) -> str:
+    """Same length as `command`, quoted contents replaced, so separators and
+    `#` inside quotes cannot split a segment or start a comment."""
+    return _QUOTED.sub(lambda m: m.group(0)[0] + "_" * (len(m.group(0)) - 2) + m.group(0)[-1], command)
+
+
+def _segments(command: str, masked: str) -> list[str]:
+    """Split at unquoted separators, dropping each segment's unquoted `# comment`."""
+    bounds = [0]
+    for match in _SEPARATOR.finditer(masked):
+        bounds += [match.start(), match.end()]
+    bounds.append(len(command))
+    segments = []
+    for start, end in zip(bounds[::2], bounds[1::2], strict=True):
+        hash_at = masked.find("#", start, end)
+        segments.append(command[start:end if hash_at < 0 else hash_at])
+    return segments
+
+
+def _tokens(segment: str) -> list[str]:
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        raw = segment.split()
+    tokens = []
+    skip_next = False
+    for token in raw:
+        if skip_next:
+            skip_next = False
+        elif _REDIRECT.match(token):
+            # `> file` puts its target in the next token; `>file`, `2>&1` don't.
+            skip_next = _REDIRECT.match(token).end() == len(token)
+        else:
+            quoted = len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+            tokens.append(token[1:-1] if quoted else token)
+    return tokens
+
+
+def _program(token: str) -> str:
+    name = re.split(r"[\\/]", token)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def parse_calls(command: str) -> list[Call]:
+    masked = _mask_quotes(command)
+    calls = []
+    for segment in _segments(command, masked):
+        tokens = _tokens(segment.strip().lstrip("(&").strip())
+        if not tokens or _program(tokens[0]) not in ("git", "gh"):
+            continue
+        program, rest, cwd = _program(tokens[0]), tokens[1:], None
+        if program == "git":
+            while rest and rest[0].startswith("-"):
+                opt = rest.pop(0)
+                if opt in _GIT_VALUE_OPTS and rest:
+                    value = rest.pop(0)
+                    if opt == "-C":
+                        cwd = Path(value)
+        calls.append(Call(program, cwd, rest))
+    return calls
+
+
+def is_push(call: Call) -> bool:
+    if call.program == "gh":
+        return call.args[:2] == ["pr", "create"]
+    return call.args[:1] == ["push"]
+
+
+def _push_args(call: Call) -> tuple[set[str], list[str]]:
+    """A `git push` call's options and refspecs (the remote dropped)."""
+    options, positional, args = set(), [], call.args[1:]
+    while args:
+        arg = args.pop(0)
+        if arg.startswith("-"):
+            options.add(arg)
+            if arg in _PUSH_VALUE_OPTS and args:
+                args.pop(0)
+        else:
+            positional.append(arg)
+    return options, positional[1:]
+
+
+def publishes_nothing(call: Call) -> bool:
+    """A dry run, or a push that only deletes remote branches."""
+    if call.program != "git":
+        return False
+    options, refspecs = _push_args(call)
+    if options & _PUSH_SAFE_OPTS:
+        return True
+    return bool(refspecs) and all(spec.startswith(":") for spec in refspecs)
+
+
+def ref_problem(call: Call, branch: str | None) -> str | None:
+    """Why this push publishes refs other than HEAD, which the review covers."""
+    if call.program != "git":
+        return None
+    options, refspecs = _push_args(call)
+    if wide := options & _PUSH_ALL_REFS:
+        return f"`{min(wide)}` pushes refs other than HEAD, which a review cannot cover."
+    allowed = {"", "HEAD", "@"} |({branch, f"refs/heads/{branch}"} if branch else set())
+    for spec in refspecs:
+        source = spec.lstrip("+").split(":", 1)[0]
+        if source not in allowed:
+            return f"Refspec `{spec}` pushes something other than HEAD ({branch})."
     return None
 
 
-def command_cwd(command: str, event_cwd: Path) -> Path:
-    match = _GIT_DASH_C.search(command)
-    if not match:
-        return event_cwd
-    target = Path(match.group(1).strip("\"'"))
-    return target if target.is_absolute() else event_cwd / target
-
+# --- hook: the verdict ------------------------------------------------------
 
 def block(reason: str) -> int:
     print(
@@ -161,38 +277,52 @@ def block(reason: str) -> int:
     return 2
 
 
+def check_push(call: Call, event_cwd: Path) -> str | None:
+    cwd = event_cwd / call.cwd if call.cwd else event_cwd
+    head = git(cwd, "rev-parse", "HEAD")
+    if head is None:
+        return f"Could not resolve HEAD in {cwd}."
+    problem = ref_problem(call, git(cwd, "symbolic-ref", "--short", "-q", "HEAD"))
+    if problem:
+        return problem
+    reviewed = recorded_sha(cwd)
+    if reviewed is None:
+        return f"No code review is recorded for this worktree (HEAD {head[:12]})."
+    if not review_covers_head(cwd, reviewed, head):
+        return (
+            f"The recorded review covers {reviewed[:12]}, but HEAD is "
+            f"{head[:12]} and has new commits since."
+        )
+    return None
+
+
 def check(command: str, event_cwd: Path) -> int:
-    kind = push_kind(command)
-    if kind is None:
+    calls = parse_calls(command)
+    pushes = [c for c in calls if is_push(c) and not publishes_nothing(c)]
+    if not pushes:
         return 0
-    escape = _ESCAPE.search(command)
+    escape = _ESCAPE.search(_mask_quotes(command).rstrip())
     if escape:
-        if escape.group(1):
+        if escape.group(1).strip():
             return 0
         return block("The `# review-gate: skip` escape needs a reason after it.")
-    if kind == "git push" and _HEAD_MOVER.search(command):
+    if any(c.program == "git" and c.args[:1] and c.args[0] in _HEAD_MOVERS for c in calls):
         return block(
             "This command moves HEAD and pushes in one call, so the hook can "
             "only see the commit from before it. Run them as separate calls."
         )
-    cwd = command_cwd(command, event_cwd)
-    head = git(cwd, "rev-parse", "HEAD")
-    if head is None:
-        return block(f"Could not resolve HEAD in {cwd}.")
-    reviewed = recorded_sha(cwd)
-    if reviewed is None:
-        return block(f"No code review is recorded for this worktree (HEAD {head[:12]}).")
-    if not review_covers_head(cwd, reviewed, head):
-        return block(
-            f"The recorded review covers {reviewed[:12]}, but HEAD is {head[:12]} "
-            "and has new commits since."
-        )
+    for call in pushes:
+        problem = check_push(call, event_cwd)
+        if problem:
+            return block(problem)
     return 0
 
 
 def hook() -> int:
     try:
-        event = json.load(sys.stdin)
+        # Bytes, decoded as UTF-8: the locale codec (cp1252 on Windows) raises
+        # on some UTF-8 sequences, and a decode error must not let a push by.
+        event = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
         command = event["tool_input"]["command"]
         event_cwd = Path(event.get("cwd") or ".")
     except Exception:

@@ -8,6 +8,7 @@ pinned is the hook's verdict on a command, not a helper's return value.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -111,19 +112,90 @@ def test_mark_refuses_uncommitted_review_fixes(repo):
     assert _hook(repo, PUSH).returncode == 2
 
 
+def test_mark_refuses_an_untracked_review_fix(repo):
+    """A review fix is often a new file — a test nobody `git add`ed yet."""
+    _commit(repo, "work")
+    (repo / "test_new.py").write_text("", encoding="utf-8")
+    assert _mark(repo).returncode == 1
+
+
 def test_the_escape_needs_a_reason(repo):
     _commit(repo, "work")
     assert _hook(repo, PUSH + "  # review-gate: skip docs-only change").returncode == 0
     assert _hook(repo, PUSH + "  # review-gate: skip").returncode == 2
 
 
-def test_commit_and_push_in_one_call_is_blocked_even_when_reviewed(repo):
-    """The hook runs before the commit, so it would vouch for the old HEAD."""
+def test_the_escape_only_counts_as_a_trailing_comment(repo):
+    """Escape text inside a quoted PR body is content, not an escape."""
+    _commit(repo, "work")
+    command = 'gh pr create --body "use # review-gate: skip reason to bypass"'
+    assert _hook(repo, command).returncode == 2
+
+
+@pytest.mark.parametrize("mover", [
+    'git commit -am "late fix"',
+    "git switch other",
+    "git -C . checkout other",
+])
+@pytest.mark.parametrize("push", [PUSH, "gh pr create --fill"])
+def test_moving_head_and_pushing_in_one_call_is_blocked_even_when_reviewed(repo, mover, push):
+    """The hook runs before the move, so it would vouch for the old HEAD."""
     _commit(repo, "work")
     assert _mark(repo).returncode == 0
-    result = _hook(repo, 'git commit -am "late fix" && ' + PUSH)
+    result = _hook(repo, f"{mover} && {push}")
     assert result.returncode == 2
     assert "separate calls" in result.stderr
+
+
+@pytest.mark.parametrize("command", [
+    "git push origin other-branch",
+    "git push origin other-branch:topic",
+    "git push --all origin",
+    "git push --mirror origin",
+])
+def test_pushing_refs_other_than_head_is_blocked_even_when_reviewed(repo, command):
+    _commit(repo, "work")
+    assert _mark(repo).returncode == 0
+    assert _hook(repo, command).returncode == 2
+
+
+@pytest.mark.parametrize("command", [
+    "git push origin topic",
+    "git push origin HEAD",
+    "git push origin HEAD:refs/heads/topic",
+    "git push --force-with-lease origin +topic",
+    "git push -o ci.skip origin topic",
+    "git push -u origin topic 2>&1",
+    "git push origin topic > push.log",
+])
+def test_pushing_head_is_allowed_when_reviewed(repo, command):
+    _commit(repo, "work")
+    assert _mark(repo).returncode == 0
+    assert _hook(repo, command).returncode == 0
+
+
+@pytest.mark.parametrize("command", [
+    "git push -u origin topic && git branch -d old",
+    "git push origin topic; git log -n 3",
+    "git -C . status && git push origin topic",
+])
+def test_a_flag_in_another_command_does_not_vouch_for_the_push(repo, command):
+    _commit(repo, "work")
+    assert _hook(repo, command).returncode == 2
+
+
+def test_a_non_cp1252_command_is_still_judged(repo):
+    """U+015D encodes as C5 9D; 0x9D is undefined in cp1252, the Windows locale."""
+    _commit(repo, "work")
+    event = {"tool_name": "Bash", "cwd": str(repo),
+             "tool_input": {"command": 'gh pr create --title "ŝ"'}}
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "hook"],
+        input=json.dumps(event, ensure_ascii=False).encode("utf-8"),
+        capture_output=True, env=env,
+    )
+    assert result.returncode == 2
 
 
 @pytest.mark.parametrize("command", [
@@ -146,6 +218,7 @@ def test_commands_that_publish_nothing_pass(repo, command):
     "git -c core.quotepath=off push origin topic",
     "cd x; git push",
     "git.exe push origin topic",
+    '& "C:\\Program Files\\Git\\cmd\\git.exe" push origin topic',
 ])
 def test_push_spellings_are_all_gated(repo, command):
     _commit(repo, "work")

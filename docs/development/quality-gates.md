@@ -40,17 +40,23 @@ The workflow:
 2. `python scripts/review_gate.py mark` — records `HEAD` in
    `<git-dir>/claude-reviewed-sha`. The git dir is per-worktree, so each
    worktree has its own record and nothing is committed. `mark` refuses while
-   tracked files have uncommitted changes: the recorded commit must contain the
-   fixes.
+   the worktree has uncommitted or untracked changes: the recorded commit must
+   contain the fixes, including a new test file nobody `git add`ed.
 3. Push / open the PR.
 
 What the hook accepts: the recorded SHA is `HEAD`, or `HEAD` descends from it
 through merge commits and `origin/master`'s own commits only — bringing the
 branch up to date with master is not new work and needs no re-review. Any other
 new commit (a late fix, a rebase, an amend) re-blocks until `mark` runs again.
-A command that both moves `HEAD` and pushes (`git commit … && git push`) is
-blocked outright: the hook runs before the commit, so it could only vouch for
-the old `HEAD`.
+A command that both moves `HEAD` (commit, merge, pull, rebase, reset,
+checkout, switch, …) and pushes — `git commit … && git push` — is blocked
+outright: the hook runs before the commit, so it could only vouch for the old
+`HEAD`. The review covers `HEAD` only, so a refspec naming another branch, or
+`--all` / `--mirror` / `--branches`, is blocked too.
+
+The command is judged per segment (split at `;`, `&&`, `||`, `|`, `&` and
+newlines, outside quotes), so a `-d` or `-C` belonging to another command in
+the chain cannot vouch for the push.
 
 Always allowed: `--dry-run`, and branch deletion (`--delete`, `-d`,
 `:branch`) — the post-merge cleanup publishes no code.
@@ -63,14 +69,18 @@ git push -u origin my-branch  # review-gate: skip docs-only change
 ```
 
 It is a comment in both bash and PowerShell, so it changes nothing about the
-command, and it sits in the transcript where it can be questioned. A bare
-`# review-gate: skip` with no reason is still blocked.
+command, and it sits in the transcript where it can be questioned. It counts
+only as the command's trailing, unquoted comment — the same text inside a
+quoted PR body does nothing — and a bare `# review-gate: skip` with no reason
+is still blocked.
 
 Limits, accepted: the gate checks for a *recorded* review, not a good one —
 `mark` is the model's own attestation. It defends against forgetting, which is
 the failure that kept happening. A conflict resolution inside a merge commit is
 not re-reviewed. `cd elsewhere && git push` is judged by the session's cwd
-(`git -C <dir> push` is resolved correctly). Like any hook, it is not active in
+(`git -C <dir> push` is resolved correctly). The hook spawns a Python process
+on every shell call — tens of milliseconds, against a 17-minute CI run it
+saves. Like any hook, it is not active in
 the session that adds it — `settings.json` loads at session start.
 
 ## 2. Git hooks — commit only, and fast

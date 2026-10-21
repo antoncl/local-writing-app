@@ -24,6 +24,55 @@ default six-line source snippet, and caps its total output. An earlier version
 ran ruff twice — the second pass with `--no-cache`, which both doubled the
 process spawns and discarded the cache the first pass had just warmed.
 
+### The review-before-push gate — a `PreToolUse` hook
+
+`scripts/review_gate.py hook`, wired as a `PreToolUse` hook on `Bash|PowerShell`,
+blocks `git push` and `gh pr create` from a Claude session until a code review
+is recorded for the commit being pushed. The rule it enforces: run the
+adversarial `/code-review` over the final diff **before the first push**, so the
+fixes ride the same CI run. CI takes ~17 minutes, and as prose the rule kept
+being skipped — push first, review after, pay for a second run (most recently
+#2605).
+
+The workflow:
+
+1. `/code-review` over the branch's diff; fix the findings; **commit** the fixes.
+2. `python scripts/review_gate.py mark` — records `HEAD` in
+   `<git-dir>/claude-reviewed-sha`. The git dir is per-worktree, so each
+   worktree has its own record and nothing is committed. `mark` refuses while
+   tracked files have uncommitted changes: the recorded commit must contain the
+   fixes.
+3. Push / open the PR.
+
+What the hook accepts: the recorded SHA is `HEAD`, or `HEAD` descends from it
+through merge commits and `origin/master`'s own commits only — bringing the
+branch up to date with master is not new work and needs no re-review. Any other
+new commit (a late fix, a rebase, an amend) re-blocks until `mark` runs again.
+A command that both moves `HEAD` and pushes (`git commit … && git push`) is
+blocked outright: the hook runs before the commit, so it could only vouch for
+the old `HEAD`.
+
+Always allowed: `--dry-run`, and branch deletion (`--delete`, `-d`,
+`:branch`) — the post-merge cleanup publishes no code.
+
+**The escape is visible on purpose.** For a docs-only or emergency push, end the
+command with a comment carrying a reason:
+
+```bash
+git push -u origin my-branch  # review-gate: skip docs-only change
+```
+
+It is a comment in both bash and PowerShell, so it changes nothing about the
+command, and it sits in the transcript where it can be questioned. A bare
+`# review-gate: skip` with no reason is still blocked.
+
+Limits, accepted: the gate checks for a *recorded* review, not a good one —
+`mark` is the model's own attestation. It defends against forgetting, which is
+the failure that kept happening. A conflict resolution inside a merge commit is
+not re-reviewed. `cd elsewhere && git push` is judged by the session's cwd
+(`git -C <dir> push` is resolved correctly). Like any hook, it is not active in
+the session that adds it — `settings.json` loads at session start.
+
 ## 2. Git hooks — commit only, and fast
 
 `.pre-commit-config.yaml`: `ruff` (blocking) + advisory complexity + the

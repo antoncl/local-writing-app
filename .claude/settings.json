@@ -15,6 +15,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ${CLAUDE_PROJECT_DIR}/scripts/review_gate.py hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",

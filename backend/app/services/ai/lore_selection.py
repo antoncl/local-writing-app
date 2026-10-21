@@ -262,7 +262,9 @@ def _budgeted_lore_tiers(
     # budget actually dropped. Set here, where `limits.expansion` is already
     # in scope, rather than widening `fit_lore_budget`'s signature.
     fitted.report.expansion = limits.expansion
-    stable_ids, volatile_ids = _tier_lore_ids(project, fitted.kept_ids, session, picks.hints)
+    stable_ids, volatile_ids, changed_ids = _tier_lore_ids(
+        project, fitted.kept_ids, session, picks.hints
+    )
     stable_snapshots, volatile_snapshots, warnings = _place_before_elements(
         project, picks.snapshots, session, never=selection.never
     )
@@ -273,6 +275,7 @@ def _budgeted_lore_tiers(
             e.id: rendered[e.id] for e in fitted.report.left_out if e.id in rendered
         },
         report=fitted.report,
+        changed_entries=[(i, titles.get(i, "")) for i in changed_ids if i in rendered],
         stable_snapshots=stable_snapshots,
         volatile_snapshots=volatile_snapshots,
         warnings=warnings,
@@ -435,9 +438,9 @@ def _tier_lore_ids(
     ids: list[str],
     session: AISession,
     hints: dict[str, str] | None = None,
-) -> tuple[list[str], list[str]]:
-    """Split the one deduped lore set into `(stable_ids, volatile_ids)` for
-    per-tier placement (ADR-0060 §5), snapshotting each entry for the upcoming
+) -> tuple[list[str], list[str], list[str]]:
+    """Split the one deduped lore set into `(stable_ids, volatile_ids,
+    changed_ids)` for per-tier placement (ADR-0060 §5), snapshotting each entry for the upcoming
     commit. The base tier is per-revision vs the session baseline — unchanged →
     stable, new-or-changed → volatile. The optional `use(node, hint)` prior biases
     it, revision-bounded so it never rides stale bytes:
@@ -448,11 +451,14 @@ def _tier_lore_ids(
     - no hint: the base per-revision tier.
 
     Order within each tier follows `ids` (already sorted), so a settled block is
-    byte-identical turn-to-turn.
+    byte-identical turn-to-turn. `changed_ids` (in `ids` order) are the entries
+    the session saw on an earlier turn at a different revision (#2586) — always
+    a subset of the volatile tier, whatever the hint.
     """
     hints = hints or {}
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
+    changed_ids: list[str] = []
     for entry_id in ids:
         entry = _safe_read_node(project, entry_id)
         if entry is None:
@@ -462,6 +468,8 @@ def _tier_lore_ids(
         # are `not is_stable`, but the "stable" prior treats them differently.
         changed = session.seen(entry_id) and not session.is_stable(entry_id, revision)
         session.snapshot(entry_id, revision)
+        if changed:
+            changed_ids.append(entry_id)
         hint = hints.get(entry_id)
         if hint == "volatile":
             volatile_ids.append(entry_id)
@@ -471,7 +479,7 @@ def _tier_lore_ids(
             stable_ids.append(entry_id)
         else:
             volatile_ids.append(entry_id)
-    return stable_ids, volatile_ids
+    return stable_ids, volatile_ids, changed_ids
 
 
 def _snapshot_revisions(

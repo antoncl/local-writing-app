@@ -108,6 +108,23 @@ def _wrap_lore_block(entries: list[tuple[str, str]]) -> str:
     return "<lore>\n" + "\n\n".join(xml for _, xml in entries) + "\n</lore>"
 
 
+def _changed_note(entries: list[tuple[str, str]]) -> str:
+    """#2586: tell the model which `(id, title)` entries the author changed
+    since its last reply, so it works from the current block rather than from
+    an earlier turn's quote. Empty string when none changed."""
+    if not entries:
+        return ""
+    lines = "\n".join(f"- {xml_escape(title or entry_id)}" for entry_id, title in entries)
+    return (
+        "<changed_since_your_last_reply>\n"
+        "The author has changed these since your last reply. The versions in this "
+        "block are current: work from them, not from anything quoted earlier in the "
+        "conversation.\n"
+        f"{lines}\n"
+        "</changed_since_your_last_reply>"
+    )
+
+
 def _format_lore_block(
     project: ProjectService,
     entry_ids: list[str],

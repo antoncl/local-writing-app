@@ -643,6 +643,8 @@ async def ai_chat_stream(
     extra_done: dict[str, Any] = {}
     if prepared.journal_added:
         extra_done["journal_added"] = [e.model_dump() for e in prepared.journal_added]
+    if prepared.lore_updated:
+        extra_done["lore_updated"] = [e.model_dump() for e in prepared.lore_updated]
     if prepared.lore_fit is not None:
         extra_done["lore_fit"] = prepared.lore_fit.model_dump()
     if history_fit is not None:

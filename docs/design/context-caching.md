@@ -184,6 +184,14 @@ Concretely, for a lore-enabled chat, on every send:
      any of them drops back to volatile the turn its entry is edited. This is the
      "*new or changed since the prior call*" rule the partition machinery exists
      for.
+   - **Changed entries are named** (#2586). An entry *seen on an earlier turn at a
+     different revision* is listed in a `<changed_since_your_last_reply>` note
+     leading the volatile block, so the model works from the current version
+     rather than its own earlier quotes. The send returns the same list as
+     `lore_updated`, and the turn shows it as an "Updated since last turn" chip
+     row. The note rides the volatile block, which re-writes that turn anyway,
+     so it costs no cache. A *new* entry is not "changed"; a cross-node mutation
+     that shifts bytes without a revision bump is not named either.
 3. **Rendered once, as-of the chat's scene** (`_format_lore_block(..., scene=…)`)
    so field values are resolved consistently — no two copies with divergent
    `effective_state`.

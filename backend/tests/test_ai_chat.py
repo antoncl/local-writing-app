@@ -899,6 +899,57 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
 
+    def test_changed_entry_surfaces_as_lore_updated_on_response_and_stream(self) -> None:
+        """#2586: an entry seen on turn 1 and edited since comes back as
+        `lore_updated` on the next turn — non-stream response and stream `done`."""
+        from app.models import SaveLoreEntryRequest
+
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        payload = {
+            "provider": "anthropic",
+            "model": "claude-haiku-4-5-20251001",
+            "system_prompt": "You are a writing assistant.",
+            "messages": [{"role": "user", "content": "Honor walked in."}],
+            "chat_id": self.chat_id,
+        }
+
+        def edit_honor(body: str) -> None:
+            honor = self.service.read_lore_entry(self.honor_id)
+            self.service.save_lore_entry(
+                self.honor_id,
+                SaveLoreEntryRequest(
+                    title=honor.title, body=body, base_revision=honor.revision,
+                    entry_type="lore:character", metadata={"aliases": ["Honor"]},
+                ),
+            )
+
+        expected = [{"entry_id": self.honor_id, "title": "Honor Harrington"}]
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
+             ):
+            first = self.client.post("/api/ai/chat", json=payload)
+            self.assertEqual(first.json()["lore_updated"], [])
+            edit_honor("Now an admiral.")
+            second = self.client.post("/api/ai/chat", json=payload)
+        self.assertEqual(second.json()["lore_updated"], expected)
+
+        # Stream: edit again, then the `done` line carries it.
+        edit_honor("Now a duchess.")
+
+        def fake_stream(call):
+            from app.services.ai import providers as ai_providers
+            yield ai_providers.StreamDelta(text="partial")
+            yield ai_providers.StreamFinal(stop_reason="end_turn")
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(_ANTHROPIC_STREAM, side_effect=fake_stream):
+            streamed = self.client.post("/api/ai/chat/stream", json=payload)
+        events = [json.loads(line) for line in streamed.text.splitlines() if line.strip()]
+        done = next(e for e in events if e["type"] == "done")
+        self.assertEqual(done["lore_updated"], expected)
+
     def test_no_chat_id_skips_journal_path(self) -> None:
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \

@@ -123,6 +123,7 @@ export type {
   ChatSessionMessage,
   ChatSessionContextItem,
   ChatSessionJournalEntry,
+  ChatUpdatedEntry,
   ChangedPick,
   ChatSession,
   ChatSessionSummary,

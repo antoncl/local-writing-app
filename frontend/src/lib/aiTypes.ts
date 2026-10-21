@@ -269,6 +269,8 @@ export type ChatMessage = {
   // #2207: the model's window cut the start of this turn's prompt.
   input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
+  // #2586: entries re-sent this turn because they changed since the AI last saw them.
+  lore_updated?: ChatUpdatedEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
   // ADR-0076 decision 3: per-turn provenance, stamped from the stream `done`
@@ -362,6 +364,8 @@ export type AIChatResponse = {
   truncated: boolean;
   input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
+  // #2586: entries re-sent this turn because they changed since the AI last saw them.
+  lore_updated?: ChatUpdatedEntry[];
   // V2 telemetry. Null on failure or when provider didn't return usage.
   usage?: ChatUsage | null;
   cost_usd?: number | null;
@@ -533,6 +537,8 @@ export type ChatSessionMessage = {
   // #2207: additive-optional — older chats lack it.
   input_truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
+  // #2586: entries re-sent this turn because they changed since the AI last saw them.
+  lore_updated?: ChatUpdatedEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
   // ADR-0076 decision 3: additive persisted fields — older chats simply lack
@@ -577,6 +583,9 @@ export type ChatSessionContextItem = {
   entry_type?: string;
   title?: string;
 };
+
+// #2586: an entry re-sent because it changed since the model last saw it.
+export type ChatUpdatedEntry = { entry_id: string; title: string };
 
 export type ChatSessionJournalEntry = {
   entry_id: string;

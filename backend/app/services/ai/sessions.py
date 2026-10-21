@@ -51,6 +51,10 @@ class AISession:
     id: str
     baseline: dict[str, str] = field(default_factory=dict)
     touched: dict[str, str] = field(default_factory=dict)
+    # #2586: every entry ever committed, at the revision it was last committed
+    # at — unlike `baseline` (the previous call's set alone), it survives an
+    # entry skipping a call, so a later change to it is still a *change*.
+    last_seen: dict[str, str] = field(default_factory=dict)
 
     def snapshot(self, entry_id: str, revision: str) -> None:
         """Record that an entry was pulled into the envelope this call."""
@@ -67,15 +71,30 @@ class AISession:
         the `use(node, "stable")` placement prior needs (ADR-0060 §5)."""
         return entry_id in self.baseline
 
+    def changed_since_seen(self, entry_id: str, revision: str) -> bool:
+        """True if this entry was committed on SOME earlier call at a different
+        revision (#2586) — the model has an older version of it in its history.
+        A never-committed entry is new, not changed."""
+        seen = self.last_seen.get(entry_id)
+        return seen is not None and seen != revision
+
+    def discard_pending(self) -> None:
+        """Drop what an uncommitted call touched — a send that never reached the
+        model must not leak its set into the next call's commit (#2586)."""
+        self.touched = {}
+
     def commit(self) -> None:
-        """Promote touched revisions to baseline. Clears touched for the next call."""
+        """Promote touched revisions to baseline (and into `last_seen`). Clears
+        touched for the next call."""
+        self.last_seen.update(self.touched)
         self.baseline = dict(self.touched)
         self.touched = {}
 
     def reset(self) -> None:
-        """Wipe both baseline and touched (e.g., on cache invalidation)."""
+        """Wipe baseline, touched and last_seen (e.g., on cache invalidation)."""
         self.baseline = {}
         self.touched = {}
+        self.last_seen = {}
 
 
 class AISessionRegistry:

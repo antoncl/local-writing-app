@@ -201,6 +201,14 @@
           {/each}
         </div>
       {/if}
+      {#if message.lore_updated && message.lore_updated.length > 0}
+        <div class="cbv-journal-added" title="Sent again on this turn because it changed since the AI last saw it." data-testid="cbv-lore-updated">
+          <span class="cbv-journal-label">Updated since last turn:</span>
+          {#each message.lore_updated as entry (entry.entry_id)}
+            <span class="cbv-journal-chip" data-testid="lore-updated-chip">{entry.title || entry.entry_id}</span>
+          {/each}
+        </div>
+      {/if}
       {#if message.role === "assistant" && (message.usage || provenance || fitSegments.length > 0)}
         <div class="cbv-turn-meta">
           {#if message.usage}

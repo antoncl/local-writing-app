@@ -9,6 +9,7 @@ in a process-wide registry that must be isolated per test.
 
 from __future__ import annotations
 
+from _chat_turns import send_turn
 from test_lore_cache_blocks import _LoreCacheFixture
 
 from app.models import (
@@ -17,7 +18,6 @@ from app.models import (
     SaveLoreEntryRequest,
     SnapshotPick,
 )
-from app.services.ai.chat import expand_and_prepare_chat_blocks
 from app.services.ai.lore_budget import snapshot_pick_key
 from app.services.ai.sessions import default_registry
 
@@ -198,7 +198,7 @@ class SnapshotPickSendTests(_LoreCacheFixture):
             used_snapshots=[SnapshotPick(entry_id=source, snapshot_id=snap.id)],
             lore_enabled=True,
         )
-        prepared = expand_and_prepare_chat_blocks(
+        prepared = send_turn(
             self.service,
             self.chat_id,
             "SYSTEM PROMPT",

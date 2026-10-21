@@ -899,9 +899,15 @@ class SessionTierTests(_HelperFixtureBase):
         self.session = AISession(id="test-scene-one")
         self.scene_one = self.service.read_scene(self.scene_one_node.scene_id)
 
-    def _tier(self, hints: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
+    def _tier3(
+        self, hints: dict[str, str] | None = None
+    ) -> tuple[list[str], list[str], list[str]]:
         ids = _relevant_lore_ids(self.service, self.scene_one, "implicit")
         return _tier_lore_ids(self.service, ids, self.session, hints)
+
+    def _tier(self, hints: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
+        stable, volatile, _changed = self._tier3(hints)
+        return stable, volatile
 
     def _edit_honor(self, body: str) -> None:
         self._update_lore(
@@ -938,6 +944,13 @@ class SessionTierTests(_HelperFixtureBase):
         self.assertNotIn(self.honor["id"], stable)
         self.assertIn(self.nimitz["id"], stable)  # untouched
         self.assertNotIn(self.nimitz["id"], volatile)
+
+    def test_changed_ids_are_only_seen_then_edited_entries(self) -> None:
+        # #2586: new on turn 1 is not "changed"; edited after being seen is.
+        self.assertEqual(self._tier3()[2], [])
+        self.session.commit()
+        self._edit_honor("Captain of the Fearless. Treecat-adopted. EDITED.")
+        self.assertEqual(self._tier3()[2], [self.honor["id"]])
 
     def test_stable_hint_starts_a_new_node_stable(self) -> None:
         # A "stable"-hinted node skips the volatile-first turn (the placement prior).

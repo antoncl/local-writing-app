@@ -87,3 +87,36 @@ describe("editorPanes.flushBeforeAICall (#2587)", () => {
     expect(save.mock.calls.map((c) => c[0])).toEqual(["p1", "p2"]); // one failure doesn't stop the rest
   });
 });
+
+describe("editorPanes.flushBeforeSceneRewrite (#2596)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    editorPanes.reset();
+  });
+  afterEach(() => editorPanes.reset());
+
+  function scenePane(id: string, sceneId: string, dirty: boolean) {
+    return { ...pane(id, lore(sceneId), dirty), document: { type: "manuscript" as const, id: sceneId } };
+  }
+
+  it("persists the other panes, then the scene", async () => {
+    editorPanes.panes = [pane("p1", lore("a"), true), scenePane("p2", "scene_1", true)];
+    const saved: string[] = [];
+    vi.spyOn(editorPanes, "saveEditorPane").mockImplementation(async (id) => {
+      saved.push(id);
+      editorPanes.panes = editorPanes.panes.map((p) => (p.id === id ? { ...p, dirty: false } : p));
+    });
+
+    await editorPanes.flushBeforeSceneRewrite("scene_1");
+
+    expect(saved).toEqual(["p1", "p2"]);
+  });
+
+  it("throws when the scene's own edits can't be saved, so the rewrite aborts", async () => {
+    editorPanes.panes = [scenePane("p1", "scene_1", true)];
+    vi.spyOn(editorPanes, "saveEditorPane").mockRejectedValue(new HttpError("busy", 503, null));
+    vi.spyOn(editorPanes, "scheduleAutosaveRetry").mockImplementation(() => {});
+
+    await expect(editorPanes.flushBeforeSceneRewrite("scene_1")).rejects.toThrow("busy");
+  });
+});

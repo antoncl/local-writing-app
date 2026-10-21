@@ -1300,6 +1300,15 @@ class EditorPanesController {
     }
   }
 
+  /** `flushBeforeAICall`, for a call whose result then REWRITES `sceneId`
+   *  (Finalize roleplay, #2596): everything the prompt reads is persisted the
+   *  forgiving way, then the scene itself strictly — a scene whose own edits
+   *  could not be saved throws, so the caller aborts rather than overwrite it. */
+  async flushBeforeSceneRewrite(sceneId: string): Promise<void> {
+    await this.flushBeforeAICall();
+    await this.flushSceneIfDirty(sceneId);
+  }
+
   // Shallow-merge `patch` into one pane by id — the single privileged mutation
   // the reconcile-ladder host hooks build on (rung-1 lost-response adopt, rung-2
   // prose-merge adopt; the intent lives in editorPaneSave). Cancels autosave first

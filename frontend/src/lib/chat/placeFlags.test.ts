@@ -102,11 +102,21 @@ describe("PlaceFlagsController", () => {
     const { ctrl } = setup();
     const first = ctrl.place(1);
     expect(ctrl.placingIndex).toBe(1);
+    // The call goes out after the pending-edits flush (#2596).
+    await vi.waitFor(() => expect(extract).toHaveBeenCalledTimes(1));
     await ctrl.place(3);
     expect(extract).toHaveBeenCalledTimes(1);
     finish(OK);
     await first;
     expect(ctrl.placingIndex).toBeNull();
+  });
+
+  it("persists pending editor edits before the call reads the chat's lore (#2596)", async () => {
+    const flush = vi.spyOn(editorPanes, "flushBeforeAICall").mockResolvedValue(undefined);
+    const { ctrl } = setup();
+    await ctrl.place(1);
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(extract.mock.invocationCallOrder[0]);
   });
 
   it("does nothing without a scene or chat", async () => {

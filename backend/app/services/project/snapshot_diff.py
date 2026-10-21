@@ -72,31 +72,56 @@ from app.services.project.snapshot_witness import unwitnessed_field_ids
 # reads as a raw-HTML block, swallowing the paragraph after it.
 BLOCK_SPLIT = re.compile(r"(\r?\n(?:[ \t]*\r?\n)+)")
 
-# Word granularity the way a diff over prose has to do it: tokens are non-space
-# runs and the whitespace between them, so a boundary always falls between
-# tokens and reassembling the tokens reproduces the source exactly.
-TOKEN = re.compile(r"\S+|\s+")
+# Word granularity the way a diff over prose has to do it (#2600). A token is a
+# word (letters, digits, `_`, joined by an inner apostrophe or hyphen: "don't",
+# "well-known") or one punctuation mark, each carrying the whitespace after it;
+# a block's leading whitespace is a token of its own. Tokens reassemble to the
+# source exactly, and a boundary always falls between a word and its
+# punctuation, so "shows," -> "shows." changes only the mark.
+#
+# The matcher compares `_token_key`s — the token without its trailing
+# whitespace — so whitespace is never an element between two words. When it
+# was (one token per whitespace run, marked junk), a match could not grow
+# across the space after a word: "the dirty dressing" broke at "dirty", and the
+# stranded "the" matched the first "the" anywhere before it.
+TOKEN = re.compile(r"\s+|\w+(?:['’\-]\w+)*\s*|[^\w\s]\s*")
 
-def _is_whitespace(token: str) -> bool:
-    """difflib's `isjunk`: an element that may not anchor a match.
 
-    Whitespace is junk in the literal sense difflib means. A single space
-    matches every other single space, so letting it anchor does two kinds of
-    harm: it is the dominant term in the O(n·m) search that made a long
-    paragraph take minutes, and it inflates `SequenceMatcher.ratio()` to ~0.5
-    for ANY two prose blocks — which put `SAME_BLOCK_RATIO` on the noise floor
-    and let `_align_blocks` word-diff two unrelated paragraphs into mush.
+def _token_key(token: str) -> str:
+    """What the matcher compares: the token without its trailing whitespace (a
+    leading-whitespace token is its own key)."""
+    return token.rstrip() or token
 
-    Marking it junk fixes both at once and leaves the runs themselves unchanged:
-    measured on real prose the changed regions are identical, while two
-    unrelated paragraphs fall from 0.500 to 0.167.
+
+# Markdown's structural marks: a table's cell bar, a list bullet, emphasis, a
+# blockquote or heading marker. They anchor like words (`_is_junk`), because an
+# edit inside one cell, list item or quoted line must anchor on the structure
+# around it to stay there — junked, edits on neighbouring lines merge across
+# the line break and the whole block stacks (`escapes_container`).
+STRUCTURAL_MARKS = frozenset("|-*+>#")
+
+
+def _is_word(key: str) -> bool:
+    """A key with a letter or digit in it."""
+    return any(ch.isalnum() or ch == "_" for ch in key)
+
+
+def _is_junk(key: str) -> bool:
+    """difflib's `isjunk`: a key that may not anchor a match — prose
+    punctuation and leading whitespace, anything that is neither a word nor
+    one of the `STRUCTURAL_MARKS`.
+
+    A comma matches every other comma, so letting it anchor chops a rewritten
+    clause into fragments around its commas. Junk still extends a match next
+    to an anchored word, so an unchanged comma after an unchanged word stays
+    equal.
 
     Not `autojunk=True`, which is far faster but ruins the diff: it junks any
     element appearing in >1% of the sequence, so in repetitive prose every
     common word stops anchoring and a two-word edit reports the whole remaining
     paragraph as changed.
     """
-    return token.isspace()
+    return key not in STRUCTURAL_MARKS and not _is_word(key)
 
 
 Interval = tuple[int, int]
@@ -111,17 +136,20 @@ SETTLE_PASSES = 12
 # Above this many tokens on either side, a block is diffed as a whole rather
 # than word by word.
 #
-# `difflib`'s matcher is superlinear, and marking whitespace junk lowers the
-# constant without changing that: with every third word edited, 600 tokens cost
-# 0.12s, 2400 cost 0.88s, and it keeps climbing. This runs inside a synchronous
+# `difflib`'s matcher is superlinear, and keeping whitespace out of the token
+# sequence (#2600; before it, junk) lowers the constant without changing that.
+# Measured before #2600, with every third word edited: 600 tokens cost 0.12s,
+# 2400 cost 0.88s, and it keeps climbing. This runs inside a synchronous
 # route on a *reading* gesture, so an unbounded cost is a hung pane with nothing
 # on screen explaining why — the same class of harm as a wrong render, which is
 # why the bound is structural rather than a hope about input size.
 #
-# 2000 tokens is roughly a thousand-word paragraph: far beyond anything in
-# fiction prose, and ~0.5s at the very worst. Past it the block stacks, which is
+# Tokens are words and punctuation marks, about 1.15 per word of prose, so
+# 1200 tokens is roughly a thousand-word paragraph: far beyond anything in
+# fiction prose. (Before #2600 whitespace runs were tokens too, and the same
+# paragraph was 2000.) Past it the block stacks, which is
 # the degrade this module already uses everywhere it cannot proceed safely.
-MAX_WORD_DIFF_TOKENS = 2000
+MAX_WORD_DIFF_TOKENS = 1200
 
 # How much two blocks must still share to count as "the same block, rewritten"
 # rather than two different blocks that happen to line up positionally. Half is
@@ -397,15 +425,20 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
     `quick_ratio` first because it is a cheap upper bound: if even the bag of
     words cannot reach the threshold, the real ratio certainly cannot.
     """
-    was_tokens = TOKEN.findall(was)
-    now_tokens = TOKEN.findall(now)
+    # Only what anchors (#2600): words and structural marks. Prose punctuation
+    # counted toward the ratio's length but, being junk, matched only beside a
+    # matched word, so a dash-heavy rewrite scored under a plain one. The
+    # marks stay in: a list or table edited on every line is still that list
+    # or table, and its bullets and bars are what say so.
+    was_tokens = [key for key in map(_token_key, TOKEN.findall(was)) if not _is_junk(key)]
+    now_tokens = [key for key in map(_token_key, TOKEN.findall(now)) if not _is_junk(key)]
     if not was_tokens or not now_tokens:
         return False
     # Too big to compare cheaply, so it is not a rewrite as far as this asks —
     # the caller stacks it, which is what an oversized block gets anyway.
     if max(len(was_tokens), len(now_tokens)) > MAX_WORD_DIFF_TOKENS:
         return False
-    matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
+    matcher = difflib.SequenceMatcher(_is_junk, was_tokens, now_tokens, autojunk=False)
     if matcher.quick_ratio() < SAME_BLOCK_RATIO:
         return False
     if matcher.ratio() >= SAME_BLOCK_RATIO:
@@ -414,7 +447,7 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
     # `isjunk` to its second sequence only, and one real paragraph pair scored
     # 0.74 one way round and under 0.5 the other. `quick_ratio` is a bag count
     # and already symmetric, so only the real ratio is asked again.
-    reverse = difflib.SequenceMatcher(_is_whitespace, now_tokens, was_tokens, autojunk=False)
+    reverse = difflib.SequenceMatcher(_is_junk, now_tokens, was_tokens, autojunk=False)
     return reverse.ratio() >= SAME_BLOCK_RATIO
 
 
@@ -477,10 +510,12 @@ def _release_shared_trailing_whitespace(
 ) -> list[Region]:
     """Hand whitespace both sides end a region with back to the equal text after it.
 
-    Whitespace is junk to the token matcher, so it can never anchor: when the
-    last sentence of a block changes, the block's trailing newline is swallowed
-    into the region and the single-side view ends `came.\\n</span>` instead of
-    `came.</span>` (#2591). Never released into a protected construct, which
+    Whitespace rides on the token before it, so a region that ends on a changed
+    token ends with its whitespace: when the last sentence of a block changes,
+    the block's trailing newline is swallowed into the region and the
+    single-side view ends `came.\\n</span>` instead of `came.</span>` (#2591).
+    `_token_regions` trims that before `_settle`; this catches what a construct
+    snap pulls back in. Never released into a protected construct, which
     would undo `_settle`.
     """
     released: list[Region] = []
@@ -503,17 +538,57 @@ def _release_shared_trailing_whitespace(
 
 
 def _token_regions(was: str, now: str) -> list[Region]:
-    """The changed regions as *character* offsets, from a token-level diff."""
+    """The changed regions as *character* offsets, from a token-level diff.
+
+    The matcher sees keys, so two tokens it calls equal can still differ in the
+    whitespace they carry ("thigh " against "thigh\\n"); that whitespace is a
+    region of its own, so the equal text between regions is the same on both
+    sides, as `_emit_runs` needs.
+    """
     was_tokens = TOKEN.findall(was)
     now_tokens = TOKEN.findall(now)
     was_offsets = _offsets(was_tokens)
     now_offsets = _offsets(now_tokens)
-    matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
-    return [
-        (was_offsets[i1], was_offsets[i2], now_offsets[j1], now_offsets[j2])
-        for op, i1, i2, j1, j2 in matcher.get_opcodes()
-        if op != "equal"
-    ]
+    matcher = difflib.SequenceMatcher(
+        _is_junk, [_token_key(t) for t in was_tokens], [_token_key(t) for t in now_tokens], autojunk=False
+    )
+    regions: list[Region] = []
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op != "equal":
+            # Junk anchors nothing, so identical punctuation at a span's edge
+            # with no word beyond it to extend from ("leaving." -> "leaving at
+            # all.") lands inside the span; hand it back to the equal text.
+            while i1 < i2 and j1 < j2 and was_tokens[i1] == now_tokens[j1] and _is_junk(_token_key(was_tokens[i1])):
+                i1, j1 = i1 + 1, j1 + 1
+            while i1 < i2 and j1 < j2 and was_tokens[i2 - 1] == now_tokens[j2 - 1] and _is_junk(_token_key(was_tokens[i2 - 1])):
+                i2, j2 = i2 - 1, j2 - 1
+            regions.append((was_offsets[i1], was_offsets[i2], now_offsets[j1], now_offsets[j2]))
+            continue
+        for i, j in zip(range(i1, i2), range(j1, j2), strict=True):
+            if was_tokens[i] != now_tokens[j]:
+                key = len(_token_key(was_tokens[i]))
+                regions.append((was_offsets[i] + key, was_offsets[i + 1], now_offsets[j] + key, now_offsets[j + 1]))
+    return [_trim_shared_trailing_whitespace(region, was, now) for region in _merge_touching(regions)]
+
+
+def _trim_shared_trailing_whitespace(region: Region, was: str, now: str) -> Region:
+    """Give back whitespace both sides of a region end with. Whitespace rides
+    on the token before it, so "road\\n" -> "road at once\\n" reaches the
+    matcher as a whitespace change ("\\n" -> " ") touching an insertion
+    ("at once\\n"); merged, the region would start on the line break and
+    `_settle` would widen it into the next line's list marker. Trimmed, the
+    break stays equal text. (`_release_shared_trailing_whitespace` does the
+    same after `_settle`, for whitespace a construct snap pulls in.)"""
+    was_start, was_end, now_start, now_end = region
+    while (
+        was_end > was_start
+        and now_end > now_start
+        and was[was_end - 1] == now[now_end - 1]
+        and was[was_end - 1].isspace()
+    ):
+        was_end -= 1
+        now_end -= 1
+    return (was_start, was_end, now_start, now_end)
 
 
 def _emit_runs(regions: list[Region], was: str, now: str) -> list[DiffRun]:

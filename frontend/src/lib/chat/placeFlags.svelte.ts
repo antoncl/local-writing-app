@@ -42,6 +42,9 @@ export class PlaceFlagsController {
     this.notice = null;
     this.placingIndex = index;
     try {
+      // #2596: the call reads the chat's lore from disk — persist pending edits
+      // first. The scene's own text rides along live (`scene_text`).
+      await editorPanes.flushBeforeAICall();
       // The transcript ENDS at the chosen reply: later turns aren't sent (ADR-0100 §3).
       const res = await api.extractFlags({
         messages: history.slice(0, index + 1).map(({ role, content }) => ({ role, content })),

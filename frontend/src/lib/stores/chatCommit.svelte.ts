@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types";
 import { api, HttpError } from "@/lib/api";
 import { entryIdFromPickValue } from "@/lib/editor-core/promptResolution";
+import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 import { extractHandler, type ExtractHost } from "@/lib/editor-core/outputHandlers";
@@ -245,6 +246,9 @@ export class ChatCommitController {
     extract: () => Promise<EntryPatchExtraction>,
     garbledMessage: string,
   ): Promise<AIEntryPatch | null> {
+    // #2596: the extraction reads the chat's picks (the entry being revised) from
+    // disk — persist pending edits first. A pane frozen for review is skipped.
+    await editorPanes.flushBeforeAICall();
     const result = await extract();
     // A successful call left its row(s) on the server, which reported the
     // chat's total after them — assign the host's snapshot from it. #986: the

@@ -10,13 +10,18 @@
  * Phase 2 runs only inside a `replace` span: a greedy left-to-right pass that
  * pairs a "rewrite" of itself (`isARewriteOf`, at least half its tokens
  * shared) ahead of a lookahead match on either side, and falls back to one
- * unpaired stacked pair when neither side has one within `ALIGN_LOOKAHEAD`.
+ * unpaired stacked pair when neither side has one within the look-ahead.
  */
 import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
 
 export const MAX_WORD_DIFF_TOKENS = 2000;
 const SAME_BLOCK_RATIO = 0.5;
 const ALIGN_LOOKAHEAD = 4;
+/** The body's look-ahead, in paragraphs. Until #2591 the body aligned its
+ *  blank-line separators as items too, so `ALIGN_LOOKAHEAD`'s 4 items reached
+ *  2 paragraphs — the reach the body's pairing was tested at. Lists never had
+ *  separators and keep their 4. */
+export const BODY_ALIGN_LOOKAHEAD = 2;
 const TOKEN_RE = /\S+|\s+/g;
 
 export const isWhitespaceToken = (t: string): boolean => t.length > 0 && !/\S/.test(t);
@@ -25,7 +30,12 @@ export const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
 /** Whether `now` reads as a rewrite of `was`: at least half their tokens (by
  *  `SequenceMatcher` ratio, ignoring whitespace tokens) are shared. Empty
  *  strings and anything past `MAX_WORD_DIFF_TOKENS` are never a rewrite of
- *  anything. */
+ *  anything.
+ *
+ *  Symmetric, so no caller can ask it backwards (#2591): `isjunk` applies to
+ *  the matcher's second sequence only, and one real paragraph pair scored 0.74
+ *  one way round and under 0.5 the other. `quickRatio` is a bag count and
+ *  already symmetric, so only the real ratio is asked again. */
 export function isARewriteOf(was: string, now: string): boolean {
   const wasTokens = tokenize(was);
   const nowTokens = tokenize(now);
@@ -33,7 +43,8 @@ export function isARewriteOf(was: string, now: string): boolean {
   if (Math.max(wasTokens.length, nowTokens.length) > MAX_WORD_DIFF_TOKENS) return false;
   const matcher = new SequenceMatcher(isWhitespaceToken, wasTokens, nowTokens);
   if (matcher.quickRatio() < SAME_BLOCK_RATIO) return false;
-  return matcher.ratio() >= SAME_BLOCK_RATIO;
+  if (matcher.ratio() >= SAME_BLOCK_RATIO) return true;
+  return new SequenceMatcher(isWhitespaceToken, nowTokens, wasTokens).ratio() >= SAME_BLOCK_RATIO;
 }
 
 /** One step of the alignment, in output order. `equal`/`insert`/`delete` carry
@@ -47,19 +58,24 @@ export type AlignOp =
   | { op: "unpaired"; was: number; now: number };
 
 /** The alignment of two sequences, phase 1 then phase 2, as index ops. */
-export function alignSequences(was: string[], now: string[]): AlignOp[] {
+export function alignSequences(was: string[], now: string[], lookahead = ALIGN_LOOKAHEAD): AlignOp[] {
   const ops: AlignOp[] = [];
   const matcher = new SequenceMatcher(null, was, now);
   for (const [op, i1, i2, j1, j2] of matcher.getOpcodes()) {
     if (op === "equal") ops.push({ op: "equal", wasStart: i1, wasEnd: i2, nowStart: j1, nowEnd: j2 });
     else if (op === "insert") ops.push({ op: "insert", nowStart: j1, nowEnd: j2 });
     else if (op === "delete") ops.push({ op: "delete", wasStart: i1, wasEnd: i2 });
-    else ops.push(...alignReplaceSpan(was, now, i1, i2, j1, j2));
+    else ops.push(...alignReplaceSpan(was, now, [i1, i2, j1, j2], lookahead));
   }
   return ops;
 }
 
-function alignReplaceSpan(was: string[], now: string[], i1: number, i2: number, j1: number, j2: number): AlignOp[] {
+function alignReplaceSpan(
+  was: string[],
+  now: string[],
+  [i1, i2, j1, j2]: [number, number, number, number],
+  lookahead: number,
+): AlignOp[] {
   const ops: AlignOp[] = [];
   let i = i1;
   let j = j1;
@@ -70,8 +86,8 @@ function alignReplaceSpan(was: string[], now: string[], i1: number, i2: number, 
       j++;
       continue;
     }
-    const aheadNow = firstMatchIndex(was[i], now, j + 1, Math.min(j2, j + 1 + ALIGN_LOOKAHEAD));
-    const aheadWas = firstMatchIndex(now[j], was, i + 1, Math.min(i2, i + 1 + ALIGN_LOOKAHEAD));
+    const aheadNow = firstMatchIndex(was[i], now, j + 1, Math.min(j2, j + 1 + lookahead));
+    const aheadWas = firstMatchIndex(now[j], was, i + 1, Math.min(i2, i + 1 + lookahead));
     if (aheadNow !== null && (aheadWas === null || aheadNow - j <= aheadWas - i)) {
       ops.push({ op: "insert", nowStart: j, nowEnd: aheadNow });
       j = aheadNow;

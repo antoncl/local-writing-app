@@ -277,18 +277,18 @@
     "runs": [
       {
         "kind": "was",
-        "text": "She counted the hulls twice.",
+        "text": "She counted the hulls twice.\n\n",
         "stacked": true
       },
       {
         "kind": "now",
-        "text": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
-        "stacked": true
+        "text": "She counted the hulls twice. ",
+        "stacked": false
       },
       {
-        "kind": "was",
-        "text": "\n\nThe eleventh was the Corrant, and her father was aboard.",
-        "stacked": true
+        "kind": "equal",
+        "text": "The eleventh was the Corrant, and her father was aboard.",
+        "stacked": false
       }
     ]
   },
@@ -322,14 +322,49 @@
     "now": "- run for the high road at once\n- do not stop for anything that can walk\n",
     "runs": [
       {
-        "kind": "was",
-        "text": "- run for the high road\n- do not stop for anything you can carry\n",
-        "stacked": true
+        "kind": "equal",
+        "text": "- run for the high road",
+        "stacked": false
       },
       {
         "kind": "now",
-        "text": "- run for the high road at once\n- do not stop for anything that can walk\n",
-        "stacked": true
+        "text": " at once",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n- do not stop for anything ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "you",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "that",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " can ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "carry",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "walk",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n",
+        "stacked": false
       }
     ]
   },
@@ -457,13 +492,134 @@
         "stacked": false
       },
       {
+        "kind": "equal",
+        "text": "\n\n",
+        "stacked": false
+      },
+      {
         "kind": "now",
-        "text": "\n\nThe eleventh was moored at the harbour.",
+        "text": "The eleventh was moored at the harbour.\n\n",
         "stacked": true
       },
       {
         "kind": "equal",
-        "text": "\n\nMaren did not run. She had never done the sensible thing quickly.\n",
+        "text": "Maren did not run. She had never done the sensible thing quickly.\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "removed-paragraph-keeps-later-pairs",
+    "why": "the blank-line separators were aligned as blocks and difflib anchored on every one, so one removed paragraph paired each later paragraph with its neighbour and stacked them all; each survivor must pair with itself and word-diff (#2591)",
+    "was": "The note said tonight. I am not coming tonight.\n\nThe villa sits where the terraces give out, whitewashed, red tile.\n\nA man who arrives composed has been waiting somewhere nearby.\n\nThe door opens before I reach it, and a servant looks at my face.\n",
+    "now": "The villa sits where the terraces give out. Whitewashed, red tile.\n\nA man who arrives composed has been waiting somewhere near.\n\nThe door opens before I reach it, and a servant looks at my face.\n",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "The note said tonight. I am not coming tonight.\n\n",
+        "stacked": true
+      },
+      {
+        "kind": "equal",
+        "text": "The villa sits where the terraces give ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "out, whitewashed,",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "out. Whitewashed,",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " red tile.\n\nA man who arrives composed has been waiting somewhere ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "nearby.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "near.",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n\nThe door opens before I reach it, and a servant looks at my face.\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "rewrite-test-is-symmetric",
+    "why": "isjunk applies to a matcher's second sequence only, so the rewrite test scored this pair 0.74 one way round and under 0.5 the other; the was-side look-ahead asked it backwards and paired the grown paragraph with its neighbour (#2591)",
+    "was": "\"Sir.\" A servant, grey at the temples.\n\nHe turns and walks.\n\nBeyond the house is the stable, and beside it a training surround: a ring of peeled poles perhaps 15 meters across, sand footing raked flat. The servant stops at the gate.\n",
+    "now": "Beyond the house is the stable, and beside the stable a training surround: a ring of peeled poles 15 meters across, sand raked flat. The servant stops at the gate and tips his chin at the ring and goes back the way he came.\n",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "\"Sir.\" A servant, grey at the temples.\n\nHe turns and walks.\n\n",
+        "stacked": true
+      },
+      {
+        "kind": "equal",
+        "text": "Beyond the house is the stable, and beside ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "it",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "the stable",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " a training surround: a ring of peeled poles ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "perhaps ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "15 meters across, sand ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "footing ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "raked flat. The servant stops at the ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "gate.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "gate and tips his chin at the ring and goes back the way he came.",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n",
         "stacked": false
       }
     ]

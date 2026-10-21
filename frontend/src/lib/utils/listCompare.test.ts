@@ -208,6 +208,26 @@ describe("pairListItems — without identity (alignment)", () => {
     ]);
   });
 
+  it("two removed ahead of an item that grew a clause: the grown item still pairs as its rewrite", () => {
+    // #2591: the rewrite test is asked in either order. The look-ahead from O's
+    // item back into L once asked it backwards, scored this pair under 0.5, and
+    // reported the grown item as an addition beside three removals.
+    const original = rumour(
+      "Beyond the house is the stable, and beside it a training surround: a ring of peeled poles " +
+        "perhaps 15 meters across, sand footing raked flat. The servant stops at the gate.",
+    );
+    const grown = rumour(
+      "Beyond the house is the stable, and beside the stable a training surround: a ring of peeled " +
+        "poles 15 meters across, sand raked flat. The servant stops at the gate and tips his chin at " +
+        "the ring and goes back the way he came.",
+    );
+    const L = [rumour('"Sir." A servant, grey at the temples.'), rumour("He turns and walks."), original];
+    const pairing = pairListItems(RUMOUR_FIELD, L, [grown]);
+    expect(pairing.removals).toEqual([0, 1]);
+    expect(pairing.additions).toEqual([]);
+    expect(pairing.pairs.map((p) => [p.l, p.o, p.edited])).toEqual([[2, 0, true]]);
+  });
+
   it("two unrelated lists of short items with empty/default members: all removals and additions", () => {
     const L = [rumour("Fog by the docks"), rumour("A locked door")];
     const O = [rumour("Bells at midnight"), rumour("Cold coffee")];

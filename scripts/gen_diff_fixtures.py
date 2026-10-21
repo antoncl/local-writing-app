@@ -176,6 +176,44 @@ CASES: list[dict[str, str]] = [
         ),
     },
     {
+        "name": "removed-paragraph-keeps-later-pairs",
+        "why": (
+            "the blank-line separators were aligned as blocks and difflib anchored on every one, "
+            "so one removed paragraph paired each later paragraph with its neighbour and stacked "
+            "them all; each survivor must pair with itself and word-diff (#2591)"
+        ),
+        "was": (
+            "The note said tonight. I am not coming tonight.\n\n"
+            "The villa sits where the terraces give out, whitewashed, red tile.\n\n"
+            "A man who arrives composed has been waiting somewhere nearby.\n\n"
+            "The door opens before I reach it, and a servant looks at my face.\n"
+        ),
+        "now": (
+            "The villa sits where the terraces give out. Whitewashed, red tile.\n\n"
+            "A man who arrives composed has been waiting somewhere near.\n\n"
+            "The door opens before I reach it, and a servant looks at my face.\n"
+        ),
+    },
+    {
+        "name": "rewrite-test-is-symmetric",
+        "why": (
+            "isjunk applies to a matcher's second sequence only, so the rewrite test scored this "
+            "pair 0.74 one way round and under 0.5 the other; the was-side look-ahead asked it "
+            "backwards and paired the grown paragraph with its neighbour (#2591)"
+        ),
+        "was": (
+            '"Sir." A servant, grey at the temples.\n\n'
+            "He turns and walks.\n\n"
+            "Beyond the house is the stable, and beside it a training surround: a ring of peeled "
+            "poles perhaps 15 meters across, sand footing raked flat. The servant stops at the gate.\n"
+        ),
+        "now": (
+            "Beyond the house is the stable, and beside the stable a training surround: a ring of "
+            "peeled poles 15 meters across, sand raked flat. The servant stops at the gate and tips "
+            "his chin at the ring and goes back the way he came.\n"
+        ),
+    },
+    {
         "name": "clean-prose-control",
         "why": "the case the mockup already proves — must stay clean, or the harness is wrong",
         "was": "Somewhere behind her a shutter began to bang. Nobody came to close it.",

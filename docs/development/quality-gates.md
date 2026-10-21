@@ -151,13 +151,16 @@ and a manual run gate everything.
 | rest of `backend/` (incl. `pyproject.toml`, `requirements.lock`) | ✓ | | ✓ |
 | `docs/` | ✓ | | |
 | `frontend/` | | ✓ | ✓ |
-| `frontend/src/lib/views/__fixtures__/`, `viewGrammar.generated.ts` (parity fixtures pytest reads) | ✓ | ✓ | ✓ |
+| `frontend/src/lib/views/__fixtures__/`, `viewGrammar.generated.ts`, `diffRuns.fixtures.json` (fixtures pytest reads or regenerates) | ✓ | ✓ | ✓ |
 | `gates.yml`, `scripts/`, `.claude/`, `spec/`, `.ruff.toml`, `.pre-commit-config.yaml`, `.gitattributes` | ✓ | ✓ | ✓ |
-| other `.github/`, `packaging/`, `site/`, root `*.md`, `LICENSE`, `.gitignore` | | | |
+| other `.github/workflows/`, the PR template, `packaging/`, `site/`, root `*.md`, `LICENSE`, `.gitignore` | | | |
 | **anything not listed** | ✓ | ✓ | ✓ |
 
 The `backend` job's ruff, guard, drift and ratchet steps are cheap and
-repo-wide, so they run on every PR; only its pytest step skips.
+repo-wide, so they run on every PR. When its full pytest step skips, it still
+runs `test_gate_invariants.py` and `test_ci_changed_areas.py` (seconds): they
+check the gate machinery against the whole tracked tree, so a file added by
+any PR can turn them red.
 
 The mapping is **fail-open**, and that is the invariant to keep when editing it:
 a wrong guess may cost a slower run, never a skipped job that should have gone

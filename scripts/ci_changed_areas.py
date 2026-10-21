@@ -47,8 +47,10 @@ RULES: tuple[tuple[str, frozenset[str]], ...] = (
     (".gitattributes", EVERYTHING),
     # Corpora that pin the Python and TypeScript runtimes to each other.
     ("spec/", EVERYTHING),
-    # Nothing in gates.yml reads these.
-    (".github/", NOTHING),
+    # Nothing in gates.yml reads these. Only these: anything else under
+    # `.github/` (a local action gates.yml might use) falls through to everything.
+    (".github/workflows/", NOTHING),
+    (".github/pull_request_template.md", NOTHING),
     ("packaging/", NOTHING),
     ("site/", NOTHING),
     ("README.md", NOTHING),
@@ -63,17 +65,24 @@ RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("backend/", frozenset({"backend", "e2e"})),
     # Guide and prompt-reference tests read the real docs.
     ("docs/", frozenset({"backend"})),
-    # Frontend files the backend suite reads as parity fixtures.
+    # Frontend files the backend suite reads as parity fixtures, or regenerates
+    # and compares (test_diff_fixtures_are_current).
     ("frontend/src/lib/views/__fixtures__/", EVERYTHING),
     ("frontend/src/lib/viewGrammar.generated.ts", EVERYTHING),
+    ("frontend/src/lib/utils/diffRuns.fixtures.json", EVERYTHING),
     ("frontend/", frozenset({"frontend", "e2e"})),
 )
+
+
+def matches(path: str, prefix: str) -> bool:
+    """A "/"-terminated prefix matches a whole directory; anything else, one path."""
+    return path == prefix or (prefix.endswith("/") and path.startswith(prefix))
 
 
 def areas_for_path(path: str) -> frozenset[str]:
     """The areas one changed path can affect; an unknown path affects them all."""
     for prefix, areas in RULES:
-        if path == prefix or (prefix.endswith("/") and path.startswith(prefix)):
+        if matches(path, prefix):
             return areas
     return EVERYTHING
 

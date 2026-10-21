@@ -182,6 +182,14 @@ jobs:
         if: needs.changes.outputs.backend != 'false'
         run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
 
+      # The complement of the step above, never both. These suites test the gate
+      # machinery against the whole tracked tree (CI and pre-commit pathspecs,
+      # the diff fixtures, the area map), so any PR's new file can turn them red —
+      # a few seconds, so they run when the full suite is skipped.
+      - name: pytest (gate invariants only)
+        if: needs.changes.outputs.backend == 'false'
+        run: python -m pytest backend/tests/test_gate_invariants.py backend/tests/test_ci_changed_areas.py -q --timeout=120 --timeout-method=thread
+
   # The platform the app actually runs on. Only the test suite — lint, the
   # guards and the ratchet are platform-independent and would just be a slower
   # second opinion. This is the job that would have caught the cp1252 and

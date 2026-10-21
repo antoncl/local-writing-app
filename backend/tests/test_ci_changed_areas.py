@@ -36,6 +36,9 @@ ALL = {"backend", "frontend", "e2e"}
         (["frontend/package-lock.json"], {"frontend", "e2e"}),
         (["docs/development/quality-gates.md"], {"backend"}),
         (["README.md", "site/index.html", ".github/workflows/release.yml"], set()),
+        # Not a workflow: a local action gates.yml could use runs everything.
+        ([".github/actions/setup/action.yml"], ALL),
+        (["frontend/src/lib/utils/diffRuns.fixtures.json"], ALL),
         # Parity fixtures the backend suite reads from the frontend tree.
         (["frontend/src/lib/views/__fixtures__/default-view-specs.json"], ALL),
         (["frontend/src/lib/viewGrammar.generated.ts"], ALL),
@@ -73,10 +76,7 @@ def test_every_tracked_file_is_mapped_by_a_rule():
         {
             p.split("/")[0]
             for p in tracked
-            if not any(
-                p == prefix or (prefix.endswith("/") and p.startswith(prefix))
-                for prefix, _ in ci.RULES
-            )
+            if not any(ci.matches(p, prefix) for prefix, _ in ci.RULES)
         }
     )
     assert unmapped == []

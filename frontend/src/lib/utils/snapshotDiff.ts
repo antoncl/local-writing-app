@@ -362,9 +362,43 @@ function changedRegions(was: string, now: string): Region[] | null {
   if (wasIntervals === null || nowIntervals === null) return null;
   if (tooLargeToDiff(was, now)) return null;
   if (isCodeBlock(was) || isCodeBlock(now)) return null;
-  const regions = settle(tokenRegions(was, now), was, now, wasIntervals, nowIntervals);
-  if (regions === null || needsStacking(regions, was, now)) return null;
+  const settled = settle(tokenRegions(was, now), was, now, wasIntervals, nowIntervals);
+  if (settled === null) return null;
+  const regions = releaseSharedTrailingWhitespace(settled, was, now, wasIntervals, nowIntervals);
+  if (needsStacking(regions, was, now)) return null;
   return regions;
+}
+
+/** Hand whitespace both sides end a region with back to the equal text after
+ *  it. Whitespace is junk to the token matcher, so it can never anchor: when
+ *  the last sentence of a block changes, the block's trailing newline is
+ *  swallowed into the region (#2591). Never released into a protected
+ *  construct, which would undo `settle`. */
+function releaseSharedTrailingWhitespace(
+  regions: Region[],
+  was: string,
+  now: string,
+  wasIntervals: Interval[],
+  nowIntervals: Interval[],
+): Region[] {
+  return regions.map(([wasStart, wasEnd, nowStart, nowEnd]) => {
+    let shared = 0;
+    while (
+      shared < Math.min(wasEnd - wasStart, nowEnd - nowStart) &&
+      was[wasEnd - shared - 1] === now[nowEnd - shared - 1] &&
+      /\s/.test(was[wasEnd - shared - 1])
+    ) {
+      shared++;
+    }
+    if (
+      shared &&
+      snap(wasEnd - shared, wasIntervals, false) === wasEnd - shared &&
+      snap(nowEnd - shared, nowIntervals, false) === nowEnd - shared
+    ) {
+      return [wasStart, wasEnd - shared, nowStart, nowEnd - shared];
+    }
+    return [wasStart, wasEnd, nowStart, nowEnd];
+  });
 }
 
 function tokenRegions(was: string, now: string): Region[] {

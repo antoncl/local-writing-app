@@ -345,8 +345,8 @@ def _align_blocks(was_chunks: list[Chunk], now_chunks: list[Chunk]) -> list[Diff
         # splits or merges a paragraph, they do not move one to the far end of
         # the scene. An unbounded search would pair across the whole region and
         # produce a worse answer than admitting there is no counterpart.
-        ahead_now = _first_now_match(was_blocks[i], now_blocks, j + 1, j + 1 + ALIGN_LOOKAHEAD)
-        ahead_was = _first_was_match(now_blocks[j], was_blocks, i + 1, i + 1 + ALIGN_LOOKAHEAD)
+        ahead_now = _first_match(was_blocks[i], now_blocks, j + 1, j + 1 + ALIGN_LOOKAHEAD)
+        ahead_was = _first_match(now_blocks[j], was_blocks, i + 1, i + 1 + ALIGN_LOOKAHEAD)
         if ahead_now is not None and (ahead_was is None or ahead_now - j <= ahead_was - i):
             runs.append(DiffRun(kind="now", text=_join(now_chunks[j:ahead_now]), stacked=True))
             j = ahead_now
@@ -364,22 +364,9 @@ def _align_blocks(was_chunks: list[Chunk], now_chunks: list[Chunk]) -> list[Diff
     return runs
 
 
-def _first_now_match(was_block: str, now_blocks: list[str], start: int, stop: int) -> int | None:
-    for index in range(start, min(stop, len(now_blocks))):
-        if _is_a_rewrite_of(was_block, now_blocks[index]):
-            return index
-    return None
-
-
-def _first_was_match(now_block: str, was_blocks: list[str], start: int, stop: int) -> int | None:
-    """The look-ahead on the `was` side, asking the question in the same order.
-
-    `_is_a_rewrite_of` is not symmetric — difflib applies `isjunk` to its second
-    sequence only — so asking "is this now-block a rewrite of that was-block"
-    backwards missed a paragraph that scored 0.74 the right way round (#2591).
-    """
-    for index in range(start, min(stop, len(was_blocks))):
-        if _is_a_rewrite_of(was_blocks[index], now_block):
+def _first_match(block: str, candidates: list[str], start: int, stop: int) -> int | None:
+    for index in range(start, min(stop, len(candidates))):
+        if _is_a_rewrite_of(block, candidates[index]):
             return index
     return None
 
@@ -421,7 +408,14 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
     matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
     if matcher.quick_ratio() < SAME_BLOCK_RATIO:
         return False
-    return matcher.ratio() >= SAME_BLOCK_RATIO
+    if matcher.ratio() >= SAME_BLOCK_RATIO:
+        return True
+    # Symmetric, so no caller can ask it backwards (#2591): difflib applies
+    # `isjunk` to its second sequence only, and one real paragraph pair scored
+    # 0.74 one way round and under 0.5 the other. `quick_ratio` is a bag count
+    # and already symmetric, so only the real ratio is asked again.
+    reverse = difflib.SequenceMatcher(_is_whitespace, now_tokens, was_tokens, autojunk=False)
+    return reverse.ratio() >= SAME_BLOCK_RATIO
 
 
 def _block_runs(was: str, now: str) -> list[DiffRun]:
@@ -470,9 +464,42 @@ def _changed_regions(was: str, now: str) -> list[Region] | None:
     if is_code_block(was) or is_code_block(now):
         return None
     regions = _settle(_token_regions(was, now), was, now, was_intervals, now_intervals)
-    if regions is None or _needs_stacking(regions, was, now):
+    if regions is None:
+        return None
+    regions = _release_shared_trailing_whitespace(regions, was, now, was_intervals, now_intervals)
+    if _needs_stacking(regions, was, now):
         return None
     return regions
+
+
+def _release_shared_trailing_whitespace(
+    regions: list[Region], was: str, now: str, was_intervals: list[Interval], now_intervals: list[Interval]
+) -> list[Region]:
+    """Hand whitespace both sides end a region with back to the equal text after it.
+
+    Whitespace is junk to the token matcher, so it can never anchor: when the
+    last sentence of a block changes, the block's trailing newline is swallowed
+    into the region and the single-side view ends `came.\\n</span>` instead of
+    `came.</span>` (#2591). Never released into a protected construct, which
+    would undo `_settle`.
+    """
+    released: list[Region] = []
+    for was_start, was_end, now_start, now_end in regions:
+        shared = 0
+        while (
+            shared < min(was_end - was_start, now_end - now_start)
+            and was[was_end - shared - 1] == now[now_end - shared - 1]
+            and was[was_end - shared - 1].isspace()
+        ):
+            shared += 1
+        if (
+            shared
+            and _snap(was_end - shared, was_intervals, left=False) == was_end - shared
+            and _snap(now_end - shared, now_intervals, left=False) == now_end - shared
+        ):
+            was_end, now_end = was_end - shared, now_end - shared
+        released.append((was_start, was_end, now_start, now_end))
+    return released
 
 
 def _token_regions(was: str, now: str) -> list[Region]:

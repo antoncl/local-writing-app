@@ -30,7 +30,12 @@ export const tokenize = (s: string): string[] => s.match(TOKEN_RE) ?? [];
 /** Whether `now` reads as a rewrite of `was`: at least half their tokens (by
  *  `SequenceMatcher` ratio, ignoring whitespace tokens) are shared. Empty
  *  strings and anything past `MAX_WORD_DIFF_TOKENS` are never a rewrite of
- *  anything. */
+ *  anything.
+ *
+ *  Symmetric, so no caller can ask it backwards (#2591): `isjunk` applies to
+ *  the matcher's second sequence only, and one real paragraph pair scored 0.74
+ *  one way round and under 0.5 the other. `quickRatio` is a bag count and
+ *  already symmetric, so only the real ratio is asked again. */
 export function isARewriteOf(was: string, now: string): boolean {
   const wasTokens = tokenize(was);
   const nowTokens = tokenize(now);
@@ -38,7 +43,8 @@ export function isARewriteOf(was: string, now: string): boolean {
   if (Math.max(wasTokens.length, nowTokens.length) > MAX_WORD_DIFF_TOKENS) return false;
   const matcher = new SequenceMatcher(isWhitespaceToken, wasTokens, nowTokens);
   if (matcher.quickRatio() < SAME_BLOCK_RATIO) return false;
-  return matcher.ratio() >= SAME_BLOCK_RATIO;
+  if (matcher.ratio() >= SAME_BLOCK_RATIO) return true;
+  return new SequenceMatcher(isWhitespaceToken, nowTokens, wasTokens).ratio() >= SAME_BLOCK_RATIO;
 }
 
 /** One step of the alignment, in output order. `equal`/`insert`/`delete` carry
@@ -80,8 +86,8 @@ function alignReplaceSpan(
       j++;
       continue;
     }
-    const aheadNow = firstMatchIndex((c) => isARewriteOf(was[i], c), now, j + 1, Math.min(j2, j + 1 + lookahead));
-    const aheadWas = firstMatchIndex((c) => isARewriteOf(c, now[j]), was, i + 1, Math.min(i2, i + 1 + lookahead));
+    const aheadNow = firstMatchIndex(was[i], now, j + 1, Math.min(j2, j + 1 + lookahead));
+    const aheadWas = firstMatchIndex(now[j], was, i + 1, Math.min(i2, i + 1 + lookahead));
     if (aheadNow !== null && (aheadWas === null || aheadNow - j <= aheadWas - i)) {
       ops.push({ op: "insert", nowStart: j, nowEnd: aheadNow });
       j = aheadNow;
@@ -99,16 +105,9 @@ function alignReplaceSpan(
   return ops;
 }
 
-/** `isARewriteOf` is not symmetric (`isjunk` applies to its second sequence
- *  only), so each side's look-ahead asks it in was-then-now order (#2591). */
-function firstMatchIndex(
-  matches: (candidate: string) => boolean,
-  candidates: string[],
-  start: number,
-  stop: number,
-): number | null {
+function firstMatchIndex(block: string, candidates: string[], start: number, stop: number): number | null {
   for (let index = start; index < stop; index++) {
-    if (matches(candidates[index])) return index;
+    if (isARewriteOf(block, candidates[index])) return index;
   }
   return null;
 }

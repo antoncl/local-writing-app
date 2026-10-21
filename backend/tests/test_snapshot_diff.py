@@ -672,8 +672,9 @@ RESTRUCTURED_EXPECTED = [
     ("equal", False, "Maren did not run. She had never "),
     ("now", False, "once "),
     ("equal", False, "done the sensible thing quickly.\n\nWhen the water leaves like that, it is not "),
-    ("was", False, "leaving.\n"),
-    ("now", False, "leaving at all.\n"),
+    ("was", False, "leaving."),
+    ("now", False, "leaving at all."),
+    ("equal", False, "\n"),
 ]
 
 
@@ -703,20 +704,29 @@ def test_a_removed_paragraph_does_not_shift_the_pairing_of_the_rest() -> None:
     assert [run.text for run in runs if run.stacked] == ["The note said tonight. I am not coming tonight.\n\n"]
 
 
-def test_the_look_ahead_on_the_was_side_asks_in_was_now_order() -> None:
-    """#2591: `_is_a_rewrite_of` is not symmetric, and the `was`-side look-ahead
-    asked it backwards, so a paragraph that grew a clause after two removed ones
-    was paired with its neighbour instead of found."""
-    original = (
-        "Beyond the house is the stable, and beside it a training surround: a ring of peeled poles perhaps "
-        "15 meters across, sand footing raked flat. The servant stops at the gate."
-    )
-    grown = (
-        "Beyond the house is the stable, and beside the stable a training surround: a ring of peeled poles "
-        "15 meters across, sand raked flat. The servant stops at the gate and tips his chin at the ring and "
-        "goes back the way he came."
-    )
-    was = '"Sir." A servant, grey at the temples.\n\nHe turns and walks.\n\n' + original
+REWRITE_PAIR = (
+    "Beyond the house is the stable, and beside it a training surround: a ring of peeled poles perhaps "
+    "15 meters across, sand footing raked flat. The servant stops at the gate.",
+    "Beyond the house is the stable, and beside the stable a training surround: a ring of peeled poles "
+    "15 meters across, sand raked flat. The servant stops at the gate and tips his chin at the ring and "
+    "goes back the way he came.",
+)
+
+
+def test_the_rewrite_test_is_symmetric() -> None:
+    """#2591: `isjunk` applies to a matcher's second sequence only, so this pair
+    scored 0.74 one way round and under 0.5 the other. Either order must agree."""
+    original, grown = REWRITE_PAIR
+    assert _is_a_rewrite_of(original, grown)
+    assert _is_a_rewrite_of(grown, original)
+
+
+def test_the_look_ahead_on_the_was_side_finds_a_grown_paragraph() -> None:
+    """#2591: the `was`-side look-ahead asked the rewrite test backwards, so a
+    paragraph that grew a clause after two removed ones was paired with its
+    neighbour instead of found."""
+    original, grown = REWRITE_PAIR
+    was ='"Sir." A servant, grey at the temples.\n\nHe turns and walks.\n\n' + original
     runs = diff_runs(was, grown)
     assert [(run.kind, run.text) for run in runs if run.stacked] == [
         ("was", '"Sir." A servant, grey at the temples.\n\nHe turns and walks.\n\n')

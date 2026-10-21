@@ -23,12 +23,16 @@ metadata:
   A select shows its option's label, not the stored value — in a list item
   too (#2515). A list field keeps its order, one numbered item per line (a
   grouped item as `Member: value` pairs, by member label).
+  The line under the summary (#2604) says the brief is notes, not text: without
+  it a model renders a purpose or value field by stating it in the prose.
 #}
 {#- A list item value by its option label, when its member has options. -#}
 {% macro shown(member, value) %}{{ member.option_labels.get(value, value) if (member and value is string) else value }}{% endmacro %}
 {% set s = brief_scene %}
 ## This scene: {{ s.title }}
 {{ s.summary }}
+
+_This brief is the author's notes on the scene, for you and not the reader: use it to decide what happens and how, but never quote, paraphrase or explain it in the prose. A note on what the scene is for is achieved by the scene happening, not by saying so._
 {% for f in fields(s) if f.proposable or f.type in ("entity_ref", "entity_ref_list") %}
 {% if f.id not in ("title", "summary", "body", "status", "tags", "pov_mode", "pov", "tense") %}
 {% set v = field_value(s, f) %}

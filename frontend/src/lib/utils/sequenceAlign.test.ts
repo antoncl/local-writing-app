@@ -58,4 +58,18 @@ describe("alignSequences", () => {
   it("isARewriteOf: fewer than half the tokens shared is not a rewrite", () => {
     expect(isARewriteOf("one two three four", "five six seven eight")).toBe(false);
   });
+
+  it("isARewriteOf: counts words, so a rewrite's dashes and semicolons don't sink it (#2600)", () => {
+    // A real beat pair that fell under the ratio while its punctuation counted.
+    expect(
+      isARewriteOf(
+        "He takes his assigned place in the water; BUT when Lysandra invites Maro in — a courtesy never made to him — the arrangement completes itself: three people in the water, and he is the one who was not asked.",
+        "He takes his place in the water. Lysandra invites Maro in — the courtesy she never extended to him — and Maro accepts; Kyrion shifts to make room.",
+      ),
+    ).toBe(true);
+  });
+
+  it("isARewriteOf: shared punctuation alone doesn't pair two unrelated sentences", () => {
+    expect(isARewriteOf("Maren did not run, not yet. She stood, counted, and waited.", "The lantern was out, the rope frayed. Nobody came, and nobody would.")).toBe(false);
+  });
 });

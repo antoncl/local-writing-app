@@ -244,6 +244,25 @@ CASES: list[dict[str, str]] = [
         "was": "She was *very tired and cross by the end of it.",
         "now": "She was *very weary and cross by the end of it.",
     },
+    {
+        "name": "punctuation-only-change",
+        "why": "#2600: a word's punctuation is its own token, so shows, -> shows. marks only the mark",
+        "was": "The dirty dressing on his thigh shows, and she remarks on it.",
+        "now": "The dirty dressing on his thigh shows; and she remarks on it.",
+    },
+    {
+        "name": "repeated-word-stays-in-its-run",
+        "why": "#2600: whitespace is never a matcher element, so 'the dirty dressing' matches whole "
+        "and the current 'the' does not jump to the first 'the' in the proposal",
+        "was": "The bath takes his clothes next; THEREFORE the dirty dressing on his thigh shows.",
+        "now": "He undresses for the water; the dirty dressing on his thigh shows.",
+    },
+    {
+        "name": "edits-in-two-table-cells",
+        "why": "#2600: a table's | still anchors, so each cell's edit stays inside its cell",
+        "was": "| boat | state |\n| --- | --- |\n| Corrant | at sea |\n",
+        "now": "| boat | state |\n| --- | --- |\n| Rowan | in port |\n",
+    },
 ]
 
 

@@ -176,12 +176,41 @@ class WorkspaceLayout {
     const homeId = HOMES[panelId] ?? G_SIDE;
     const existing = this.groupById(homeId);
     if (existing) return existing;
-    // The region's home column was pruned away (e.g. both permanent regions
-    // dragged out of it). Recreate a dedicated group for it on the right edge
-    // rather than dumping the region into an unrelated group's tabs (#155).
+    // The home group is absent: a preset arranged its regions elsewhere (Revising
+    // has no side group), or the user merged it into a neighbour (TODO + Search
+    // dragged into the side column). Follow the regions that share the home
+    // rather than spawning a column (#2588); recreate the group on the right
+    // edge only when there is nowhere sensible to go, so a region is never
+    // dumped into an unrelated group just because its column vanished (#155).
+    const adopted = this.#groupOfHomeSiblings(homeId) ?? this.#rightmostRegionGroup();
+    if (adopted) return adopted;
     const fresh = group(homeId, []);
     this.#appendColumn(fresh);
     return fresh;
+  }
+
+  // The group holding the most placed regions that share `homeId`; ties go to
+  // the rightmost (later in tree order).
+  #groupOfHomeSiblings(homeId: string): TabGroup | null {
+    let best: TabGroup | null = null;
+    let bestCount = 0;
+    for (const g of this.allGroups()) {
+      const count = g.tabs.filter((t) => HOMES[t] === homeId).length;
+      if (count > 0 && count >= bestCount) {
+        best = g;
+        bestCount = count;
+      }
+    }
+    return best;
+  }
+
+  // The rightmost group outside the editor home that holds at least one region
+  // (a split holding only documents is an editor column, not a side column).
+  #rightmostRegionGroup(): TabGroup | null {
+    const groups = this.allGroups().filter(
+      (g) => g.id !== G_EDITOR && g.tabs.some((t) => !isEditorPanelId(t) && HOMES[t] !== G_EDITOR),
+    );
+    return groups[groups.length - 1] ?? null;
   }
 
   // Add a fresh group as a new column at the end of the root row split.

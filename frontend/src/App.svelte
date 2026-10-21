@@ -1064,7 +1064,7 @@
     {promptEntries}
     {loreEntries}
     availableScenes={flattenStructureScenes(structure?.root)}
-    onFlush={(id) => editorPanes.flushSceneIfDirty(id)}
+    onFlush={(id) => editorPanes.flushBeforeSceneRewrite(id)}
     onFinalized={(result) => {
       editorPanes.reconcileSceneFromServer(result.scene);
       const notice = finalizeNotice(result);

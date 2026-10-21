@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { get } from "svelte/store";
 import { ChatCommitController, type ChatCommitDeps, patchToRows } from "./chatCommit.svelte";
+import { editorPanes } from "./editorPanes.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
 import { mutationSetEntriesStore } from "./mutationSets";
 import { api, HttpError } from "@/lib/api";
@@ -942,5 +943,53 @@ describe("ChatCommitController — follow-ups (ADR-0099 §4)", () => {
     expect(deps.setNotice).toHaveBeenCalledWith(
       expect.stringContaining("2 follow-up(s) couldn't be matched to an entry"),
     );
+  });
+});
+
+// #2596: the extraction reads the chat's picks (the entry being revised) from
+// disk, so a commit persists pending editor edits first — revise and create
+// alike, through the one `runExtraction` seam.
+describe("ChatCommitController — persists pending edits before extracting (#2596)", () => {
+  beforeEach(() => {
+    entryBrainstorm.clear("lore-1");
+    vi.clearAllMocks();
+  });
+
+  function recordOrder(): string[] {
+    const order: string[] = [];
+    vi.spyOn(editorPanes, "flushBeforeAICall").mockImplementation(async () => {
+      order.push("flush");
+    });
+    return order;
+  }
+
+  it("flushes before the revise extraction", async () => {
+    const order = recordOrder();
+    extractPatch.mockImplementation(async () => {
+      order.push("extract");
+      return okResult({ fields: { bio: "x" } });
+    });
+    const { c } = makeController();
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry: "lore-1" };
+
+    await c.commitToEntry();
+
+    expect(order).toEqual(["flush", "extract"]);
+  });
+
+  it("flushes before the create-mode extraction", async () => {
+    const order = recordOrder();
+    extractDraft.mockImplementation(async () => {
+      order.push("extract");
+      return okResult({ body: "a spine", fields: { name: "Vale" } });
+    });
+    const { c } = makeController();
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry_type: "lore:character" };
+
+    await c.commitDraft();
+
+    expect(order).toEqual(["flush", "extract"]);
   });
 });

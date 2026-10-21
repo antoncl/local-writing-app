@@ -342,6 +342,7 @@
     onOpenEntry: (id) =>
       void editorPanes.openNodeOfKind(id, "lore").catch((e) => editorPanes.setStatus(e instanceof Error ? e.message : String(e))),
     onOpenChat: (payload) => onOpenChat?.(payload),
+    persistEdits: () => editorPanes.flushBeforeAICall(),
     keepWriters: {
       markRange: (from, to, note) => todoAnchors.markRange(from, to, note),
       createTodos: (items) => todoActions.createTodos(items),

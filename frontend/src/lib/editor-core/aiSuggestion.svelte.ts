@@ -113,6 +113,10 @@ export interface AiSuggestionDeps {
     sceneId: string | null;
     assistantId: string;
   }) => void;
+  // Persist every open pane's pending edits before the call reads project files
+  // (#2596) — the template renders the scene, picks and lore from disk, and an
+  // idle autosave may still be seconds away. Never throws.
+  persistEdits?: () => Promise<void>;
 }
 
 // The dialog's draft strings for seeded natural-valued inputs: strings pass
@@ -179,6 +183,9 @@ export class AiSuggestionController {
   // Flags whose Keep is in flight (a file TODO write), so a second click on the
   // same flag doesn't make a second TODO.
   #keeping = new Set<number>();
+  // Set while `persistEdits` runs ahead of a call (#2596): bars a second run
+  // meanwhile without showing "generating" for what is only a save.
+  #persisting = false;
 
   #deps: AiSuggestionDeps;
 
@@ -464,7 +471,7 @@ export class AiSuggestionController {
   ): Promise<void> {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
-    if (!editor || !scene || this.generating) return;
+    if (!editor || !scene || this.generating || this.#persisting) return;
     if (!promptOffersOn(this.#deps.getPromptCtx(), entry, scene.entry_type)) {
       this.#deps.onNotice?.(`"${entry.title}" isn't offered on this document.`);
       return;
@@ -524,7 +531,9 @@ export class AiSuggestionController {
   ): Promise<void> {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
-    if (!editor || !scene) return;
+    // The in-flight guard lives here, not only in `runPromptEntry`: the inputs
+    // dialog calls this directly, and a double submit must not start two runs.
+    if (!editor || !scene || this.generating || this.#persisting) return;
     // No explicit pick → the prompt's own preference (pin, else tag scope);
     // the backend would otherwise resolve "" to the topmost overall (#2593).
     // Resolved into its own name so retry replays the caller's pick ("" stays
@@ -537,6 +546,25 @@ export class AiSuggestionController {
       // Both editor handlers share one host; the registry decides which drives it.
       const handler = outputHandlerFor(entry.context_strategy?.output) as OutputHandler<InlineHost, InlineGathered>;
       const host = this.#inlineHost(run, surface);
+      // #2596: before `produce` — nothing in the document has changed yet, so the
+      // save carries exactly what the author sees, and the call reads it back.
+      const epoch = this.#runEpoch;
+      this.#persisting = true;
+      try {
+        await this.#deps.persistEdits?.();
+      } finally {
+        this.#persisting = false;
+      }
+      // The save took real time: if the pane moved to another document meanwhile
+      // (`reset()` bumped the epoch, or the scene/editor changed), this run belongs
+      // to a document the writer has left — drop it rather than write into the new one.
+      if (
+        epoch !== this.#runEpoch
+        || this.#deps.getScene()?.id !== scene.id
+        || this.#deps.getEditor() !== editor
+      ) {
+        return;
+      }
       const gathered = await handler.produce(host);
       if (!gathered) return;
       this.error = null;

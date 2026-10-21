@@ -734,6 +734,16 @@
     chatNotice = null;
     chatRawReply = null;
     chatRewound = false;
+    // #2587: the send reads what it places (the scene, picks, lore) from disk, and
+    // an editor saves only after 6s idle — persist what the author sees first.
+    // Before the lock render too, which reads the same files. A save that fails
+    // (a revision conflict) surfaces on its own pane; the send still goes.
+    chatRunning = true;
+    try {
+      await editorPanes.flushDirtyPanes();
+    } finally {
+      chatRunning = false;
+    }
     // First-send template render: render + lock whenever the chat is bound to a
     // prompt that hasn't been rendered yet (#1436 — no longer gated on declared
     // inputs, so an input-less self-contained prompt also applies its system

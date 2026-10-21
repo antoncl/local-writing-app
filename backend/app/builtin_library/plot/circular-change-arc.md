@@ -112,3 +112,4 @@ make the ending visibly contrast with the opening.
 - The character leaves comfort for plot convenience rather than need.
 - The apparent gain has no cost.
 - The return repeats the old world without showing what has changed.
+

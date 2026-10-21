@@ -38,8 +38,9 @@ import { SequenceMatcher } from "@/lib/utils/sequenceMatcher";
 import {
   alignSequences,
   BODY_ALIGN_LOOKAHEAD,
-  isWhitespaceToken,
+  isJunkKey,
   tokenize,
+  tokenKey,
   MAX_WORD_DIFF_TOKENS,
 } from "@/lib/utils/sequenceAlign";
 
@@ -401,17 +402,47 @@ function releaseSharedTrailingWhitespace(
   });
 }
 
+/** The matcher sees keys, so two tokens it calls equal can still differ in the
+ *  whitespace they carry; that whitespace is a region of its own (the
+ *  backend's `_token_regions`). */
 function tokenRegions(was: string, now: string): Region[] {
   const wasTokens = tokenize(was);
   const nowTokens = tokenize(now);
   const wasOffsets = offsets(wasTokens);
   const nowOffsets = offsets(nowTokens);
-  const matcher = new SequenceMatcher(isWhitespaceToken, wasTokens, nowTokens);
+  const matcher = new SequenceMatcher(isJunkKey, wasTokens.map(tokenKey), nowTokens.map(tokenKey));
   const out: Region[] = [];
-  for (const [op, i1, i2, j1, j2] of matcher.getOpcodes()) {
-    if (op !== "equal") out.push([wasOffsets[i1], wasOffsets[i2], nowOffsets[j1], nowOffsets[j2]]);
+  for (const [op, a1, a2, b1, b2] of matcher.getOpcodes()) {
+    let [i1, i2, j1, j2] = [a1, a2, b1, b2];
+    if (op !== "equal") {
+      // Identical punctuation at a span's edge, with no word beyond it to
+      // extend from, goes back to the equal text (the backend's note).
+      const sameJunk = (i: number, j: number) => wasTokens[i] === nowTokens[j] && isJunkKey(tokenKey(wasTokens[i]));
+      while (i1 < i2 && j1 < j2 && sameJunk(i1, j1)) [i1, j1] = [i1 + 1, j1 + 1];
+      while (i1 < i2 && j1 < j2 && sameJunk(i2 - 1, j2 - 1)) [i2, j2] = [i2 - 1, j2 - 1];
+      out.push([wasOffsets[i1], wasOffsets[i2], nowOffsets[j1], nowOffsets[j2]]);
+      continue;
+    }
+    for (let k = 0; k < i2 - i1; k++) {
+      const i = i1 + k;
+      const j = j1 + k;
+      if (wasTokens[i] === nowTokens[j]) continue;
+      const key = tokenKey(wasTokens[i]).length;
+      out.push([wasOffsets[i] + key, wasOffsets[i + 1], nowOffsets[j] + key, nowOffsets[j + 1]]);
+    }
   }
-  return out;
+  return mergeTouching(out).map((region) => trimSharedTrailingWhitespace(region, was, now));
+}
+
+/** Give back whitespace both sides of a region end with, before `settle`
+ *  can widen a region that starts on a line break into the next line's
+ *  construct — the backend's `_trim_shared_trailing_whitespace`. */
+function trimSharedTrailingWhitespace([wasStart, wasEnd, nowStart, nowEnd]: Region, was: string, now: string): Region {
+  while (wasEnd > wasStart && nowEnd > nowStart && was[wasEnd - 1] === now[nowEnd - 1] && /\s/.test(was[wasEnd - 1])) {
+    wasEnd--;
+    nowEnd--;
+  }
+  return [wasStart, wasEnd, nowStart, nowEnd];
 }
 
 function emitRuns(regions: Region[], was: string, now: string): DiffRun[] {

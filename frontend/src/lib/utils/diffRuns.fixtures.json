@@ -276,19 +276,19 @@
     "now": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
     "runs": [
       {
-        "kind": "was",
-        "text": "She counted the hulls twice.\n\n",
-        "stacked": true
+        "kind": "equal",
+        "text": "She counted the hulls twice.",
+        "stacked": false
       },
       {
         "kind": "now",
-        "text": "She counted the hulls twice. ",
+        "text": " The eleventh was the Corrant, and her father was aboard.",
         "stacked": false
       },
       {
-        "kind": "equal",
-        "text": "The eleventh was the Corrant, and her father was aboard.",
-        "stacked": false
+        "kind": "was",
+        "text": "\n\nThe eleventh was the Corrant, and her father was aboard.",
+        "stacked": true
       }
     ]
   },
@@ -455,22 +455,17 @@
     "runs": [
       {
         "kind": "equal",
-        "text": "> When the water leaves like that, it is not ",
-        "stacked": false
-      },
-      {
-        "kind": "was",
-        "text": "leaving.",
+        "text": "> When the water leaves like that, it is not leaving",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "leaving at all.",
+        "text": " at all",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": "\n> It is drawing breath.\n",
+        "text": ".\n> It is drawing breath.\n",
         "stacked": false
       }
     ]
@@ -521,37 +516,37 @@
       },
       {
         "kind": "equal",
-        "text": "The villa sits where the terraces give ",
+        "text": "The villa sits where the terraces give out",
         "stacked": false
       },
       {
         "kind": "was",
-        "text": "out, whitewashed,",
+        "text": ", whitewashed",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "out. Whitewashed,",
+        "text": ". Whitewashed",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": " red tile.\n\nA man who arrives composed has been waiting somewhere ",
+        "text": ", red tile.\n\nA man who arrives composed has been waiting somewhere ",
         "stacked": false
       },
       {
         "kind": "was",
-        "text": "nearby.",
+        "text": "nearby",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "near.",
+        "text": "near",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": "\n\nThe door opens before I reach it, and a servant looks at my face.\n",
+        "text": ".\n\nThe door opens before I reach it, and a servant looks at my face.\n",
         "stacked": false
       }
     ]
@@ -604,22 +599,17 @@
       },
       {
         "kind": "equal",
-        "text": "raked flat. The servant stops at the ",
-        "stacked": false
-      },
-      {
-        "kind": "was",
-        "text": "gate.",
+        "text": "raked flat. The servant stops at the gate",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "gate and tips his chin at the ring and goes back the way he came.",
+        "text": " and tips his chin at the ring and goes back the way he came",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": "\n",
+        "text": ".\n",
         "stacked": false
       }
     ]
@@ -632,17 +622,12 @@
     "runs": [
       {
         "kind": "equal",
-        "text": "Somewhere behind ",
-        "stacked": false
-      },
-      {
-        "kind": "was",
-        "text": "her",
+        "text": "Somewhere behind her",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "her, up in the town,",
+        "text": ", up in the town,",
         "stacked": false
       },
       {
@@ -698,12 +683,17 @@
       },
       {
         "kind": "was",
-        "text": "twice.",
+        "text": "twice",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "once.",
+        "text": "once",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": ".",
         "stacked": false
       }
     ]
@@ -741,6 +731,100 @@
         "kind": "now",
         "text": "She was *very weary and cross by the end of it.",
         "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "punctuation-only-change",
+    "why": "#2600: a word's punctuation is its own token, so shows, -> shows. marks only the mark",
+    "was": "The dirty dressing on his thigh shows, and she remarks on it.",
+    "now": "The dirty dressing on his thigh shows; and she remarks on it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The dirty dressing on his thigh shows",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": ",",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": ";",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " and she remarks on it.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "repeated-word-stays-in-its-run",
+    "why": "#2600: whitespace is never a matcher element, so 'the dirty dressing' matches whole and the current 'the' does not jump to the first 'the' in the proposal",
+    "was": "The bath takes his clothes next; THEREFORE the dirty dressing on his thigh shows.",
+    "now": "He undresses for the water; the dirty dressing on his thigh shows.",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "The bath takes his clothes next; THEREFORE",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "He undresses for the water;",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " the dirty dressing on his thigh shows.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edits-in-two-table-cells",
+    "why": "#2600: a table's | still anchors, so each cell's edit stays inside its cell",
+    "was": "| boat | state |\n| --- | --- |\n| Corrant | at sea |\n",
+    "now": "| boat | state |\n| --- | --- |\n| Rowan | in port |\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "| boat | state |\n| --- | --- |\n| ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "Corrant",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "Rowan",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " | ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "at sea",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "in port",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " |\n",
+        "stacked": false
       }
     ]
   }

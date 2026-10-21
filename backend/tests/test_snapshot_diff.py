@@ -38,7 +38,6 @@ from app.services.markdown_scan import (
 from app.services.project.field_values import same_rendered_value
 from app.services.project.snapshot_diff import (
     MAX_WORD_DIFF_TOKENS,
-    TOKEN,
     _field_diffs,
     _is_a_rewrite_of,
     diff_runs,
@@ -632,7 +631,9 @@ def interleaved_pairs(runs: list) -> list:
     Short pairs are exempt: a two-word substitution legitimately shares nothing
     ("quay" -> "pier"), and demanding otherwise would fire constantly.
     """
-    words = lambda text: [t for t in TOKEN.findall(text) if not t.isspace()]  # noqa: E731
+    # Whitespace-separated words, not the diff's own tokens (#2600 split those at
+    # punctuation): the guard measures the output, so it must not move with them.
+    words = lambda text: re.findall(r"\S+", text)  # noqa: E731
     found = []
     for first, second in zip(runs, runs[1:], strict=False):
         if first.kind != "was" or second.kind != "now" or first.stacked or second.stacked:
@@ -671,10 +672,10 @@ RESTRUCTURED_EXPECTED = [
     ("now", True, "The eleventh was moored at the old harbour all week.\n\n"),
     ("equal", False, "Maren did not run. She had never "),
     ("now", False, "once "),
-    ("equal", False, "done the sensible thing quickly.\n\nWhen the water leaves like that, it is not "),
-    ("was", False, "leaving."),
-    ("now", False, "leaving at all."),
-    ("equal", False, "\n"),
+    # #2600, reviewed: the word stays equal and only the insertion is marked.
+    ("equal", False, "done the sensible thing quickly.\n\nWhen the water leaves like that, it is not leaving"),
+    ("now", False, " at all"),
+    ("equal", False, ".\n"),
 ]
 
 

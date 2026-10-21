@@ -52,6 +52,12 @@ repos:
         language: system
         files: ^frontend/src/.*\.(ts|js|svelte)$
 
+      - id: ai-call-flush-guard
+        name: AI-call flush guard (a model call persists pending editor edits first, #2598)
+        entry: python scripts/check_ai_call_flush.py
+        language: system
+        files: ^frontend/src/.*\.(ts|js|svelte)$
+
       - id: svelte-runes-guard
         name: runes guard (component events use callback props, not createEventDispatcher, #49)
         entry: python scripts/check_svelte_runes.py

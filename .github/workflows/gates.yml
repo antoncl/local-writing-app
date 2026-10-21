@@ -89,6 +89,13 @@ jobs:
       - name: http-client guard
         run: git ls-files 'frontend/src/*.ts' 'frontend/src/*.js' 'frontend/src/*.svelte' | xargs -r python scripts/check_http_client.py
 
+      # A model call reads project files from disk, so it persists the author's
+      # pending editor edits first (#2587, #2596). Each call site flushes or names
+      # where the flush happens (#2598). A Python guard over frontend files, here
+      # for the same reason as the http-client guard.
+      - name: AI-call flush guard
+        run: git ls-files 'frontend/src/*.ts' 'frontend/src/*.js' 'frontend/src/*.svelte' | xargs -r python scripts/check_ai_call_flush.py
+
       # The frontend is on idiomatic Svelte 5 runes (#49); component events use
       # callback props. createEventDispatcher is a true Svelte deprecation
       # (removed in v6) that svelte-check does not flag, so a Python guard is

@@ -61,6 +61,7 @@ export async function fetchLineNotes(args: NotesRunArgs): Promise<NotesOutcome> 
     // streaming route because only a stream's disconnect stops the provider (#2464).
     let res: NotesDone | null = null;
     let streamError: string | null = null;
+    // ai-flush: AiSuggestionController.runPromptEntryWithInputs persists before `produce` (#2596)
     for await (const ev of api.aiGenerateStream({
       template_source: entry.body,
       target_scene_id: sceneIdForWire,

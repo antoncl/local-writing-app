@@ -106,6 +106,7 @@
       // The prompt's own assistant (pin, else tag scope) — "" leaves the
       // backend's default, which never sees the prompt (#2593).
       const assistantId = assistantForPrompt(entry, $assistantEntriesStore);
+      // ai-flush: `onFlush` above is App's editorPanes.flushBeforeSceneRewrite (#2596)
       for await (const ev of api.aiGenerateStream(
         {
           ...(assistantId ? { assistant_id: assistantId } : {}),

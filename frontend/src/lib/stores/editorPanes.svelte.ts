@@ -1283,6 +1283,23 @@ class EditorPanesController {
     return allSaved;
   }
 
+  /** Persist what the author sees before an AI call reads project files (#2587):
+   *  the send renders the scene, picks and lore from disk, and an idle autosave
+   *  may still be up to 6s away. Each dirty pane goes through `autosaveOnce`, the
+   *  autosave's own classified save, so a failed flush keeps the recovery the
+   *  timer would have had (409 → the overwrite prompt, 5xx → the bounded retry,
+   *  other 4xx → the saveError badge) and never throws: the call goes ahead with
+   *  what is on disk. A pane frozen for an AI review is skipped; its one write
+   *  belongs to the review transaction (#634). Chat and view panes no-op in the
+   *  save itself. */
+  async flushBeforeAICall(): Promise<void> {
+    const dirty = this.panes.filter((pane) => pane.dirty && !this.#reviewLocks.has(pane.id));
+    for (const pane of dirty) {
+      this.#autosave.cancel(pane.id);
+      await autosaveOnce(this, pane.id);
+    }
+  }
+
   // Shallow-merge `patch` into one pane by id — the single privileged mutation
   // the reconcile-ladder host hooks build on (rung-1 lost-response adopt, rung-2
   // prose-merge adopt; the intent lives in editorPaneSave). Cancels autosave first

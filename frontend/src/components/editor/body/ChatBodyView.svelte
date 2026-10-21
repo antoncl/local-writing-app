@@ -717,8 +717,24 @@
   // send-time lock render.
   const promptEndsInUserTurn = $derived(endsInUserTurn(estimate.previewMessages));
 
+  // #2587: the send reads what it places (the scene, picks, lore) from disk, and
+  // an editor saves only after 6s idle — so persist what the author sees right
+  // before each real read (the lock render, the turn). `flushBeforeAICall` never
+  // throws and keeps autosave's recovery for a failed save; the send goes on.
+  // Not `chatRunning`: saving isn't generating (no busy composer, no Stop that
+  // can't stop anything). `sendFlushing` only bars a second click meanwhile.
+  let sendFlushing = false;
+  async function persistEditsForSend(): Promise<void> {
+    sendFlushing = true;
+    try {
+      await editorPanes.flushBeforeAICall();
+    } finally {
+      sendFlushing = false;
+    }
+  }
+
   async function sendChat() {
-    if (chatRunning || commit.committing) return;
+    if (chatRunning || sendFlushing || commit.committing) return;
     if (sendBlockingInputs.length > 0) {
       chatError = `Missing required: ${sendBlockingInputs.map((i) => i.label || i.name).join(", ")}.`;
       return;
@@ -740,6 +756,7 @@
     // prompt and contributes any `{% role %}` turns, incl. a trailing user turn,
     // to chatHistory).
     if (activePromptEntry && !chatSystemPrompt) {
+      await persistEditsForSend(); // the lock render reads the same files
       chatRunning = true;
       try {
         const ok = await renderAndLockPromptTemplate(activePromptEntry);
@@ -769,6 +786,7 @@
     // Also clear imperatively (#1083): the reactive value-sync can wedge, so a
     // clear the user must always see can't depend on it alone.
     composerRef?.setValue("");
+    await persistEditsForSend();
     chatRunning = true;
     const rewindUser = () => {
       if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);

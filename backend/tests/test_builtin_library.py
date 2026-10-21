@@ -1237,11 +1237,15 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("**Trust the reader.**", text)
         self.assertIn("_This brief is the author's notes on the scene, for you and not the reader", text)
         self.assertNotIn("**One narrator.**", text)
+        # Prose style reads the drafted scene's narration, not the editor's
+        # scene, so it agrees with the viewpoint rule (#2604 review).
+        self.assertIn("- Narrative POV: Third person — limited", text)
 
     def test_draft_scene_without_a_pov_character_asks_the_model_to_choose_one(self) -> None:
         self._set(self.scene_ids[0], summary="Honor leaves the station.")
         text = self._preview(self.scene_ids[0])
-        self.assertIn("No point-of-view character is set for this scene.", text)
+        self.assertIn("No point-of-view character is set for this scene: choose", text)
+        self.assertIn("never tell the reader what the viewpoint character learns", text)
         self.assertNotIn("The point-of-view character is **", text)
 
     def test_draft_scene_viewpoint_rule_follows_the_narration_mode(self) -> None:

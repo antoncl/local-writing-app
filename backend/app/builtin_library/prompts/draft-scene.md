@@ -67,13 +67,12 @@ Write the draft straight away, in full; then revise it as the author asks — ea
 
 - **One continuous stretch of time.** The scene plays out in one place, moment to moment, from its first line to its last, with no skips. The events the brief calls for happen inside that stretch, in the order it gives them — a numbered list is an order to follow — and you get from one to the next through what the characters do and say. If they cannot all happen in one sitting, tell the author so before the scene rather than jumping ahead. The length is a guide: when the events don't fit it, play fewer moments out in full rather than summarize.
 {% if narration.mode == "third_omniscient" %}
-- **One narrator.** The narrator may enter any character's mind, but moves between minds deliberately — only at a paragraph break, never within an exchange — and tells only what the moment needs, not what happens later.
+- **One narrator.** The narrator may enter any character's mind, but moves between minds deliberately — only at a paragraph break, never within an exchange.
 {% elif narration.mode == "third_objective" %}
 - **No one's mind.** The narration reports only what could be seen and heard in the room; no one's thoughts or feelings are stated. Let them show in what people say and do.
-{% elif narration.character %}
-- **One mind.** The point-of-view character is **{{ narration.character.title }}**. The narration holds only what {{ narration.character.title }} perceives, remembers, thinks and knows at this moment; everyone else is seen from outside, through what they say and do, and what they feel is {{ narration.character.title }}'s guess, never reported as fact. Narrate from inside the moment, not from after the story: never tell the reader what {{ narration.character.title }} learns or understands later. Someone {{ narration.character.title }} doesn't know yet is described as {{ narration.character.title }} sees them until the scene itself gives their name — in speech, an introduction, a sign — and is named only from then on.
 {% else %}
-- **One mind.** No point-of-view character is set for this scene. Choose the character with most at stake, name them to the author in a line before the scene, and hold the narration to what they perceive, remember, think and know at this moment; everyone else is seen from outside. Narrate from inside the moment, not from after the story: never tell the reader what the viewpoint character learns or understands later. Someone they don't know yet is described as they see them until the scene itself gives the name, and is named only from then on.
+{% set viewer = narration.character.title if narration.character else "the viewpoint character" %}
+- **One mind.** {% if narration.character %}The point-of-view character is **{{ viewer }}**.{% else %}No point-of-view character is set for this scene: choose the character with most at stake, tell the author who in a line before your first draft, and keep to them in every revision.{% endif %} The narration holds only what {{ viewer }} perceives, remembers, thinks and knows at this moment; everyone else is seen from outside, through what they say and do, and what they feel is {{ viewer }}'s guess, never reported as fact. Narrate from inside the moment, not from after the story: never tell the reader what {{ viewer }} learns or understands later. Someone {{ viewer }} doesn't know yet is described as {{ viewer }} sees them until the scene itself gives their name — in speech, an introduction, a sign — and is named only from then on.
 {% endif %}
 - **Trust the reader.** Show each moment once — as action, speech, gesture, or a concrete detail the viewpoint would notice — and then leave it: no sentence after it saying what it meant, what someone realized, or how they felt. People rarely say outright what they want or feel; let it show in what they do and what they avoid saying.
 
@@ -85,8 +84,10 @@ Beyond that:
 
 You don't save anything yourself — when the author commits, a separate step takes the scene from this conversation, and it can only use what is actually written here: a change you describe but never write out has no new text to commit. That is why every revision writes the whole scene out.
 
+{% set prose_scene = e %}
 {% include "Prose generation settings" %}
 {% include "Character voice in prose" %}
+
 {% include "Project settings" %}
 {% include "Author directions in brackets" %}
 

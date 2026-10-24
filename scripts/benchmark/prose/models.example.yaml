@@ -6,7 +6,8 @@
 #   provider     ollama | anthropic | openrouter | openai
 #   model        the provider's model id
 #   max_tokens   the assistant's output cap
-#   temperature  the assistant's temperature
+#   temperature  the assistant's temperature; omit it for a model that accepts none
+#                (the newer Claude models: the app refuses one)
 #   primary      true for the one strong cloud model the blind pairs use
 #
 # Cloud providers need their key in the environment when you run setup_backend.py
@@ -24,15 +25,14 @@ models:
   # The primary strong cloud model (the blind pairs draw from this one only).
   # - name: primary-anthropic
   #   provider: anthropic
-  #   model: claude-sonnet-4-5
+  #   model: claude-sonnet-5-5
   #   max_tokens: 4096
-  #   temperature: 0.8
   #   primary: true
 
   # A cheap cloud model.
   # - name: cheap-cloud
   #   provider: openrouter
-  #   model: google/gemini-2.5-flash
+  #   model: mistralai/mistral-small-3.2-24b-instruct
   #   max_tokens: 4096
   #   temperature: 0.8
   #   primary: false

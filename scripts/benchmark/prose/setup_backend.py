@@ -85,7 +85,7 @@ def assistant_metadata(model: dict[str, Any]) -> dict[str, Any]:
         "ai_provider": model["provider"],
         "ai_model": model["model"],
         "ai_max_tokens": model["max_tokens"],
-        "ai_temperature": model["temperature"],
+        "ai_temperature": model.get("temperature"),
         "ai_thinking": False,
     }
 

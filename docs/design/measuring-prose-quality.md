@@ -83,7 +83,10 @@ different things:
 - **A small invented book**: four scene briefs and two *Continue* runs from mid-scene, three
   characters with narrating and speaking voices, and no ties to any real project. One narration
   setting (close third person, past tense) is used for every style, so the styles differ only in
-  what the notes say.
+  what the notes say. The voice samples avoid every mechanic the style notes disagree on, so a
+  voice never takes a side on mechanics. A *Continue* run continues a plain lead-in, which sets the
+  voice it continues in, so *Continue* results are reported separately and never counted in the
+  separation test.
 - **Four contrasting style notes** in ADR-0101's shape (Mechanics and Manner):
   - frank and plain
   - lush and ornate
@@ -116,8 +119,15 @@ They count what can be counted:
 - word count against the target
 - an author's name or title appearing in a builder-inferred note, which fails the builder test
   outright (§4.3)
+- the longest run of words a draft shares with a voice sample, since a model may lift the
+  sample instead of writing in its voice
 
-They measure rule-following and catch regressions; they say nothing about quality.
+They measure rule-following and catch regressions; they say nothing about quality. A count
+gets a direction (worse when it rises) only when it is a failure in any style: named emotions,
+common-list phrases, markdown, a preamble, a lifted sample. The mechanics the style notes
+disagree on (italics, numerals, dashes, contractions, adverbs, sentence length) are reported as
+*changed* when they move beyond the noise band, never as better or worse: whether a move is
+right depends on the note, and judging that is the model judge's job (§4.2).
 
 ### 4.2 The model judge: rule-following and attribution
 
@@ -203,28 +213,35 @@ guessing.
 ## 7. How the harness runs
 
 **It drives the backend over HTTP, as the frontend does.**
-- **The backend.** The harness starts a worktree dev backend (`scripts/dev_backend.py`), which
-  derives its own port and its own config directory. It never uses Anton's live server, config or
-  projects.
-- **One-shot prompts** such as Continue or Shorten: render the preview, then call the generate
-  route.
+- **The backend.** The harness runs against a worktree dev backend (`scripts/dev_backend.py`), which
+  derives its own port and its own config directory, and finds it through the port file that
+  backend publishes in its checkout. It refuses the default port 8787, and so never uses Anton's
+  live server, config or projects.
+- **One-shot prompts** such as Continue or Shorten: call the generate route with the cursor text,
+  as the editor does.
 - **Conversation prompts** such as Draft scene or the builder:
-  1. render and lock the template
-  2. create the chat
-  3. send the turn
-  4. run the commit extraction
+  1. create the chat
+  2. render the template through the preview route and save the locked record on the chat
+  3. send the turn, and save the reply on the chat
+  4. run the commit extraction, which proposes the body without writing it
 - **Why not in-process.** The backend has no single "run this conversation" entry point: the lock,
   the chat's creation and the turn order live in the frontend (`promptTemplateLock.ts` and the chat
   stores). Calling services in-process would reimplement that logic. Over HTTP, the harness mirrors
   only the *sequence* of calls, and every call runs the real code.
-- **The guard on the mirror.** For each provider request, the harness keeps the backend's own trace
-  of what was sent (`record_ai_trace`). Once per prompt, and again whenever the frontend's sequence
-  for that prompt changes, the harness's trace is compared with the trace of the same brief run by
-  hand in the app. A difference fails the harness, not the change.
+- **The guard on the mirror.** What the harness mirrors is the frontend's half of a conversation,
+  and that half ends in the chat record the app saves: the locked system prompt, the opening turns,
+  the lore it used, the field contract and the inputs. The backend's half (lore placement on the
+  send) is real code on both paths, and the preview mirrors it (ADR-0092). So the harness keeps
+  each draft with its chat record as the backend stored it. Once per prompt, and again whenever the
+  frontend's sequence for that prompt changes, that record is compared with the record of the same
+  brief run by hand in the app (`scripts/benchmark/prose/parity.py`). A difference fails the
+  harness, not the change. The backend keeps no log of the exact provider request
+  (`record_ai_trace` records commit extractions only), so the chat record is the evidence.
 
 **Setup.**
-- The harness writes the provider keys into the throwaway config directory from environment
-  variables.
+- The harness reads the provider keys from environment variables and saves them through the
+  app's machine-settings route, which keeps them in the OS keyring under the throwaway config
+  directory's own namespace. They are never printed or logged.
 - It creates one assistant per model in scope and turns AI on for the project.
 - Cost is the sum of the costs the routes return. The cost ledger is written by the frontend on
   accept, so the harness doesn't read it.
@@ -259,7 +276,7 @@ The result is kept or reverted against §2, and recorded with its cost in the PR
 - **Not a writer's manuscript in the repository tree or in front of other readers**, and not a run
   against a live book.
 - **Not reimplementing the app's logic in the harness.** It mirrors the frontend's call sequence and
-  checks the mirror against the backend's own traces.
+  checks the mirror against the chat record a hand run saves.
 - **Not one number,** and not a threshold without the noise band.
 - **Not two changes in one run.**
 
@@ -269,9 +286,9 @@ The result is kept or reverted against §2, and recorded with its cost in the PR
    worktree dev backend comes up on its derived port with its own config directory, and the
    built-in fixture project is generated.
 2. **Parity.** The maintainer runs Draft scene on one brief by hand in the app, then the harness's
-   parity check. It reports the harness's trace and the hand run's trace as matching.
+   parity check. It reports the harness's chat record and the hand run's as matching.
 3. **Baseline.** The A/A baseline runs. A dated output folder holds:
-   - every draft, with its trace
+   - every draft, with its chat record and the costs the routes returned
    - the script checks per brief, style and model
    - the noise band
 4. **Calibration.** The maintainer answers the calibration set. The report says which rules the

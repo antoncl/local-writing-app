@@ -1,0 +1,38 @@
+# The models the prose harness runs (docs/design/measuring-prose-quality.md §2).
+#
+# Copy to `models.yaml` beside it; the harness reads `models.yaml` if it exists,
+# else this file. One entry per model:
+#   name         the label used in output folders and reports (a safe file name)
+#   provider     ollama | anthropic | openrouter | openai
+#   model        the provider's model id
+#   max_tokens   the assistant's output cap
+#   temperature  the assistant's temperature
+#   primary      true for the one strong cloud model the blind pairs use
+#
+# Cloud providers need their key in the environment when you run setup_backend.py
+# (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY). Keys are never read
+# from this file.
+
+models:
+  - name: local-qwen
+    provider: ollama
+    model: "Qwen3.8-9B:latest"
+    max_tokens: 4096
+    temperature: 0.8
+    primary: false
+
+  # The primary strong cloud model (the blind pairs draw from this one only).
+  # - name: primary-anthropic
+  #   provider: anthropic
+  #   model: claude-sonnet-4-5
+  #   max_tokens: 4096
+  #   temperature: 0.8
+  #   primary: true
+
+  # A cheap cloud model.
+  # - name: cheap-cloud
+  #   provider: openrouter
+  #   model: google/gemini-2.5-flash
+  #   max_tokens: 4096
+  #   temperature: 0.8
+  #   primary: false

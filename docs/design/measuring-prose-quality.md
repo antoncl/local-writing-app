@@ -1,59 +1,76 @@
 # Measuring prose quality: what counts as better, and who decides
 
-> **Why this document exists.** ADR-0101 decides who owns how the prose reads — the built-in
+> **Why this document exists.** ADR-0101 decides who owns how the prose reads: the built-in
 > prompts, the style notes, the voices. Every slice it plans is a change to prompt or note text,
-> and prompt text can't be judged by reading it: the same edit helps one draft and hurts the
-> next. Without a fixed way to measure, each change is judged by feel on whichever scene happens
-> to be open, and the built-ins drift toward one writer's taste. This document says what success
-> means for that work, how it is measured, and who judges.
+> and prompt text can't be judged by reading it, because the same edit helps one draft and hurts
+> the next. Without a fixed way to measure, each change is judged by feel on whichever scene
+> happens to be open, and the built-ins drift toward one writer's taste. This document says what
+> success means for that work, how it is measured, and who judges.
 >
 > It is a working method for developing the app, not an app feature. The harness lives under
-> `scripts/benchmark/prose/` and follows that folder's rules (`scripts/benchmark/README.md`):
-> drive the real code, generate the runnable fixtures under `tmp/benchmark-fixtures/`, quote the
-> scope you measured.
+> `scripts/benchmark/prose/` and follows that folder's rules (`scripts/benchmark/README.md`): drive
+> the real code, generate the runnable fixtures, quote the scope you measured.
+>
+> Verified against `1cd8761b` (2026-10-24).
 
 ## 1. Two kinds of success
 
 The app ships two kinds of thing, and they answer to different judges.
 
-- **A writer's own book** — their style notes, their voices. The writer's taste *is* the spec.
-  For *Unbecoming Someone*, Anton judges, and nobody else's preference should move it.
-- **The built-ins** — *Prose craft*, *Character voice in prose*, the style builder. They ship to
-  every user. Their job is not to write the way any one writer likes; it is **to write the way
-  the author using them asked, and only that way**, with sound defaults where the author asked
-  nothing. They are judged on fidelity, not on anyone's taste.
+- **A writer's own book**: their style notes, their voices. The writer's taste *is* the spec. For
+  *Unbecoming Someone*, Anton judges, and nobody else's preference should move it.
+- **The built-ins**: *Prose craft*, *Character voice in prose*, the prose prompts, and the style
+  builder. The builder is not a built-in yet (ADR-0101 S2), but it is held to this standard
+  because it is meant to become one. These serve every user. Their job is not to write the way any
+  one writer likes. It is **to write the way the author using them asked, and only that way**, with
+  sound defaults where the author asked nothing. They are judged on fidelity, not on anyone's
+  taste.
 
 The two are measured on separate test sets (§3), so tuning one can't quietly tune the other.
 
 ## 2. What success means
 
-A change succeeds when every line for its tier holds, on every model in scope (§7).
+Every rate below is compared with **the noise band**: the spread between two runs of the unchanged
+baseline (§7). A difference inside the band is no difference. Without it, a check run three drafts
+at a time flips on chance alone, and "it got worse" or "it got better" means nothing.
 
 **For a writer's own book:**
-- The writer prefers the new drafts in a clear majority of blind comparisons — at least 7 of 10
-  pairs.
-- Every failure on the failure list (§5) is as rare or rarer, per 1,000 words.
+- In 20 blind pairs on the primary model (§4.4), the writer prefers the new draft in at least 15.
+  That threshold is 15 rather than 11 or 12 because 15 of 20 is unlikely by chance (about 2%).
+- No failure on the writer's list (§5) is more frequent than the baseline, beyond the noise band.
 - No rule that held before breaks.
 
 **For the built-ins:**
-- **Styles stay apart.** Given a draft and two style notes, a judge picks the note that produced
-  it at least 9 times in 10 (§4.2). Drafts that can't be told apart mean the prompt flattens
-  every style into the model's own.
-- **The builder captures someone else's style.** A draft written from a note the builder inferred
-  from an author's pages is assigned to that author, not another, in at least 3 of 4 authors
-  (§4.3).
-- **The defaults avoid the shared failures.** With no style note at all, every failure on the
-  common list (§5) is as rare or rarer than at baseline.
-- **No style regresses.** A change that improves one style note's drafts and degrades another's
-  fails.
-- **Readers prefer it**, where readers are available (§6): a majority of blind comparisons.
+- **Styles stay apart.** For each model, the judge identifies which of two style notes produced a
+  draft in at least 90% of trials, with the two notes shown in random order (§4.2).
+- **The builder captures someone else's style.** For each model, at least 9 of 12 drafts written
+  from builder-inferred notes are attributed to the right author among four (§4.3). Chance is 3.
+- **The defaults avoid the shared failures.** With no style note, no failure on the common list
+  (§5) is more frequent than the baseline, beyond the noise band.
+- **No style regresses.** A change that improves one style note's drafts beyond the band and
+  worsens another's beyond the band fails.
+- **Readers prefer it**, where readers are available (§6), by the same 15-of-20 bar.
+
+**Which models.** The harness names a fixed list:
+- a **primary** strong cloud model, which the blind pairs use
+- a cheap cloud model
+- the local model the writer uses
+
+The script and judge checks run on all three. A model that can't complete a step, such as a local
+model truncating a full scene plus its commit, is reported as *out of reach* for that prompt; that
+is not a failure of the change. A change that helps only the strongest model is not a success for
+the built-ins.
 
 ## 3. The test sets
 
-Both are frozen: a run changes prompts or notes, never the briefs.
+Each set is frozen: a copy taken once, and kept. A run changes prompts or notes, never the briefs.
 
-**The personal set** — a frozen copy of the writer's book, kept locally and never committed or
-shown to anyone else. Six to eight scene briefs chosen to stress different things:
+**The personal set** is a copy of the writer's book **and its whole ancestor chain**, since the
+book's *always* style notes may live in the series or author folders above it. It is kept in a
+folder the writer names **outside the repository tree**, and so are all its outputs. A run writes
+cost records, traces and chat files into the project it drives, which is another reason it is
+always a copy and never the live book. It has six to eight scene briefs, chosen to stress
+different things:
 - two voices in dialogue
 - action
 - quiet interiority
@@ -61,139 +78,209 @@ shown to anyone else. Six to eight scene briefs chosen to stress different thing
 - a scene with a change marker
 - two *Continue* runs from mid-scene
 
-**The built-in set** — committed, so anyone can rerun it. It has three parts:
-- **A small invented book.** Four scene briefs and three characters with narrating and speaking
-  voices, written for the test, with no ties to any real project. Its source files are committed
-  under `scripts/benchmark/prose/`; the runnable project is generated from them.
-- **Four contrasting style notes**, each written to ADR-0101's shape (Mechanics and Manner):
-  - a frank close third person
-  - a lush, distant omniscient narrator
-  - a clipped first-person present-tense thriller voice
-  - a warm, wry comic voice
-  The fourth case is no style note at all, which measures the defaults.
-- **Public-domain pages** from four authors with distinct styles: Austen, Conan Doyle, Stephen
-  Crane, Kate Chopin. These are used only as input to the builder.
+**The built-in set** is committed, so anyone can rerun it. The runnable project is generated under
+`tmp/benchmark-fixtures/prose/` from source files under `scripts/benchmark/prose/`. It has:
+- **A small invented book**: four scene briefs and two *Continue* runs from mid-scene, three
+  characters with narrating and speaking voices, and no ties to any real project. One narration
+  setting (close third person, past tense) is used for every style, so the styles differ only in
+  what the notes say.
+- **Four contrasting style notes** in ADR-0101's shape (Mechanics and Manner):
+  - frank and plain
+  - lush and ornate
+  - clipped and hard-boiled
+  - warm and wry
 
-**Every run makes three drafts per brief per model.** One draft is mostly noise; a comparison
-needs the spread.
+  None of them sets POV or tense. Those stay in the narration fields (ADR-0101 decision 8). A
+  fifth case, no style note at all, measures the defaults.
+- **The style builder's text**, as ADR-0101 S2 commits it.
+- **Public-domain pages** from four authors of roughly the same era, so period diction doesn't
+  give the answer away: Stephen Crane, Kate Chopin, Jack London, Edith Wharton. They are used
+  only as input to the builder.
+
+**Every run makes three drafts per brief, per style case, per model.** One draft is mostly noise.
 
 ## 4. The checks
 
-Cheapest first. Each check reports per brief, per style and per model, never as one blended
-score.
+Each check reports per brief, per style and per model, never as one blended score.
 
-### 4.1 Script checks — exact, free, run every time
+### 4.1 Script checks: exact, free, run every time
 
-These count what can be counted:
+They count what can be counted:
 - italics in thought
 - digits below ten
 - em-dash spacing
 - the share of dialogue tags that are "said"
 - adverbs on tags
 - named-emotion words ("felt", "realized", "couldn't help")
-- hits from the style note's never-list and from the common list
+- hits from the style note's never-list and, once it exists, the common list
 - word count against the target
+- an author's name or title appearing in a builder-inferred note, which fails the builder test
+  outright (§4.3)
 
 They measure rule-following and catch regressions; they say nothing about quality.
 
-### 4.2 The model judge — rule-following and style separation
+### 4.2 The model judge: rule-following and attribution
 
-A model, not the one that drafted, answers **yes/no questions, one rule per question, each
-answer with the quoted passage that decides it**. It covers:
-- viewpoint slips
-- time skips
-- a moment explained after it was shown
-- a summing-up ending
-- euphemism in the narration
-- the narration noticing what the viewpoint character wouldn't
-
-It also runs the separation test: given a draft and two style notes, which note produced it?
+- **One fixed judge model, named in the harness.** It is never used to judge its own drafts. Drafts
+  by the judge's own model go to a named second judge.
+- **One rule per question.** The judge answers yes or no and quotes the passage that decides it. The
+  rules it checks:
+  - viewpoint slips
+  - time skips
+  - a moment explained after it was shown
+  - a summing-up ending
+  - euphemism in the narration
+  - the narration noticing what the viewpoint character wouldn't
+- **The separation test.** Given a draft and two style notes, the judge says which note produced it.
+  This is attribution against written rules, not a taste call.
 
 Two rules bound it:
-- **It never judges quality.** Model judges tend to prefer prose that reads like a model's;
-  "which draft is better" is a human question (§6).
-- **It earns trust before it is used.** On about twenty drafts, the writer answers the same
-  questions by hand. The judge is used only where it agrees with the writer on at least 85% of
-  verdicts; a rule where it disagrees more stays with the script or with the writer.
+- **It never says which draft is better.** Model judges tend to prefer prose that reads like a
+  model's, so quality is a human question (§4.4).
+- **It is calibrated before its verdicts count.**
+  - The writer answers the same questions by hand on a calibration set, built so that every rule
+    has at least eight drafts where the failure is present and eight where it isn't.
+  - A rule is the judge's only if the judge agrees with the writer on at least 80% of the
+    *present* cases and 80% of the *absent* cases. Two rates are used because one overall rate
+    would let a judge that always answers "no" pass on a rare failure.
+  - A rule that fails stays with the script or with the writer.
+  - Changing the judge model voids the calibration.
 
 ### 4.3 The builder test
 
-The harness runs the style builder on each public-domain author's pages: one turn with the pages
-and a request to infer the style, then the commit. It then drafts one brief from each inferred
-note. The judge is shown the draft and two authors' original pages, and says which author the
-draft is closer to.
+The harness drives the builder as the app does:
+- **The first user turn** carries an author's pages and the fixed message "Infer this writing's
+  style from these pages and propose the note."
+- **The contrast step.** If the builder asks one, the harness answers with the fixed reply "No
+  preference; propose the note from the pages."
+- **The commit** follows.
 
-The automated run skips the builder's contrast step ("which of these two is closer?"), since
-that needs a writer's answer, so this measures what the builder infers from pages, not the whole
-conversation.
+This measures what the builder infers from pages. It does not measure the full conversation with
+a writer.
 
-### 4.4 Blind comparison — the quality judge
+The note it commits must not name the author or a work (§4.1). From each of the four inferred notes,
+the harness drafts one brief three times. For each draft, the judge is shown the draft and one
+unnamed excerpt from each of the four authors, and says which author the draft is closest to.
 
-Pairs of drafts from the same brief, one old and one new, in random order and unlabelled. Only
-**the first ~400 words** of each draft are shown, since that is where most failures show and
-where reading time is affordable. For each pair the reader picks the one they would keep, and may
-mark lines they would cut. The harness writes the pairs as a local page and holds the key back.
-The reader's picks are saved to a file the harness then tallies against the key.
+### 4.4 Blind pairs: the quality judge
+
+- **What a pair is.** The first ~400 words of an old draft and a new draft of the same brief, in
+  random order and unlabelled. That is where most failures show, and where reading time is
+  affordable.
+- **"Old"** means the frozen drafts kept from the baseline, not a fresh run.
+- **Which pairs.** 20 are drawn per change, from the primary model only, spread evenly across the
+  briefs and style cases.
+- **What the reader does.** For each pair they pick the draft they would keep, and may mark lines
+  they would cut.
+- **How it's tallied.** The harness writes the pairs as a local page and holds the key back; the
+  page exports the reader's picks as a file, which the harness tallies against the key.
 
 ## 5. The failure list
 
 The list of failures is the real spec for every prose change, and it comes from reading, not
 guessing.
 
-1. **Baseline.** Run today's prompts and notes on both sets.
-2. **Annotate.** The writer reads the personal set and marks every failure; the built-in set is
-   annotated the same way.
-3. **Sort.** The marks become two lists, each with rough frequencies:
-   - **the common list** — failures any reader would call failures: an emotion stated outright,
-     stock phrasing, a summing-up ending, purple description
-   - **the writer's list** — failures against this book's own style
-
-   The common list feeds *Prose craft* and the default checks. The writer's list feeds the
-   writer's own never-list, and never the built-ins.
+1. **Annotate the baseline.** The writer reads the baseline drafts of both sets and marks every
+   failure.
+2. **Sort the marks into two lists, each with rough frequencies:**
+   - **The common list**: failures any reader would call failures, such as an emotion stated
+     outright, stock phrasing, a summing-up ending, or purple description. It feeds *Prose craft*,
+     the script checks and the default checks.
+   - **The writer's list**: failures against this book's own style. It feeds the writer's own
+     never-list, and never the built-ins.
 
 ## 6. Who judges
 
 - **The writer**, for their own book, always.
 - **Readers beyond the writer**, for the built-ins, when available: a small opt-in group (people
-  using the app, a writing group, friends), found through a GitHub Discussion or the release
-  notes. They only ever see drafts from the built-in set — the invented book — never a writer's
-  manuscript. Recruiting them is outreach and is the maintainer's to decide and do.
-- **Until readers exist**, the built-ins are still kept off one writer's taste by the
-  separation and builder tests (§4.2, §4.3), which measure fidelity to the style each author
-  asked for. The maintainer's own blind comparisons on the built-in set count as one reader's.
+  using the app, a writing group, friends), found through a GitHub Discussion or the release notes.
+  They only ever see drafts from the invented book, never a writer's manuscript. Recruiting them is
+  outreach, and is the maintainer's to decide and do.
+- **Until readers exist,** the separation and builder tests (§4.2, §4.3) still keep the built-ins
+  off one writer's taste, since they measure fidelity to the style each author asked for. The
+  maintainer's own blind pairs on the built-in set count as one reader's.
 
-## 7. How a change is run
+## 7. How the harness runs
 
-1. **Change one thing.** *Prose craft*, *or* a style note, *or* a voice section — never two at
-   once, so a result can be attributed.
-2. **Rerun the affected set**: the personal set for the writer's own notes and voices; the
-   built-in set, and the personal set too, for any built-in.
-3. **Read the report**: script and judge results beside the baseline, then the blind pairs.
-4. **Keep or revert** against §2. Record the result and its cost in the PR.
+**It drives the backend over HTTP, as the frontend does.**
+- **The backend.** The harness starts a worktree dev backend (`scripts/dev_backend.py`), which
+  derives its own port and its own config directory. It never uses Anton's live server, config or
+  projects.
+- **One-shot prompts** such as Continue or Shorten: render the preview, then call the generate
+  route.
+- **Conversation prompts** such as Draft scene or the builder:
+  1. render and lock the template
+  2. create the chat
+  3. send the turn
+  4. run the commit extraction
+- **Why not in-process.** The backend has no single "run this conversation" entry point: the lock,
+  the chat's creation and the turn order live in the frontend (`promptTemplateLock.ts` and the chat
+  stores). Calling services in-process would reimplement that logic. Over HTTP, the harness mirrors
+  only the *sequence* of calls, and every call runs the real code.
+- **The guard on the mirror.** For each provider request, the harness keeps the backend's own trace
+  of what was sent (`record_ai_trace`). Once per prompt, and again whenever the frontend's sequence
+  for that prompt changes, the harness's trace is compared with the trace of the same brief run by
+  hand in the app. A difference fails the harness, not the change.
 
-**Models in scope** are a fixed list, named in the harness: at least one strong cloud model, one
-cheap cloud model, and the local model the writer uses. A change that helps only the strongest
-model is not a success for the built-ins.
+**Setup.**
+- The harness writes the provider keys into the throwaway config directory from environment
+  variables.
+- It creates one assistant per model in scope and turns AI on for the project.
+- Cost is the sum of the costs the routes return. The cost ledger is written by the frontend on
+  accept, so the harness doesn't read it.
+
+**A run, in order:**
+1. **A/A**: the unchanged baseline, twice, to measure the noise band (§2).
+2. **Script checks** on both baseline runs.
+3. **Calibration** (§4.2), once per judge model, before any judge verdict counts.
+4. **Judge checks** on the baseline.
+5. **Annotation** (§5), which produces the common list and the writer's list.
+
+After that, each change is one change: *Prose craft*, *or* a style note, *or* a voice section, never
+two. It reruns:
+- **A built-in change**: the whole built-in set on all models, script and judge checks, and the blind
+  pairs on the primary model. The personal set reruns too.
+- **A change to a writer's own note or voice**: the personal set only.
+
+The result is kept or reverted against §2, and recorded with its cost in the PR.
+
+**Cost, estimated.**
+- One built-in run is about 180 drafts at about two calls each (turn and commit), plus about a
+  thousand single-rule judge calls.
+- That is roughly $20–50 on current cloud pricing.
+- The local model costs no money but about three hours a run.
+- Estimated from prompt sizes, not measured. The harness reports the real figure per run.
 
 ## 8. Anti-goals
 
-- **Not an app feature.** No score in the UI and no telemetry. The harness is a development tool.
-- **Not the model as quality judge.** It checks rules and tells styles apart, nothing more.
+- **Not an app feature.** No score in the UI and no telemetry.
+- **Not the model as quality judge.** It checks rules and attributes styles.
 - **Not one writer's taste in the built-ins.** The writer's list never feeds *Prose craft*.
-- **Not a writer's manuscript in the repo or in front of other readers.**
-- **Not one number.** A blended score hides the regression that §2 forbids.
+- **Not a writer's manuscript in the repository tree or in front of other readers**, and not a run
+  against a live book.
+- **Not reimplementing the app's logic in the harness.** It mirrors the frontend's call sequence and
+  checks the mirror against the backend's own traces.
+- **Not one number,** and not a threshold without the noise band.
 - **Not two changes in one run.**
 
 ## 9. The journey that defines done (for the harness)
 
-1. The maintainer runs the baseline on the built-in set. A dated output folder holds every draft
-   with the request that produced it, a report of the script and judge checks per brief, style
-   and model, and a page of blind 400-word pairs with the key held aside.
-2. The maintainer runs the judge-calibration step, answers the twenty drafts' questions, and the
-   report says which rules the judge may own.
-3. A *Prose craft* edit is rerun. The report shows each check beside the baseline, and flags a
-   style whose drafts got harder to tell apart.
-4. The maintainer picks in the pairs page; the harness tallies the picks against the key, and the
-   result fills the PR's measurement section.
-5. The same commands, pointed at a local copy of a writer's book, run the personal set; nothing
-   from it is written inside the repo.
+1. **Setup.** The maintainer sets the provider keys in the environment and runs the setup. A
+   worktree dev backend comes up on its derived port with its own config directory, and the
+   built-in fixture project is generated.
+2. **Parity.** The maintainer runs Draft scene on one brief by hand in the app, then the harness's
+   parity check. It reports the harness's trace and the hand run's trace as matching.
+3. **Baseline.** The A/A baseline runs. A dated output folder holds:
+   - every draft, with its trace
+   - the script checks per brief, style and model
+   - the noise band
+4. **Calibration.** The maintainer answers the calibration set. The report says which rules the
+   judge may own, and only then adds judge results to the baseline.
+5. **Annotation.** The maintainer annotates the baseline; the common list and the writer's list are
+   written.
+6. **A change.** A *Prose craft* edit is rerun. The report shows each check beside the baseline and
+   its noise band, and flags a style whose drafts got harder to tell apart. The pairs page shows 20
+   pairs; the maintainer's picks are tallied against the key into the PR's measurement section.
+7. **The personal set.** The same commands, pointed at a copy of a writer's book and its chain in a
+   folder outside the repository, run the personal set. Nothing from it is written inside the
+   repository tree.

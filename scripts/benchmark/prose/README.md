@@ -4,8 +4,8 @@ Measures the built-in prose prompts (*Draft scene*, *Continue*) against an inven
 book across four style notes and a no-note case. Method and thresholds:
 [`docs/design/measuring-prose-quality.md`](../../../docs/design/measuring-prose-quality.md)
 (ADR-0101). This folder is piece H1: the runner, the script checks, the noise band
-and the parity guard. The model judge, the builder test and the blind-pairs page come
-later.
+and the parity guard; "Judge (H2)" below adds the model judge. The builder test and the
+blind-pairs page come later.
 
 It drives a worktree dev backend **over HTTP, in the frontend's own call sequence**, so
 every call runs the real backend code. It never reimplements backend logic.
@@ -91,6 +91,46 @@ Use the backend venv's Python (`<py>` below), from the repo root.
 A draft whose step fails (truncated, garbled, error, timeout) is recorded as `out_of_reach`
 or `error` in its meta and counted in the report, never retried unless `--retries` says so.
 
+## Judge (H2)
+
+A model judge checks the drafts against six rules the script checks can't count, and
+says which of two style notes a draft was written to follow. Its verdicts reach a report
+only for the rules where it has been shown to agree with you. It never says which draft
+is better.
+
+1. Name the judges in `models.yaml` under `judges:` (`primary` and `second`; the example
+   file shows the shape). The primary must be a different family from the primary drafter.
+   Rerun `setup_backend.py` (`--no-judges` skips them; `--models` filters drafters only).
+2. Judge a run: `judge.py <run>`. A draft written by the primary judge's model goes to
+   `second`, so no model judges its own drafts. `--rules` or `--separation` runs one half;
+   a rerun resumes, and `--redo` asks again; a record from a different judge model is
+   never resumed. `--workers` (default 4) judges that many drafts at once. It writes
+   `judge_<n>.json` beside each draft and `judge.json` in the run (the judges' model ids
+   and cost). A band or compare with `--calibration` refuses runs judged by different models.
+3. Calibrate, in order:
+   1. Name a third model under `seeder:` in `models.yaml` (neither a judge nor a drafter;
+      the example file shows one) and rerun `setup_backend.py`.
+   2. `calibration_seed.py <run> --out <seeded>` has it rewrite 8 Continue passages per rule
+      (`--per-rule`) to contain exactly that one failure, as a run of its own.
+   3. `judge.py <seeded>` judges them like any run.
+   4. `calibration.py sheet <run> --seeded <seeded> --out <dir>` shuffles a sample of the
+      natural drafts and every seeded passage into one list (`answers.yaml`, `sheet.md`).
+      The sample is `--scenes` Draft scene drafts (12) and, by default, as many Continue
+      drafts as there are seeded passages, so a continuation alone doesn't hint at a planted
+      failure. It refuses to overwrite an `answers.yaml` that already holds answers.
+   5. `calibration_serve.py <dir>` opens the reading page: answer each rule yes, no or not
+      sure. Answers save as you go, so you can stop and resume. The page never shows the
+      judge's answers or which passages are seeded.
+4. `calibration.py tally <dir>/answers.yaml --out calibration.json` prints each rule's
+   agreement per judge model. The judge owns a rule only if it has at least 8 present and 8
+   absent answers at 80% agreement or better on each, agrees on 80% of the seeded present
+   ones, and, if you found any natural present ones, on 80% of those too. Not-sure answers
+   are never counted. Change the judge model and the calibration no longer applies.
+5. `report.py <run> --calibration calibration.json` (also on `--band` and `--compare`)
+   adds `judge_<rule>` for the owned rules (share of drafts with the failure; a rise is
+   `worse`) and `separation_correct` (a fall is `worse`: the styles got harder to tell
+   apart). Unparsed or errored verdicts are never counted.
+
 ## What the harness does as a writer would
 
 - **Inputs.** It fills in only the scene, and sends every other input the prompt declares as
@@ -125,5 +165,10 @@ or `error` in its meta and counted in the report, never retried unless `--retrie
 | `run.py` | Draft scene and Continue, per case, model, brief and draft. |
 | `checks.py` | Pure script checks (`phrases.yaml` holds the common phrase list, empty until annotated). |
 | `report.py` | Per-cell means, the noise band, the comparison. |
+| `judge.py` | The model judge: six rule checks and the separation test. |
+| `calibration.py` | The writer's worksheet and the tally that says which rules the judge owns. |
+| `calibration_seed.py` | Rewrites passages to contain one planted failure each (the seeder model). |
+| `calibration_serve.py` | Local server for the reading page; saves answers to `answers.yaml`. |
+| `calibration_page.html` | The reading page (offline, no dependencies). |
 | `parity.py` | The mirror-versus-hand-run guard. |
 | `lwa_client.py` | The HTTP client and backend discovery. |

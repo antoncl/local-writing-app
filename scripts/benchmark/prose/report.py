@@ -14,6 +14,9 @@ prompt) group, never one blended score (measuring-prose-quality.md §4, §8).
       NEW beside the baseline (the mean of the two A/A runs) and the band, one
       table per metric. A difference is flagged only when it exceeds the band.
 
+Each form takes --calibration calibration.json (H2): the judge's results are then added, but
+only for the rules the calibration gives the judge's model. Without it the output is unchanged.
+
 A draft whose step failed (status out_of_reach or error) is counted, not scored.
 """
 
@@ -27,7 +30,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibration import owned_rules  # noqa: E402
 from checks import TARGET_WORDS, analyze, iter_drafts, load_phrases, load_samples  # noqa: E402
+from judge import RULES, judge_path  # noqa: E402
 
 PHRASES_PATH = Path(__file__).resolve().parent / "phrases.yaml"
 BOOK_PATH = Path(__file__).resolve().parent / "fixture" / "book.yaml"
@@ -48,6 +53,11 @@ LOWER_IS_BETTER = frozenset({
     "emotion_words", "phrase_hits", "has_markdown", "starts_with_preamble", "sample_overlap",
 })
 NO_DIRECTION = frozenset({"words", "target_ratio", "said_share", "sentence_mean", "sentence_sd"})
+# Judge metrics exist only with a calibration file, and only for the rules it gives the judge
+# (H2). A rule failure is a failure in any style, so a rise is worse; separation accuracy
+# falling means a style's drafts have become harder to tell apart.
+JUDGE_METRICS = (*(f"judge_{rule}" for rule in RULES), "separation_correct")
+HIGHER_IS_BETTER = frozenset({"separation_correct"})
 REFUSED_BAND_KEYS = ("prompts", "book_yaml_sha256", "models", "git_head")
 
 
@@ -64,31 +74,59 @@ def group_key(item: dict[str, Any]) -> str:
     return "|".join(str(item[k]) for k in ("case", "model", "prompt"))
 
 
+def metric_names(*summaries: dict[str, Any]) -> tuple[str, ...]:
+    """The script metrics, then any judge metrics that appear in these summaries."""
+    found = {m for s in summaries for c in s["cells"].values() for m in c["metrics"]}
+    return (*METRICS, *(m for m in JUDGE_METRICS if m in found))
+
+
 def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Counts and per-metric means over one cell's (or group's) drafts."""
     scored = [i["metrics"] for i in items if i["status"] == "ok"]
+    names = (*METRICS, *(m for m in JUDGE_METRICS if any(m in s for s in scored)))
     return {
         "drafts": len(items),
         "ok": len(scored),
         "out_of_reach": sum(1 for i in items if i["status"] == "out_of_reach"),
         "errors": sum(1 for i in items if i["status"] == "error"),
-        "metrics": {m: mean_or_none([s.get(m) for s in scored]) for m in METRICS},
+        "metrics": {m: mean_or_none([s.get(m) for s in scored]) for m in names},
     }
 
 
-def scored_drafts(run_dir: Path) -> list[dict[str, Any]]:
+def judge_metrics(run_dir: Path, item: dict[str, Any], calibration: dict[str, Any]) -> dict[str, float]:
+    """Judge metrics for one draft: 1.0 yes / 0.0 no for the rules the calibration gives the judge's
+    model, plus separation if it ran. An unparsed or errored verdict is left out, never counted."""
+    path = judge_path(item, run_dir)
+    if not path.is_file():
+        return {}
+    record = json.loads(path.read_text(encoding="utf-8"))
+    owned = owned_rules(calibration, record.get("judge_model", ""))
+    out = {
+        f"judge_{rule}": 1.0 if verdict["answer"] == "yes" else 0.0
+        for rule, verdict in record.get("rules", {}).items()
+        if rule in owned and verdict.get("answer") in ("yes", "no")
+    }
+    correct = record.get("separation", {}).get("correct")
+    if correct is not None:
+        out["separation_correct"] = 1.0 if correct else 0.0
+    return out
+
+
+def scored_drafts(run_dir: Path, calibration: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     phrases = load_phrases(PHRASES_PATH)
     samples = load_samples(BOOK_PATH)
     drafts = []
     for item in iter_drafts(run_dir):
         status = item["meta"].get("status", "ok")
         metrics = analyze(item["text"], TARGET_WORDS.get(item["prompt"], 0), phrases, samples) if status == "ok" else {}
+        if status == "ok" and calibration is not None:
+            metrics = {**metrics, **judge_metrics(run_dir, item, calibration)}
         drafts.append({**{k: item[k] for k in ("case", "model", "prompt", "brief", "n")}, "status": status, "metrics": metrics})
     return drafts
 
 
-def summarize_run(run_dir: Path) -> dict[str, Any]:
-    drafts = scored_drafts(run_dir)
+def summarize_run(run_dir: Path, calibration: dict[str, Any] | None = None) -> dict[str, Any]:
+    drafts = scored_drafts(run_dir, calibration)
     cells: dict[str, list[dict[str, Any]]] = {}
     groups: dict[str, list[dict[str, Any]]] = {}
     for d in drafts:
@@ -109,20 +147,21 @@ def render_report(summary: dict[str, Any]) -> str:
     groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     for key, cell in summary["cells"].items():
         groups.setdefault("|".join(key.split("|")[:3]), []).append((key.split("|")[3], cell))
+    names = metric_names(summary)
     for gkey, rows in groups.items():
-        lines += [f"## {gkey.replace('|', ' / ')}", "", "| brief | ok/drafts | out of reach | " + " | ".join(METRICS) + " |"]
-        lines.append("|" + "---|" * (len(METRICS) + 3))
+        lines += [f"## {gkey.replace('|', ' / ')}", "", "| brief | ok/drafts | out of reach | " + " | ".join(names) + " |"]
+        lines.append("|" + "---|" * (len(names) + 3))
         for brief, cell in rows:
-            vals = " | ".join(_fmt(cell["metrics"][m]) for m in METRICS)
+            vals = " | ".join(_fmt(cell["metrics"].get(m)) for m in names)
             lines.append(f"| {brief} | {cell['ok']}/{cell['drafts']} | {cell['out_of_reach']} | {vals} |")
         g = summary["groups"][gkey]
-        vals = " | ".join(_fmt(g["metrics"][m]) for m in METRICS)
+        vals = " | ".join(_fmt(g["metrics"].get(m)) for m in names)
         lines += [f"| **all briefs** | {g['ok']}/{g['drafts']} | {g['out_of_reach']} | {vals} |", ""]
     return "\n".join(lines)
 
 
-def write_report(run_dir: Path) -> None:
-    summary = summarize_run(run_dir)
+def write_report(run_dir: Path, calibration: dict[str, Any] | None = None) -> None:
+    summary = summarize_run(run_dir, calibration)
     (run_dir / "checks.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (run_dir / "report.md").write_text(render_report(summary), encoding="utf-8")
     print(f"wrote {run_dir / 'checks.json'} and {run_dir / 'report.md'}")
@@ -146,6 +185,22 @@ def ensure_comparable(run_a: Path, run_b: Path) -> None:
         )
 
 
+def judge_models(run_dir: Path) -> set[str]:
+    """The judge model ids recorded under a run (empty when it was never judged)."""
+    models = set()
+    for path in run_dir.glob("*/*/*/*/judge_*.json"):
+        models.add(json.loads(path.read_text(encoding="utf-8")).get("judge_model", ""))
+    return models
+
+
+def ensure_same_judges(*runs: Path) -> None:
+    """Refuse judge metrics compared across runs judged by different models: the band and the
+    flags would measure the judge change, not the prose."""
+    found = {r.name: sorted(judge_models(r)) for r in runs}
+    if len({tuple(v) for v in found.values()}) > 1:
+        raise SystemExit(f"Refusing judge metrics: the runs were judged by different models: {found}")
+
+
 def band_between(summary_a: dict[str, Any], summary_b: dict[str, Any], level: str) -> dict[str, dict[str, float | None]]:
     out: dict[str, dict[str, float | None]] = {}
     for key in sorted(set(summary_a[level]) | set(summary_b[level])):
@@ -153,14 +208,16 @@ def band_between(summary_a: dict[str, Any], summary_b: dict[str, Any], level: st
         mb = summary_b[level].get(key, {}).get("metrics", {})
         out[key] = {
             m: (round(abs(ma[m] - mb[m]), 4) if ma.get(m) is not None and mb.get(m) is not None else None)
-            for m in METRICS
+            for m in metric_names(summary_a, summary_b)
         }
     return out
 
 
-def make_band(run_a: Path, run_b: Path) -> dict[str, Any]:
+def make_band(run_a: Path, run_b: Path, calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     ensure_comparable(run_a, run_b)
-    sa, sb = summarize_run(run_a), summarize_run(run_b)
+    if calibration is not None:
+        ensure_same_judges(run_a, run_b)
+    sa, sb = summarize_run(run_a, calibration), summarize_run(run_b, calibration)
     return {
         "runs": [run_a.name, run_b.name],
         "cells": band_between(sa, sb, "cells"),
@@ -177,7 +234,9 @@ def flag_for(metric: str, baseline: float | None, new: float | None, band: float
         return "unmeasured" if new != baseline else ""
     if abs(new - baseline) <= band:
         return ""
-    if metric not in LOWER_IS_BETTER:
+    if metric in HIGHER_IS_BETTER:
+        return "worse" if new < baseline else "better"
+    if metric not in LOWER_IS_BETTER and not metric.startswith("judge_"):
         return "changed"
     return "worse" if new > baseline else "better"
 
@@ -200,7 +259,7 @@ def render_compare(new: dict[str, Any], sa: dict[str, Any], sb: dict[str, Any], 
              "Baseline is the mean of the two A/A runs; the band is their absolute difference. "
              "A flag appears only when the new mean is further from the baseline than the band.", ""]
     keys = sorted(set(new["cells"]) | set(sa["cells"]) | set(sb["cells"]))
-    for metric in METRICS:
+    for metric in metric_names(new, sa, sb):
         lines += [f"## {metric}", "", "| cell | baseline | new | band | flag | out of reach (base A/B, new) |", "|---|---|---|---|---|---|"]
         for key in keys:
             base = mean_or_none([sa["cells"].get(key, {}).get("metrics", {}).get(metric),
@@ -213,9 +272,12 @@ def render_compare(new: dict[str, Any], sa: dict[str, Any], sb: dict[str, Any], 
     return "\n".join(lines)
 
 
-def compare(new_dir: Path, run_a: Path, run_b: Path) -> str:
-    band = make_band(run_a, run_b)
-    return render_compare(summarize_run(new_dir), summarize_run(run_a), summarize_run(run_b), band)
+def compare(new_dir: Path, run_a: Path, run_b: Path, calibration: dict[str, Any] | None = None) -> str:
+    if calibration is not None:
+        ensure_same_judges(new_dir, run_a, run_b)
+    band = make_band(run_a, run_b, calibration)
+    runs = (summarize_run(r, calibration) for r in (new_dir, run_a, run_b))
+    return render_compare(*runs, band)
 
 
 def main() -> None:
@@ -225,20 +287,22 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="where --band writes its JSON")
     parser.add_argument("--compare", type=Path, metavar="NEW")
     parser.add_argument("--baseline", nargs=2, type=Path, metavar=("RUN_A", "RUN_B"))
+    parser.add_argument("--calibration", type=Path, help="calibration.json: add the judge metrics for the rules it owns")
     args = parser.parse_args()
+    calibration = json.loads(args.calibration.read_text(encoding="utf-8")) if args.calibration else None
     if args.band:
         if not args.out:
             parser.error("--band needs --out")
-        args.out.write_text(json.dumps(make_band(*args.band), indent=2), encoding="utf-8")
+        args.out.write_text(json.dumps(make_band(*args.band, calibration), indent=2), encoding="utf-8")
         print(f"wrote {args.out}")
     elif args.compare:
         if not args.baseline:
             parser.error("--compare needs --baseline RUN_A RUN_B")
-        text = compare(args.compare, *args.baseline)
+        text = compare(args.compare, *args.baseline, calibration)
         (args.compare / "compare.md").write_text(text, encoding="utf-8")
         print(text)
     elif args.run_dir:
-        write_report(args.run_dir)
+        write_report(args.run_dir, calibration)
     else:
         parser.error("give RUN_DIR, --band, or --compare")
 

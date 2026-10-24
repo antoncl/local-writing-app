@@ -116,25 +116,31 @@ def _pairs(present_yes: int, present_n: int, absent_no: int, absent_n: int):
     )
 
 
+def _owned(pairs):
+    """Ownership with every pair counted as both pooled and seeded, and no natural cases."""
+    stats = calibration.rule_agreement(pairs)
+    return calibration.owns_rule(stats, stats, calibration.rule_agreement([]))
+
+
 def test_rule_agreement_owned_at_exactly_the_thresholds():
     result = calibration.rule_agreement(_pairs(8, 10, 8, 10))
     assert (result["present_n"], result["absent_n"]) == (10, 10)
     assert result["present_agree"] == 0.8 and result["absent_agree"] == 0.8
-    assert result["owned"] is True
+    assert _owned(_pairs(8, 10, 8, 10)) is True
 
 
 def test_rule_agreement_just_under_agreement_is_not_owned():
-    assert calibration.rule_agreement(_pairs(7, 9, 10, 10))["owned"] is False
+    assert _owned(_pairs(7, 9, 10, 10)) is False
 
 
 def test_rule_agreement_seven_present_is_not_owned():
-    assert calibration.rule_agreement(_pairs(7, 7, 10, 10))["owned"] is False
+    assert _owned(_pairs(7, 7, 10, 10)) is False
 
 
 def test_judge_that_always_says_no_fails_on_present():
     result = calibration.rule_agreement([("yes", "no")] * 8 + [("no", "no")] * 8)
     assert result["present_agree"] == 0.0 and result["absent_agree"] == 1.0
-    assert result["owned"] is False
+    assert _owned([("yes", "no")] * 8 + [("no", "no")] * 8) is False
 
 
 def test_unparsed_error_and_missing_count_as_disagreement():

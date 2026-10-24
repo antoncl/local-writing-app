@@ -1,20 +1,17 @@
 """Calibration of the model judge against the writer (#2615, measuring-prose-quality.md §7 steps 3-4).
 
-  calibration.py sheet RUN_DIR --out DIR [--drafts 24] [--seed 2615]
+  calibration.py sheet RUN_DIR [--seeded SEEDED_RUN] --out DIR [--drafts 24] [--seed 2615]
       A worksheet of drafts x rules for the writer: DIR/sheet.md to read and
-      DIR/answers.yaml to fill with yes/no. It never shows the judge's verdicts.
+      DIR/answers.yaml to fill (calibration_serve.py fills it from a page). Natural
+      drafts are a stratified sample of RUN_DIR; seeded ones are every ok draft of
+      SEEDED_RUN (calibration_seed.py). They are shuffled into one list, and nothing
+      the writer sees tells them apart or shows the judge's verdicts.
   calibration.py tally DIR/answers.yaml --out calibration.json
       Scores the judge's recorded verdicts (judge_<n>.json) against the answers,
-      per judge model and rule, and says which rules the judge owns.
+      per judge model and rule, and says which rules the judge owns (`owns_rule`).
 
-A rule is the judge's only with at least 8 failure-present and 8 failure-absent
-answers and 80% agreement on each. The result is keyed to the judge's model id: a
-different model owns nothing until it is calibrated.
-
-A seeded item is a draft rewritten to contain exactly one failure (a third model,
-confirmed by the writer); the sheet marks it `seeded: true` and its address must
-point at a draft with a judge file. Seeded answers count toward the thresholds and
-are also reported on their own.
+The result is keyed to the judge's model id: a different model owns nothing until
+it is calibrated. Every item records the run its judge files live in.
 """
 
 from __future__ import annotations
@@ -66,23 +63,36 @@ def render_sheet(items: list[dict[str, Any]], book: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def make_sheet(run_dir: Path, out: Path, count: int, seed: int) -> None:
+def interleave(natural: list[dict[str, Any]], seeded: list[dict[str, Any]], seed: int) -> list[dict[str, Any]]:
+    """Natural and seeded items shuffled together with `seed`, numbered `d01`, `d02`, ... after the shuffle."""
+    items = [*natural, *seeded]
+    random.Random(seed).shuffle(items)
+    return [{**it, "id": f"d{i:02d}"} for i, it in enumerate(items, start=1)]
+
+
+def sheet_item(item: dict[str, Any]) -> dict[str, Any]:
+    """The answers.yaml record for one drafted item; `run` is absolute so the tally and the page find
+    the drafts and judge files from any working directory."""
+    record = {k: item[k] for k in ("id", "case", "model", "prompt", "brief", "n", "run", "seeded")}
+    if item["seeded"]:
+        record["seeded_rule"] = item["seeded_rule"]
+    return {**record, "answers": dict.fromkeys(RULES), "note": ""}
+
+
+def make_sheet(run_dir: Path, seeded_dir: Path | None, out: Path, count: int, seed: int) -> None:
     drafts = [d for d in iter_drafts(run_dir) if d["meta"].get("status", "ok") == "ok"]
-    picked = sample_drafts(drafts, count, seed)
-    items = [{**d, "id": f"d{i:02d}"} for i, d in enumerate(picked, start=1)]
-    answers = {
-        # Absolute, so the tally finds the judge files from any working directory.
-        "run": str(run_dir.resolve()),
-        "items": [
-            {**{k: it[k] for k in ("id", "case", "model", "prompt", "brief", "n")},
-             "seeded": False, "answers": dict.fromkeys(RULES)}
-            for it in items
-        ],
-    }
+    natural = [{**d, "run": str(run_dir.resolve()), "seeded": False} for d in sample_drafts(drafts, count, seed)]
+    seeded = [
+        {**d, "run": str(seeded_dir.resolve()), "seeded": True, "seeded_rule": d["meta"]["seeded_rule"]}
+        for d in (iter_drafts(seeded_dir) if seeded_dir else [])
+        if d["meta"].get("status", "ok") == "ok"
+    ]
+    items = interleave(natural, seeded, seed)
+    answers = {"run": str(run_dir.resolve()), "items": [sheet_item(it) for it in items]}
     out.mkdir(parents=True, exist_ok=True)
     (out / "sheet.md").write_text(render_sheet(items, load_book()), encoding="utf-8")
     (out / "answers.yaml").write_text(yaml.safe_dump(answers, sort_keys=False), encoding="utf-8")
-    print(f"wrote {out / 'sheet.md'} and {out / 'answers.yaml'} ({len(items)} drafts)")
+    print(f"wrote {out / 'sheet.md'} and {out / 'answers.yaml'} ({len(natural)} natural + {len(seeded)} seeded)")
 
 
 def rule_agreement(pairs: list[tuple[str, str]]) -> dict[str, Any]:
@@ -92,15 +102,31 @@ def rule_agreement(pairs: list[tuple[str, str]]) -> dict[str, Any]:
     absent = [j for w, j in pairs if w == "no"]
     present_agree = round(present.count("yes") / len(present), 4) if present else None
     absent_agree = round(absent.count("no") / len(absent), 4) if absent else None
-    owned = (
-        len(present) >= MIN_CASES and len(absent) >= MIN_CASES
-        and present_agree is not None and present_agree >= MIN_AGREEMENT
-        and absent_agree is not None and absent_agree >= MIN_AGREEMENT
-    )
     return {
         "present_n": len(present), "absent_n": len(absent),
-        "present_agree": present_agree, "absent_agree": absent_agree, "owned": owned,
+        "present_agree": present_agree, "absent_agree": absent_agree,
     }
+
+
+def _agrees(stats: dict[str, Any], key: str) -> bool:
+    return stats[key] is not None and stats[key] >= MIN_AGREEMENT
+
+
+def owns_rule(pooled: dict[str, Any], seeded: dict[str, Any], natural: dict[str, Any]) -> bool:
+    """Whether the judge owns a rule, from `rule_agreement` of all, seeded and natural items.
+
+    - Pooled: at least MIN_CASES present and absent each, and MIN_AGREEMENT on each, so neither
+      "always yes" nor "always no" passes and the sample is big enough to mean something.
+    - Seeded present (at least one, agreeing): the judge must catch a failure planted on purpose.
+    - Natural present (if the writer found any, agreeing): the judge must not miss real failures
+      the writer found, even when it catches planted ones; then the rule stays with the writer.
+    """
+    return (
+        pooled["present_n"] >= MIN_CASES and pooled["absent_n"] >= MIN_CASES
+        and _agrees(pooled, "present_agree") and _agrees(pooled, "absent_agree")
+        and seeded["present_n"] >= 1 and _agrees(seeded, "present_agree")
+        and (natural["present_n"] == 0 or _agrees(natural, "present_agree"))
+    )
 
 
 def judge_answer(run_dir: Path, item: dict[str, Any], rule: str) -> tuple[str, str]:
@@ -112,21 +138,22 @@ def judge_answer(run_dir: Path, item: dict[str, Any], rule: str) -> tuple[str, s
     return record["judge_model"], record.get("rules", {}).get(rule, {}).get("answer", "missing")
 
 
-def tally_pairs(run_dir: Path, items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, list[tuple[str, str]]]]]:
-    """`{judge_model: {rule: {"all": pairs, "seeded": pairs}}}` over the answered items."""
+def tally_pairs(default_run: Path, items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, list[tuple[str, str]]]]]:
+    """`{judge_model: {rule: {"all", "seeded", "natural": pairs}}}` over the answered items; each
+    item's judge file is read from its own `run` (else `default_run`). Unsure or blank is skipped."""
     out: dict[str, dict[str, dict[str, list[tuple[str, str]]]]] = {}
     for item in items:
+        run_dir = Path(item.get("run") or default_run)
         for rule, writer in (item.get("answers") or {}).items():
             if str(writer).lower() not in ("yes", "no"):
                 continue
             model, answer = judge_answer(run_dir, item, rule)
             if not model:
                 continue
-            bucket = out.setdefault(model, {}).setdefault(rule, {"all": [], "seeded": []})
+            bucket = out.setdefault(model, {}).setdefault(rule, {"all": [], "seeded": [], "natural": []})
             pair = (str(writer).lower(), answer)
             bucket["all"].append(pair)
-            if item.get("seeded"):
-                bucket["seeded"].append(pair)
+            bucket["seeded" if item.get("seeded") else "natural"].append(pair)
     return out
 
 
@@ -142,10 +169,12 @@ def tally(answers_path: Path) -> dict[str, Any]:
     judges: dict[str, dict[str, Any]] = {}
     for model, rules in pairs_by_model.items():
         for rule, pairs in rules.items():
-            seeded = rule_agreement(pairs["seeded"])
+            pooled, seeded, natural = (rule_agreement(pairs[k]) for k in ("all", "seeded", "natural"))
             judges.setdefault(model, {})[rule] = {
-                **rule_agreement(pairs["all"]),
+                **pooled,
                 "seeded_present_n": seeded["present_n"], "seeded_present_agree": seeded["present_agree"],
+                "natural_present_n": natural["present_n"], "natural_present_agree": natural["present_agree"],
+                "owned": owns_rule(pooled, seeded, natural),
             }
     return {"judges": judges, "answers_sha256": hashlib.sha256(raw).hexdigest()}
 
@@ -159,12 +188,13 @@ def owned_rules(calibration: dict[str, Any], judge_model: str) -> set[str]:
 def render_table(calibration: dict[str, Any]) -> str:
     lines = []
     for model, rules in calibration["judges"].items():
-        lines += [f"{model}", f"  {'rule':28} present  absent  owned"]
+        lines += [f"{model}", f"  {'rule':28} present  absent  seeded present  natural present  owned"]
         for rule, s in rules.items():
             lines.append(
                 f"  {rule:28} {s['present_n']:>2} {s['present_agree']!s:>6}  {s['absent_n']:>2} {s['absent_agree']!s:>6}"
+                f"  {s['seeded_present_n']:>2} {s['seeded_present_agree']!s:>6}"
+                f"  {s['natural_present_n']:>2} {s['natural_present_agree']!s:>6}"
                 f"  {'OWNED' if s['owned'] else '-'}"
-                + (f"  (seeded present {s['seeded_present_n']}: {s['seeded_present_agree']})" if s["seeded_present_n"] else "")
             )
     return "\n".join(lines)
 
@@ -174,6 +204,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sheet = sub.add_parser("sheet", help="write the worksheet for the writer")
     sheet.add_argument("run_dir", type=Path)
+    sheet.add_argument("--seeded", type=Path, help="a calibration_seed.py run whose ok drafts join the sheet")
     sheet.add_argument("--out", type=Path, required=True)
     sheet.add_argument("--drafts", type=int, default=24)
     sheet.add_argument("--seed", type=int, default=2615)
@@ -182,7 +213,7 @@ def main() -> None:
     score.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "sheet":
-        make_sheet(args.run_dir, args.out, args.drafts, args.seed)
+        make_sheet(args.run_dir, args.seeded, args.out, args.drafts, args.seed)
         return
     calibration = tally(args.answers)
     args.out.write_text(json.dumps(calibration, indent=2), encoding="utf-8")

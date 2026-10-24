@@ -10,7 +10,7 @@ Against the discovered dev backend (never :8787):
   2. Per case project (the briefs' and the Continue lead-ins'): `PATCH /api/project/settings {"ai_policy": ...}`
      (routers/project.py::update_project_settings) - `cloud-allowed` if any
      non-ollama model is listed, else `local-only`.
-  3. Per project and model (the `judges:` too, unless `--no-judges`): an assistant, `POST /api/assistants` then
+  3. Per project and model (the `judges:` and the `seeder:` too, unless `--no-judges`): an assistant, `POST /api/assistants` then
      `PUT /api/assistants/{id}` (routers/entries.py ~L105-130) with the
      `ai_provider / ai_model / ai_max_tokens / ai_temperature / ai_thinking`
      metadata keys (services/ai/call_resolver.py reads exactly these). It is read
@@ -65,6 +65,12 @@ def load_judges(path: Path | None = None) -> dict[str, dict[str, Any]]:
     if unknown:
         raise SystemExit(f"{chosen}: judges may only be 'primary' and 'second', not {', '.join(sorted(unknown))}.")
     return judges
+
+
+def load_seeder(path: Path | None = None) -> dict[str, Any] | None:
+    """The optional top-level `seeder:` entry (a `models:` entry shape) from the same file; None when absent."""
+    chosen = _models_file(path)
+    return (yaml.safe_load(chosen.read_text(encoding="utf-8")) or {}).get("seeder") or None
 
 
 def select_models(models: list[dict[str, Any]], names: list[str] | None) -> list[dict[str, Any]]:
@@ -161,14 +167,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--cases", nargs="+", choices=CASES, default=list(CASES))
     parser.add_argument("--models", nargs="+", help="drafting model names from models.yaml (default: all)")
-    parser.add_argument("--no-judges", action="store_true", help="skip the judges' assistants")
+    parser.add_argument("--no-judges", action="store_true", help="skip the judges' and the seeder's assistants")
     args = parser.parse_args()
     base_url = discover_backend()
     judges = [] if args.no_judges else list(load_judges().values())
-    models = select_models(load_models(), args.models) + judges
+    seeder = None if args.no_judges else load_seeder()
+    models = select_models(load_models(), args.models) + judges + ([seeder] if seeder else [])
     names = [m["name"] for m in models]
     if len(names) != len(set(names)):
-        raise SystemExit(f"Model and judge names must be distinct: {', '.join(sorted(names))}")
+        raise SystemExit(f"Model, judge and seeder names must be distinct: {', '.join(sorted(names))}")
     keys = provider_keys(models)
     if keys:
         # The machine-settings route is unscoped; the key is sent, never echoed.

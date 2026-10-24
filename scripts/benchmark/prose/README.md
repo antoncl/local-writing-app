@@ -107,13 +107,22 @@ is better.
    never resumed. `--workers` (default 4) judges that many drafts at once. It writes
    `judge_<n>.json` beside each draft and `judge.json` in the run (the judges' model ids
    and cost). A band or compare with `--calibration` refuses runs judged by different models.
-3. Calibrate: `calibration.py sheet <run> --out <dir>` draws a sample and writes `sheet.md`
-   and `answers.yaml`. Read the drafts and answer each rule yes (the failure is there) or
-   no. Each rule needs at least 8 of each once answered; where a rule comes up short, add
-   drafts rewritten to contain just that failure and mark them `seeded: true`.
+3. Calibrate, in order:
+   1. Name a third model under `seeder:` in `models.yaml` (neither a judge nor a drafter;
+      the example file shows one) and rerun `setup_backend.py`.
+   2. `calibration_seed.py <run> --out <seeded>` has it rewrite 8 Continue passages per rule
+      (`--per-rule`) to contain exactly that one failure, as a run of its own.
+   3. `judge.py <seeded>` judges them like any run.
+   4. `calibration.py sheet <run> --seeded <seeded> --out <dir>` shuffles a sample of the
+      natural drafts and every seeded passage into one list (`answers.yaml`, `sheet.md`).
+   5. `calibration_serve.py <dir>` opens the reading page: answer each rule yes, no or not
+      sure. Answers save as you go, so you can stop and resume. The page never shows the
+      judge's answers or which passages are seeded.
 4. `calibration.py tally <dir>/answers.yaml --out calibration.json` prints each rule's
-   agreement per judge model. The judge owns a rule at 80% or better on the present cases
-   *and* the absent ones. Change the judge model and the calibration no longer applies.
+   agreement per judge model. The judge owns a rule only if it has at least 8 present and 8
+   absent answers at 80% agreement or better on each, agrees on 80% of the seeded present
+   ones, and, if you found any natural present ones, on 80% of those too. Not-sure answers
+   are never counted. Change the judge model and the calibration no longer applies.
 5. `report.py <run> --calibration calibration.json` (also on `--band` and `--compare`)
    adds `judge_<rule>` for the owned rules (share of drafts with the failure; a rise is
    `worse`) and `separation_correct` (a fall is `worse`: the styles got harder to tell
@@ -155,5 +164,8 @@ is better.
 | `report.py` | Per-cell means, the noise band, the comparison. |
 | `judge.py` | The model judge: six rule checks and the separation test. |
 | `calibration.py` | The writer's worksheet and the tally that says which rules the judge owns. |
+| `calibration_seed.py` | Rewrites passages to contain one planted failure each (the seeder model). |
+| `calibration_serve.py` | Local server for the reading page; saves answers to `answers.yaml`. |
+| `calibration_page.html` | The reading page (offline, no dependencies). |
 | `parity.py` | The mirror-versus-hand-run guard. |
 | `lwa_client.py` | The HTTP client and backend discovery. |

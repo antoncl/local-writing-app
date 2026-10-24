@@ -55,3 +55,15 @@ models:
 #     model: deepseek/deepseek-v4-flash
 #     max_tokens: 1024
 #     temperature: 0
+
+# The seeder (calibration_seed.py). Optional; the shape of a `models:` entry without
+# `primary`. It rewrites passages to contain exactly one planted failure, so the judge can be
+# calibrated on every rule. It is neither the judge nor a drafter: calibration_seed.py refuses
+# a seeder whose model is either. setup_backend.py gives it an assistant like the judges'
+# (skip with --no-judges).
+# seeder:
+#   name: seeder
+#   provider: openrouter
+#   model: deepseek/deepseek-v4-pro
+#   max_tokens: 2048
+#   temperature: 0.7

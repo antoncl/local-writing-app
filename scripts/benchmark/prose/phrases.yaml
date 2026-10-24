@@ -1,0 +1,6 @@
+# Stock phrases the script checks count as hits (checks.py `phrase_hits`).
+#
+# Shipped EMPTY on purpose: the common list comes from the writer annotating the
+# baseline drafts (docs/design/measuring-prose-quality.md §5), not from guessing.
+# Each entry is a plain phrase matched case-insensitively against the whole draft.
+common: []

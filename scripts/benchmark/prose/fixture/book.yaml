@@ -1,0 +1,271 @@
+# The built-in test set's invented book (docs/design/measuring-prose-quality.md §3).
+#
+# Frozen: a run changes prompts or notes, never this file. Editing it starts a
+# new baseline. Every style case is generated as its own project from this one
+# file, so the cast, the briefs and the narration are identical across styles
+# and only the style note differs.
+
+project:
+  title: The Tidewater Ledger
+  # One narration setting for every style case, so telling the styles apart
+  # measures the note and not POV or tense.
+  pov_mode: third_close
+  tense: past
+
+# Each voice sample avoids every mechanic the style notes disagree on (dashes,
+# numbers, italics, tags): a voice shifts the style, never the mechanics
+# (ADR-0101 decision 1), so a sample must not take sides.
+characters:
+  - key: ines
+    title: Ines Calder
+    body: |
+      Bookkeeper at the Harrow saltworks for nineteen years. Forty-four, unmarried, lives above the
+      works office. Raised her half-brother Tomas after their mother died.
+
+      ## Narrating voice
+      - Notices first what things cost, what they weigh, and who is owed. Weather only when it
+        spoils salt.
+      - Never notices how she looks or how she is seen.
+      - Compares things to accounts: a face is "in arrears", a silence "doesn't balance".
+      - Interiority is sparse and corrective: a thought surfaces as a figure, then a correction of
+        the figure. She doesn't name her own feelings; she notices her hands.
+      - The body registers as cold fingers, a tight jaw, and counting under her breath.
+
+      ## Speaking voice
+      - Short and exact. Answers a question with a question when cornered.
+      - Never says "I think" or "I feel".
+      - What she leaves unsaid: that she is afraid for Tomas.
+
+      ## Sample
+      The column was short. She added it again from the bottom, the way her father had taught her,
+      because a mistake made going down is rarely made coming up. Still short, and by the same
+      sum. The lamp needed trimming. She did not trim it. She turned back to the week of the high
+      tides, when the boats went out light, and found her own hand and her own figures, and
+      nothing wrong with any of them.
+
+  - key: tomas
+    title: Tomas Brede
+    aliases: [Tom]
+    body: |
+      Ines's half-brother, thirty-one. Runs a flat-bottomed salt boat between the works and the
+      excise quay. Owes money to men in the lower town. Charming, quick, and sure every trouble is
+      temporary.
+
+      ## Narrating voice
+      - Notices faces first (what someone wants from him), then exits, then the water.
+      - Compares things to tides and weather: a mood "on the turn", a debt "coming in".
+      - Interiority is quick and self-justifying; a doubt is answered before it finishes.
+      - The body registers as restlessness: he is always about to move.
+
+      ## Speaking voice
+      - Long, joking, deflecting. Calls his sister "Nessa" and everyone else by a nickname.
+      - Talks around anything that costs him: a debt is "a bit of bother", a loan "a favour
+        between friends".
+      - What he leaves unsaid: that he is in real danger.
+
+      ## Sample
+      The fog came off the flats like a held breath let go, and Tomas let the boat drift into it
+      because a man the cutter cannot see is a man the cutter cannot fine. He could hear the oars
+      before he saw the light. More than one man, and one of them rowing like he had been told to
+      hurry and resented it. Fine. Resentful men look at their own hands.
+
+  - key: vey
+    title: Margery Vey
+    aliases: [Mrs Vey]
+    body: |
+      Owner of the Harrow saltworks, sixty-eight, widowed. Never raises her voice and never names
+      money directly. Not a viewpoint character.
+
+      ## Speaking voice
+      - Formal, complete sentences; never a contraction.
+      - Threatens by courtesy: "I would hate for this to become a matter for the excise."
+      - Names nothing outright: the shortfall is "the matter", Tomas's debt "your brother's
+        arrangement".
+
+style_notes:
+  # Four contrasting styles in ADR-0101's shape (Mechanics, Manner). None sets
+  # POV or tense: those stay in the narration fields (ADR-0101 decision 8).
+  frank:
+    title: House style
+    body: |
+      ## Mechanics
+      - **Inner thought**: woven into the narration, unmarked; no italics, no "she thought". The
+        narration is already inside her head.
+      - **Dialogue tags**: "said" or an action beat; no adverbs on tags. The words carry the tone.
+      - **Em-dashes**: closed up, for a cut-off line in dialogue only; commas elsewhere.
+      - **Numbers**: spelled out below ten, numerals from 10. Money in numerals ("£11 4s").
+      - **Exposition**: only what the viewpoint character needs in the moment; nothing explained
+        for the reader's benefit.
+
+      ## Manner
+      - **Diction**: plain and direct. Name things by their names; no euphemism in the narration.
+      - **Figurative language**: rare, and only the viewpoint character's own comparisons.
+      - **Paragraphs**: short; a stimulus, then the response, in that order.
+
+      ## Never
+      - A sentence that tells the reader what a moment meant.
+      - Weather as mood.
+      - Two adjectives on one noun.
+
+  lush:
+    title: House style
+    body: |
+      ## Mechanics
+      - **Inner thought**: in italics, without a tag, so thought reads as its own voice.
+      - **Dialogue tags**: descriptive verbs welcome ("murmured", "conceded"), sparingly with
+        adverbs. The tag is part of the music.
+      - **Em-dashes**: spaced, freely used for asides and interruptions.
+      - **Numbers**: always spelled out, including money ("eleven pounds four").
+      - **Exposition**: generous; history and texture may ride along with any moment.
+
+      ## Manner
+      - **Diction**: rich and exact, with a taste for the uncommon word that is the right one.
+      - **Figurative language**: abundant: extended metaphor and simile drawn from the estuary,
+        salt, light and water.
+      - **Paragraphs**: long and cumulative, building through clauses; sentence length varies
+        widely.
+      - **The senses**: every scene grounds at least three, smell and texture especially.
+
+      ## Never
+      - A bare, unadorned scene opening.
+      - Contractions in the narration.
+      - Modern idiom ("okay", "deal with it").
+
+  hardboiled:
+    title: House style
+    body: |
+      ## Mechanics
+      - **Inner thought**: never shown directly; the reader infers it from what the character
+        does.
+      - **Dialogue tags**: "said" only, or none; most lines carry no tag at all.
+      - **Em-dashes**: none; use a full stop.
+      - **Numbers**: numerals always ("4 casks", "£11").
+      - **Fragments**: allowed and encouraged in the narration.
+      - **Exposition**: none. The reader catches up.
+
+      ## Manner
+      - **Diction**: clipped, concrete and hard: short words over long ones.
+      - **Figurative language**: rare, blunt and a little cynical when it comes.
+      - **Paragraphs**: one to three sentences; a lot of white space.
+      - **Tone**: dry; danger is stated flatly, never dramatised.
+
+      ## Never
+      - A sentence over twenty-five words.
+      - An adverb ending in -ly in the narration.
+      - A character explaining their feelings.
+
+  wry:
+    title: House style
+    body: |
+      ## Mechanics
+      - **Inner thought**: in free indirect style, often as an aside in parentheses, where the
+        humour lives.
+      - **Dialogue tags**: "said", with the occasional comic beat in place of a tag.
+      - **Em-dashes**: spaced, for comic timing and second thoughts.
+      - **Numbers**: spelled out below a hundred.
+      - **Exposition**: allowed when it's funny, never when it's merely informative.
+
+      ## Manner
+      - **Diction**: warm, a little formal, with understatement doing the comic work.
+      - **Figurative language**: comic comparisons that reveal character ("the ledger sat on the
+        desk with the air of a creditor").
+      - **Paragraphs**: medium length, often ending on a turn or deflation.
+      - **Tone**: affection for everyone, including the villain; danger is real but observed with
+        a raised eyebrow.
+
+      ## Never
+      - Cruelty played for laughs.
+      - A joke that stops the scene.
+      - A punchline that is explained.
+
+scenes:
+  - key: short_column
+    title: The short column
+    pov: ines
+    characters: [ines, tomas]
+    summary: |
+      Late at night in the works office, Ines finds the salt-tax column short by exactly the sum
+      Tomas owes in the lower town.
+      1. Ines re-adds the column and finds the shortfall, then traces it back three weeks.
+      2. She finds no error in her own entries, and realises the casks were removed after counting.
+      3. Tomas lets himself in, cheerful, smelling of the quay, to borrow lamp oil.
+      4. They talk about nothing; she watches his hands and his boots for salt.
+      5. She does not ask him. He leaves. She closes the ledger without correcting it.
+
+  - key: vey_tea
+    title: Mrs Vey's tea
+    pov: ines
+    characters: [ines, vey]
+    summary: |
+      Mrs Vey invites Ines to tea in the big house and, without once naming it, lets her know she
+      knows about the short column.
+      1. Small talk over tea; Mrs Vey praises nineteen years of perfect books.
+      2. Mrs Vey mentions that the excise inspector visits on Friday.
+      3. She speaks of "your brother's arrangement" with men in the lower town.
+      4. Ines tries twice to say something and stops.
+      5. Ines agrees to "set the matter right" by Friday. Neither woman says what that means.
+
+  - key: night_water
+    title: Night water
+    pov: tomas
+    characters: [tomas]
+    summary: |
+      Tomas takes the boat out at night to recover a cask of untaxed salt he hid on the flats,
+      before the excise cutter's dawn patrol.
+      1. He poles out into fog on the falling tide.
+      2. He finds the marker stake and hauls the cask aboard.
+      3. The cutter's lamp appears, closer than it should be; he hears oars.
+      4. He drifts into the fog and, when they nearly collide, rolls the cask overboard.
+      5. The cutter passes. He is alone, with nothing to show for the night and the debt unpaid.
+
+  - key: fair_copy
+    title: The fair copy
+    pov: ines
+    characters: [ines]
+    summary: |
+      Thursday night. Ines sits alone with the ledger, a fresh page and the means to make the
+      column balance with a forged entry.
+      1. She rules a fresh page and copies the honest entries in a fair hand.
+      2. She reaches the short week, and writes the first figure of the false entry.
+      3. She stops, and remembers teaching Tomas to count with salt crystals on this desk.
+      4. She scrapes the figure out.
+      5. She leaves the column short, and writes a note for the inspector in her own name.
+
+continue_cases:
+  # Lead-ins are deliberately plain: they set the voice the model continues
+  # in, so Continue results are reported separately and never counted in the
+  # style-separation test (measuring-prose-quality.md §4.2). They are built
+  # into a project of their own, so a lead-in never sees the briefs' later
+  # events in its story so far.
+  - key: quay_talk
+    scene: short_column
+    title: Quay talk
+    before: |
+      The quay was busy for a Tuesday. Two salt boats were tied up at the excise steps, and a man
+      in a grey coat was writing in a book while the boatmen waited.
+
+      Ines found Tomas sitting on an upturned cask near the end of the wall. He was eating an apple
+      and watching the man in the grey coat.
+
+      "You're early," he said.
+
+      "I'm on time. You said ten."
+
+      "Did I? Then I'm early too." He offered her the apple. She shook her head. "Nessa, sit down.
+      You look like you're about to audit the gulls."
+
+      She did not sit. "Where were you on Saturday night?"
+
+      He took another bite of the apple and chewed it for longer than he needed to.
+  - key: rain_haul
+    scene: night_water
+    title: Rain haul
+    before: |
+      The rain started when he was still a hundred yards from the slip. By the time the keel
+      touched the gravel it was coming down hard enough to flatten the water.
+
+      Tomas jumped out into the shallows and took the bow line. The boat was heavier than it should
+      have been, because of the water she had shipped crossing the bar. He leaned into the rope and
+      got her moving, a foot at a time, up the wet stones.
+
+      Halfway up, the line slipped in his hands.

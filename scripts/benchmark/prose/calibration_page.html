@@ -230,7 +230,7 @@ function renderQuestions() {
       b.textContent = LABELS[value];
       b.className = data.answers[item.rule] === value ? "on" : "";
       b.setAttribute("aria-pressed", String(data.answers[item.rule] === value));
-      b.addEventListener("click", () => { q = idx; choose(item.rule, value, false); });
+      b.addEventListener("click", () => { q = idx; choose(item.rule, value, false); b.blur(); });
       row.append(b);
     }
     div.append(p, row);
@@ -238,10 +238,15 @@ function renderQuestions() {
   });
 }
 
-function choose(rule, value, advance) {
+function choose(rule, value, fromKey) {
   // Clicking the chosen answer clears it; the keys always set it.
-  data.answers[rule] = advance ? value : (data.answers[rule] === value ? null : value);
-  if (advance && q < data.questions.length - 1) q++;
+  data.answers[rule] = fromKey ? value : (data.answers[rule] === value ? null : value);
+  // A click or a key that answers moves the current question on, so the next key never lands on
+  // the question just answered: to the next blank one below, else simply the next one.
+  if (data.answers[rule] !== null) {
+    const blank = data.questions.findIndex((x, i) => i > q && data.answers[x.rule] == null);
+    q = blank >= 0 ? blank : Math.min(q + 1, data.questions.length - 1);
+  }
   renderQuestions();
   queueSave();
 }

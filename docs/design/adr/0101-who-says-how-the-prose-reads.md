@@ -1,8 +1,8 @@
 # ADR-0101: Who says how the prose reads — the prompt, the author's style, or the voice
 
-**Status:** Proposed — 2026-10-24. Direction accepted by Anton Lauridsen 2026-10-24; this text was
-then revised against two cold implementing threads and awaits his approval. Text by Claude, from
-a conversation with Anton about a *Narration Conventions* note that "doesn't hit the mark".
+**Status:** Accepted — 2026-10-24, Anton Lauridsen, after revision against two cold implementing
+threads. Text by Claude, from a conversation with Anton about a *Narration Conventions* note that
+"doesn't hit the mark".
 Epic #2611.
 **Context verified against `1cd8761b` (2026-10-24).**
 

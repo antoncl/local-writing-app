@@ -156,7 +156,12 @@ def ask(client: Client, assistant_id: str, system: str, message: str, choices: t
         )
     except (ApiError, httpx.HTTPError) as exc:
         return {"answer": "error", "error": f"{type(exc).__name__}: {exc}"[:500]}
-    return {**parse_verdict(text, choices), "cost_usd": done.get("cost_usd")}
+    # Output tokens and truncation explain an unparsed verdict (a judge that reasons at length).
+    usage = done.get("usage") or {}
+    return {
+        **parse_verdict(text, choices), "cost_usd": done.get("cost_usd"),
+        "output_tokens": usage.get("output_tokens"), "truncated": bool(done.get("truncated")),
+    }
 
 
 def is_done(verdict: dict[str, Any] | None) -> bool:

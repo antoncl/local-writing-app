@@ -234,7 +234,9 @@ scenes:
 continue_cases:
   # Lead-ins are deliberately plain: they set the voice the model continues
   # in, so Continue results are reported separately and never counted in the
-  # style-separation test (measuring-prose-quality.md §4.2).
+  # style-separation test (measuring-prose-quality.md §4.2). They are built
+  # into a project of their own, so a lead-in never sees the briefs' later
+  # events in its story so far.
   - key: quay_talk
     scene: short_column
     title: Quay talk

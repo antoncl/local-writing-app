@@ -45,7 +45,6 @@ from fixture_gen import BOOK_YAML, CASES, book_sha256, load_fixture  # noqa: E40
 from lwa_client import REPO, ApiError, Client, discover_backend  # noqa: E402
 from setup_backend import load_models, select_models  # noqa: E402
 
-CONTINUE_TARGET_WORDS = 300
 PROMPT_TITLES = {"draft_scene": "Draft scene", "continue": "Continue"}
 # The app sends an empty composer only when the rendered prompt ends in a user
 # turn (ChatBodyView.svelte, endsInUserTurn); otherwise the writer must type a
@@ -185,7 +184,20 @@ def blank_input_value(input_type: str) -> Any:
     return None
 
 
-def preview_inputs(prompt: dict[str, Any], drafts: dict[str, str]) -> dict[str, Any]:
+def dialog_drafts(prompt: dict[str, Any]) -> dict[str, Any]:
+    """What the inputs dialog holds for a writer who changes nothing: each declared `default`
+    (PromptInvocationDialog.svelte::open seeds `String(default)`), a number coerced back as
+    promptInputs.ts::coerceInputValue does on submit. Inputs with no default stay blank."""
+    drafts: dict[str, Any] = {}
+    for declared in prompt.get("effective_inputs") or []:
+        default = declared.get("default")
+        if default is None:
+            continue
+        drafts[declared["name"]] = default if declared["type"] == "number" else str(default)
+    return drafts
+
+
+def preview_inputs(prompt: dict[str, Any], drafts: dict[str, Any]) -> dict[str, Any]:
     """promptResolution.ts::inputValuesFromDrafts for a writer who fills in only the scene:
     every declared input is sent, a blank optional one as its blank value. The harness
     leaves the rest blank so the template's own defaults apply, as they do in the app."""
@@ -205,7 +217,7 @@ def render_lock(project: Client, prompt: dict[str, Any], assistant_id: str, scen
     preview = project.post(
         "/api/ai/preview",
         {
-            "assistant_id": assistant_id or None,
+            "assistant_id": assistant_id,
             "template_source": prompt["body"],
             "target_scene_id": "",
             "subject": scene["id"],
@@ -224,7 +236,7 @@ def extract_draft(project: Client, scene_id: str, assistant_id: str, chat_id: st
         f"/api/ai/entry-patch/{scene_id}/extract",
         {
             "messages": [{"role": m["role"], "content": m["content"]} for m in history],
-            "assistant_id": assistant_id or None,
+            "assistant_id": assistant_id,
             "chat_id": chat_id,
             "follow_ups": True,
         },
@@ -260,7 +272,7 @@ def drive_draft_scene(project: Client, prompt: dict[str, Any], assistant_id: str
     text, done = project.stream_ndjson(
         "/api/ai/chat/stream",
         {
-            "assistant_id": assistant_id or None,
+            "assistant_id": assistant_id,
             "system_prompt": lock["system_prompt"],
             "messages": [{"role": m["role"], "content": m["content"]} for m in history],
             "chat_id": chat["id"],
@@ -289,11 +301,13 @@ def drive_continue(project: Client, prompt: dict[str, Any], assistant_id: str, c
             "template_source": prompt["body"],
             "target_scene_id": case["id"],
             "session_id": case["id"],
-            "inputs": {"length": CONTINUE_TARGET_WORDS, "note": ""},
+            # The inputs dialog opens for Continue (it has visible inputs) with the declared
+            # defaults seeded, and the writer presses Run: aiSuggestion.svelte.ts ~L505.
+            "inputs": preview_inputs(prompt, dialog_drafts(prompt)),
             "resolution_scene_id": "",
             "text_before": scene["body"],
             "text_after": "",
-            **({"assistant_id": assistant_id} if assistant_id else {}),
+            "assistant_id": assistant_id,
             "commit": False,
         },
     )
@@ -309,6 +323,8 @@ def run_cell(project: Client, kind: str, drive: Any, retries: int) -> tuple[str,
     """Run one draft; a failed step is recorded, never swallowed. Retries only when asked."""
     meta: dict[str, Any] = {}
     draft = ""
+    spent = 0.0
+    attempt_costs: list[float] = []
     for attempt in range(1, retries + 2):
         meta = {"attempts": attempt, "status": "ok"}
         started = time.monotonic()
@@ -321,8 +337,12 @@ def run_cell(project: Client, kind: str, drive: Any, retries: int) -> tuple[str,
         except (ApiError, httpx.HTTPError) as exc:
             meta.update(status="error", error=str(exc))
         meta["wall_s"] = round(time.monotonic() - started, 2)
+        attempt_costs.append(meta.get("cost_usd") or 0)
+        spent += attempt_costs[-1]
         if meta["status"] == "ok":
             break
+    meta["cost_usd"] = spent
+    meta["attempt_costs"] = attempt_costs
     if kind == "draft_scene" and meta.get("chat_id"):
         meta["chat_record"] = _fetch_chat(project, meta["chat_id"])
     return draft, meta
@@ -341,8 +361,7 @@ def write_draft(folder: Path, n: int, draft: str, meta: dict[str, Any]) -> None:
     (folder / f"meta_{n}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def find_prompts(project: Client) -> dict[str, dict[str, Any]]:
-    entries = project.get("/api/prompts")["entries"]
+def find_prompts(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {}
     for key, title in PROMPT_TITLES.items():
         match = next((e for e in entries if e["title"] == title), None)
@@ -352,10 +371,17 @@ def find_prompts(project: Client) -> dict[str, dict[str, Any]]:
     return found
 
 
-def prompt_record(prompts: dict[str, dict[str, Any]]) -> dict[str, dict[str, str]]:
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def prompt_record(prompts: dict[str, dict[str, Any]], entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """The two prompts used, plus a hash over EVERY prompt and snippet the library holds: a
+    snippet the prompts include (Prose generation settings, ...) changes the run too."""
+    library = sorted((e["title"], _sha(e["body"])) for e in entries)
     return {
-        k: {"id": p["id"], "sha256": hashlib.sha256(p["body"].encode("utf-8")).hexdigest()}
-        for k, p in prompts.items()
+        "prompts": {k: {"id": p["id"], "sha256": _sha(p["body"])} for k, p in prompts.items()},
+        "library_sha256": _sha(json.dumps(library, ensure_ascii=False)),
     }
 
 
@@ -365,20 +391,26 @@ def git_head() -> str:
 
 
 def run_model(
-    project: Client, fixture: dict[str, Any], model: dict[str, Any], prompts: dict[str, dict[str, Any]],
-    out: Path, args: argparse.Namespace,
+    projects: dict[str, Client], fixture: dict[str, Any], model: dict[str, Any],
+    prompts: dict[str, dict[str, Any]], out: Path, args: argparse.Namespace,
 ) -> float:
-    assistant_id = fixture.get("assistants", {}).get(model["name"])
-    if not assistant_id:
-        raise SystemExit(f"No assistant for {model['name']} in case {fixture['case']}: run setup_backend.py.")
+    """`projects` maps a prompt kind to the Client for the project that kind runs in: Draft
+    scene in the briefs' project, Continue in the lead-ins' own (fixture_gen._make_continues)."""
+    follow = fixture["continue"]
+    assistants = {"draft_scene": fixture.get("assistants", {}), "continue": follow.get("assistants", {})}
+    for kind, known in assistants.items():
+        if not known.get(model["name"]):
+            raise SystemExit(f"No assistant for {model['name']} in case {fixture['case']} ({kind}): run setup_backend.py.")
     base = out / fixture["case"] / model["name"]
     jobs: list[tuple[str, str, Any]] = []
     for key, scene in fixture["scenes"].items():
         jobs.append(("draft_scene", key, scene))
-    for key, case in fixture["continue_cases"].items():
+    for key, case in follow["cases"].items():
         jobs.append(("continue", key, case))
     total = 0.0
     for kind, key, item in jobs:
+        project = projects[kind]
+        assistant_id = assistants[kind][model["name"]]
         for n in range(1, args.drafts + 1):
             if kind == "draft_scene":
                 drive = partial(drive_draft_scene, project, prompts[kind], assistant_id, item, n)
@@ -413,17 +445,25 @@ def main() -> None:
     try:
         for case in args.cases:
             fixture = load_fixture(case)
+            if fixture.get("book_sha256") != book_sha256() or "continue" not in fixture:
+                raise SystemExit(
+                    f"Fixture {case!r} was not built from the current book.yaml: run fixture_gen.py --regen."
+                )
             project = Client(base_url, fixture["root"])
+            follow = Client(base_url, fixture["continue"]["root"])
             try:
-                prompts = find_prompts(project)
-                record = prompt_record(prompts)
+                entries = project.get("/api/prompts")["entries"]
+                prompts = find_prompts(entries)
+                record = prompt_record(prompts, entries)
                 if run["prompts"] not in (None, record):
                     raise SystemExit(f"Prompt text differs between case projects (at {case}).")
                 run["prompts"] = record
+                projects = {"draft_scene": project, "continue": follow}
                 for model in models:
-                    run["cost_usd_by_model"][model["name"]] += run_model(project, fixture, model, prompts, out, args)
+                    run["cost_usd_by_model"][model["name"]] += run_model(projects, fixture, model, prompts, out, args)
             finally:
                 project.close()
+                follow.close()
     finally:
         (out / "run.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
     print(f"run written to {out}")

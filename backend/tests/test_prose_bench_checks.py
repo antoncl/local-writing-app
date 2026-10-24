@@ -140,15 +140,19 @@ def test_target_ratio_and_emotion_words():
 # ---- report.py: the noise band --------------------------------------------------
 
 
-def _write_run(root: Path, name: str, *, prompt_sha: str = "aaa", book_sha: str = "bbb", draft: str = "She sat.") -> Path:
+def _write_run(
+    root: Path, name: str, *, prompt_sha: str = "aaa", book_sha: str = "bbb", draft: str = "She sat.",
+    git_head: str = "head1", library_sha: str = "lib1",
+) -> Path:
     run = root / name
     folder = run / "frank" / "local" / "continue" / "quay_talk"
     folder.mkdir(parents=True)
     (folder / "draft_1.md").write_text(draft, encoding="utf-8")
     (folder / "meta_1.json").write_text(json.dumps({"status": "ok"}), encoding="utf-8")
     run_json = {
-        "prompts": {"continue": {"id": "p1", "sha256": prompt_sha}},
+        "prompts": {"prompts": {"continue": {"id": "p1", "sha256": prompt_sha}}, "library_sha256": library_sha},
         "book_yaml_sha256": book_sha,
+        "git_head": git_head,
         "models": [{"name": "local", "provider": "ollama"}],
     }
     (run / "run.json").write_text(json.dumps(run_json), encoding="utf-8")
@@ -176,6 +180,37 @@ def test_band_refuses_when_the_book_differs(tmp_path):
     run_b = _write_run(tmp_path, "b", book_sha="two")
     with pytest.raises(SystemExit, match="book_yaml_sha256"):
         report.make_band(run_a, run_b)
+
+
+def test_band_refuses_when_only_a_snippet_differs(tmp_path):
+    run_a = _write_run(tmp_path, "a", library_sha="one")
+    run_b = _write_run(tmp_path, "b", library_sha="two")
+    with pytest.raises(SystemExit, match="prompts"):
+        report.make_band(run_a, run_b)
+
+
+def test_band_refuses_when_only_the_git_head_differs(tmp_path):
+    run_a = _write_run(tmp_path, "a", git_head="abc")
+    run_b = _write_run(tmp_path, "b", git_head="def")
+    with pytest.raises(SystemExit, match="git_head"):
+        report.make_band(run_a, run_b)
+
+
+def test_a_zero_band_is_unmeasured_not_a_verdict():
+    assert report.flag_for("emotion_words", 1.0, 3.0, 0.0) == "unmeasured"
+    assert report.flag_for("italic_spans", 1.0, 5.0, None) == "unmeasured"
+    assert report.flag_for("emotion_words", 1.0, 1.0, 0.0) == ""
+    assert report.flag_for("said_share", 0.2, 0.9, 0.0) == ""  # no direction, still silent
+
+
+def test_the_group_band_stands_in_when_the_cell_band_is_zero():
+    band = {
+        "cells": {"frank|local|continue|quay_talk": {"emotion_words": 0.0}},
+        "groups": {"frank|local|continue": {"emotion_words": 0.5}},
+    }
+    assert report.effective_band(band, "frank|local|continue|quay_talk", "emotion_words") == 0.5
+    assert report.effective_band(band, "frank|local|continue|other", "emotion_words") == 0.5
+    assert report.effective_band({"cells": {}, "groups": {}}, "a|b|c|d", "words") is None
 
 
 def test_flag_only_when_the_difference_exceeds_the_band():

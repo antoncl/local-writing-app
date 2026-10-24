@@ -48,7 +48,7 @@ LOWER_IS_BETTER = frozenset({
     "emotion_words", "phrase_hits", "has_markdown", "starts_with_preamble", "sample_overlap",
 })
 NO_DIRECTION = frozenset({"words", "target_ratio", "said_share", "sentence_mean", "sentence_sd"})
-REFUSED_BAND_KEYS = ("prompts", "book_yaml_sha256", "models")
+REFUSED_BAND_KEYS = ("prompts", "book_yaml_sha256", "models", "git_head")
 
 
 def mean_or_none(values: list[Any]) -> float | None:
@@ -169,13 +169,26 @@ def make_band(run_a: Path, run_b: Path) -> dict[str, Any]:
 
 
 def flag_for(metric: str, baseline: float | None, new: float | None, band: float | None) -> str:
-    if baseline is None or new is None or band is None or metric in NO_DIRECTION:
+    """`band` is the effective one (see effective_band). A band of 0 means the baseline showed
+    no variation, not that any move is real: the move is `unmeasured`, never a verdict."""
+    if baseline is None or new is None or metric in NO_DIRECTION:
         return ""
+    if not band:
+        return "unmeasured" if new != baseline else ""
     if abs(new - baseline) <= band:
         return ""
     if metric not in LOWER_IS_BETTER:
         return "changed"
     return "worse" if new > baseline else "better"
+
+
+def effective_band(band: dict[str, Any], key: str, metric: str) -> float | None:
+    """The wider of a cell's band and its group's (case|model|prompt): a cell whose own two
+    runs happened to agree is no steadier than the group it belongs to."""
+    cell = band["cells"].get(key, {}).get(metric)
+    group = band["groups"].get(key.rsplit("|", 1)[0], {}).get(metric)
+    values = [v for v in (cell, group) if v is not None]
+    return max(values) if values else None
 
 
 def _count(summary: dict[str, Any], key: str, field: str) -> int:
@@ -193,7 +206,7 @@ def render_compare(new: dict[str, Any], sa: dict[str, Any], sb: dict[str, Any], 
             base = mean_or_none([sa["cells"].get(key, {}).get("metrics", {}).get(metric),
                                  sb["cells"].get(key, {}).get("metrics", {}).get(metric)])
             cur = new["cells"].get(key, {}).get("metrics", {}).get(metric)
-            width = band["cells"].get(key, {}).get(metric)
+            width = effective_band(band, key, metric)
             oor = f"{_count(sa, key, 'out_of_reach')}/{_count(sb, key, 'out_of_reach')}, {_count(new, key, 'out_of_reach')}"
             lines.append(f"| {key.replace('|', ' / ')} | {_fmt(base)} | {_fmt(cur)} | {_fmt(width)} | {flag_for(metric, base, cur, width)} | {oor} |")
         lines.append("")

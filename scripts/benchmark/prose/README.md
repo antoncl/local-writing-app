@@ -35,7 +35,10 @@ Use the backend venv's Python (`<py>` below), from the repo root.
 2. Pick the models: copy `models.example.yaml` to `models.yaml` and edit (the harness
    reads `models.yaml` if present). The shipped entry is a local Ollama model.
 
-3. Generate the fixture projects (one per style case, via the HTTP API; `--regen` rebuilds):
+3. Generate the fixture projects (two per style case, via the HTTP API; `--regen` rebuilds):
+   the four briefs in `<case>`, the two Continue lead-ins in `<case>-continue`, so a lead-in
+   never sees the briefs' later events in its story so far. A fixture built from an older
+   `book.yaml` is refused by `run.py`: regenerate it.
 
    ```powershell
    <py> scripts/benchmark/prose/fixture_gen.py
@@ -107,6 +110,8 @@ or `error` in its meta and counted in the report, never retried unless `--retrie
 - **`changed`** marks a style-dependent mechanic (italics, numerals, dashes, contractions,
   adverbs, sentence length) that moved beyond the noise band. Whether the move is right
   depends on the case's style note: that is the judge's call (H2), not the script's.
+- **`unmeasured`** marks a move where the baseline showed no variation (a band of 0, after
+  taking the wider of the cell's and its group's band): there is nothing to judge it against.
 - Everything is per case, model, prompt and brief, never one blended score.
 
 ## Files
@@ -114,7 +119,7 @@ or `error` in its meta and counted in the report, never retried unless `--retrie
 | File | Role |
 |---|---|
 | `fixture/book.yaml` | The frozen invented book. Editing it starts a new baseline. |
-| `fixture_gen.py` | Builds the five case projects through the API. |
+| `fixture_gen.py` | Builds the five cases' projects (briefs, and Continue lead-ins) through the API. |
 | `models.example.yaml` | The model list. |
 | `setup_backend.py` | Keys, AI policy, assistants. |
 | `run.py` | Draft scene and Continue, per case, model, brief and draft. |

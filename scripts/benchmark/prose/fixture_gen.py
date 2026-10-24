@@ -1,6 +1,7 @@
 """Generate the built-in prose test set's projects (#2613, measuring-prose-quality.md §3).
 
-One project per style case, all built from the frozen `fixture/book.yaml`, so the
+Two projects per style case (the four briefs, and the Continue lead-ins in `<case>-continue`
+so a lead-in never sees the briefs' later events), all built from the frozen `fixture/book.yaml`, so the
 cast, the briefs and the narration are identical across styles and only the style
 note differs. Everything goes through the dev backend's HTTP routes - the same
 ones the frontend uses - never by writing project files, so the fixture is what
@@ -49,6 +50,10 @@ def case_root(case: str) -> Path:
     return FIXTURE_ROOT / case
 
 
+def continue_case_root(case: str) -> Path:
+    return FIXTURE_ROOT / f"{case}-continue"
+
+
 def book_sha256() -> str:
     return hashlib.sha256(BOOK_YAML.read_bytes()).hexdigest()
 
@@ -69,13 +74,13 @@ def write_fixture(case: str, fixture: dict[str, Any]) -> None:
 
 
 def _remove_case(case: str) -> None:
-    """Delete one case folder - and only if it resolves inside the fixture root."""
-    target = case_root(case).resolve()
+    """Delete one case's two folders - and only if each resolves inside the fixture root."""
     root = FIXTURE_ROOT.resolve()
-    if root not in target.parents:
-        raise SystemExit(f"Refusing to delete {target}: not inside {root}")
-    if target.exists():
-        shutil.rmtree(target)
+    for target in (case_root(case).resolve(), continue_case_root(case).resolve()):
+        if root not in target.parents:
+            raise SystemExit(f"Refusing to delete {target}: not inside {root}")
+        if target.exists():
+            shutil.rmtree(target)
 
 
 def _save_lore(project: Client, entry: dict[str, Any], body: str, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -154,17 +159,21 @@ def _scene_metadata(spec: dict[str, Any], characters: dict[str, str], summary: s
     return metadata
 
 
-def _make_scenes(
-    project: Client, book: dict[str, Any], characters: dict[str, str]
-) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+def _make_briefs(project: Client, book: dict[str, Any], characters: dict[str, str]) -> dict[str, dict[str, str]]:
     scenes: dict[str, dict[str, str]] = {}
     for spec in book["scenes"]:
         created = project.post("/api/scenes", {"title": spec["title"]})
         _save_scene(project, created, "", _scene_metadata(spec, characters, spec["summary"].strip()))
         scenes[spec["key"]] = {"id": created["id"], "title": spec["title"]}
-    # Each Continue case is its own scene AFTER the four briefs, with no summary:
-    # a lead-in inside a brief's scene would make Draft scene a redraft there and
-    # become the next brief's "previous scene".
+    return scenes
+
+
+def _make_continues(
+    project: Client, book: dict[str, Any], characters: dict[str, str]
+) -> dict[str, dict[str, str]]:
+    """The Continue lead-ins: scenes with a body and no summary, in a project of their own so
+    the story so far never carries the briefs' later events into a lead-in (and a lead-in never
+    sits inside a brief's scene, which would make Draft scene a redraft there)."""
     by_key = {s["key"]: s for s in book["scenes"]}
     continues: dict[str, dict[str, str]] = {}
     for spec in book["continue_cases"]:
@@ -172,7 +181,7 @@ def _make_scenes(
         created = project.post("/api/scenes", {"title": spec["title"]})
         _save_scene(project, created, spec["before"], _scene_metadata(source, characters, None))
         continues[spec["key"]] = {"id": created["id"], "title": spec["title"], "scene": spec["scene"]}
-    return scenes, continues
+    return continues
 
 
 def _remove_seeded_scenes(project: Client, root: Path) -> None:
@@ -186,31 +195,49 @@ def _remove_seeded_scenes(project: Client, root: Path) -> None:
             project.delete(f"/api/scenes/{scene_id}")
 
 
-def build_case(base_url: str, book: dict[str, Any], case: str) -> dict[str, Any]:
-    root = case_root(case)
-    root.parent.mkdir(parents=True, exist_ok=True)
+def _new_project(base_url: str, root: Path, book: dict[str, Any]) -> tuple[Client, str]:
+    """Create one project through the API, clear its seeded scene, set the narration."""
     unscoped = Client(base_url)
     info = unscoped.post(
         "/api/project/create", {"root_path": str(root), "title": book["project"]["title"], "inherits": []}
     )
     unscoped.close()
     project = Client(base_url, info["root_path"])
+    _remove_seeded_scenes(project, Path(info["root_path"]))
+    _set_narration(project, book)
+    return project, info["root_path"]
+
+
+def build_case(base_url: str, book: dict[str, Any], case: str) -> dict[str, Any]:
+    case_root(case).parent.mkdir(parents=True, exist_ok=True)
+    project, brief_root = _new_project(base_url, case_root(case), book)
     try:
-        _remove_seeded_scenes(project, Path(info["root_path"]))
-        _set_narration(project, book)
         characters = _make_characters(project, book)
         note = _make_note(project, book, case)
-        scenes, continues = _make_scenes(project, book, characters)
+        scenes = _make_briefs(project, book, characters)
+    finally:
+        project.close()
+    # Same cast, note and narration, but only the lead-ins (see _make_continues).
+    project, continue_root = _new_project(base_url, continue_case_root(case), book)
+    try:
+        continue_characters = _make_characters(project, book)
+        continue_note = _make_note(project, book, case)
+        continues = _make_continues(project, book, continue_characters)
     finally:
         project.close()
     return {
         "case": case,
-        "root": info["root_path"],
+        "root": brief_root,
         "book_sha256": book_sha256(),
         "characters": characters,
         "note": note,
         "scenes": scenes,
-        "continue_cases": continues,
+        "continue": {
+            "root": continue_root,
+            "characters": continue_characters,
+            "note": continue_note,
+            "cases": continues,
+        },
     }
 
 
@@ -222,7 +249,7 @@ def ensure_case(base_url: str, book: dict[str, Any], case: str, regen: bool) -> 
         return load_fixture(case)
     fixture = build_case(base_url, book, case)
     write_fixture(case, fixture)
-    print(f"{case}: built {fixture['root']}")
+    print(f"{case}: built {fixture['root']} and {fixture['continue']['root']}")
     return fixture
 
 

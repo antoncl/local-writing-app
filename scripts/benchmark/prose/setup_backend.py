@@ -7,7 +7,7 @@ Against the discovered dev backend (never :8787):
      models/ai.py::ProviderCredentialsPatch). The dev backend runs with a
      throwaway `LWA_CONFIG_DIR` (scripts/dev_backend.py), so this never touches
      the user's real config. A key is never printed or logged.
-  2. Per case project: `PATCH /api/project/settings {"ai_policy": ...}`
+  2. Per case project (the briefs' and the Continue lead-ins'): `PATCH /api/project/settings {"ai_policy": ...}`
      (routers/project.py::update_project_settings) - `cloud-allowed` if any
      non-ollama model is listed, else `local-only`.
   3. Per project and model: an assistant, `POST /api/assistants` then
@@ -17,7 +17,8 @@ Against the discovered dev backend (never :8787):
      back and checked: an unknown assistant id silently falls back to defaults,
      so the harness asserts the id exists and carries the settings.
 
-The assistant ids are recorded in each case's `fixture.json` under `assistants`.
+The assistant ids are recorded in each case's `fixture.json` under `assistants`
+(and `continue.assistants` for the lead-in project).
 """
 
 from __future__ import annotations
@@ -120,20 +121,25 @@ def ensure_assistant(project: Client, model: dict[str, Any], known_id: str | Non
     return entry["id"]
 
 
-def setup_case(base_url: str, case: str, models: list[dict[str, Any]]) -> None:
-    fixture = load_fixture(case)
-    project = Client(base_url, fixture["root"])
+def setup_project(base_url: str, root: str, known: dict[str, str], models: list[dict[str, Any]]) -> dict[str, str]:
+    """Set one project's AI policy and give it an assistant per model; return their ids."""
+    project = Client(base_url, root)
     try:
         project.patch("/api/project/settings", {"ai_policy": ai_policy_for(models)})
-        known = fixture.get("assistants", {})
-        fixture["assistants"] = {
-            **known,
-            **{m["name"]: ensure_assistant(project, m, known.get(m["name"])) for m in models},
-        }
+        return {**known, **{m["name"]: ensure_assistant(project, m, known.get(m["name"])) for m in models}}
     finally:
         project.close()
+
+
+def setup_case(base_url: str, case: str, models: list[dict[str, Any]]) -> None:
+    fixture = load_fixture(case)
+    if "continue" not in fixture:
+        raise SystemExit(f"Fixture {case!r} predates the Continue project: run fixture_gen.py --regen.")
+    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), models)
+    follow = fixture["continue"]
+    follow["assistants"] = setup_project(base_url, follow["root"], follow.get("assistants", {}), models)
     write_fixture(case, fixture)
-    print(f"{case}: policy {ai_policy_for(models)}, assistants {sorted(fixture['assistants'])}")
+    print(f"{case}: policy {ai_policy_for(models)}, assistants {sorted(fixture['assistants'])} (both projects)")
 
 
 def main() -> None:

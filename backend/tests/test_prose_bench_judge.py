@@ -1,12 +1,13 @@
 """Rules for the prose harness's model judge, calibration and judge-aware report (#2615).
 
-Pure functions only: nothing here touches a backend or a model. The harness lives
+Nothing here touches a backend or a model (`judge.ask` is replaced in the judge_item tests). The harness lives
 under scripts/benchmark/prose/, so its modules load by path (as
 test_prose_bench_checks.py does).
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import sys
@@ -205,3 +206,96 @@ def test_report_adds_only_owned_rules(tmp_path):
     assert not [m for m in plain if m.startswith("judge_") or m == "separation_correct"]
     other = report.summarize_run(run, {"judges": {"x/other": {"time_skip": {"owned": True}}}})
     assert "judge_time_skip" not in other["cells"]["frank|m|draft_scene|short_column"]["metrics"]
+
+
+# --- judge_item: resume, redo, a changed judge ---------------------------------
+
+
+def _judge_ctx(tmp_path, judges=JUDGES):
+    # The draft's own folder, as run.py leaves it; the judge file goes beside the draft.
+    (tmp_path / "frank" / "m" / "draft_scene" / "short_column").mkdir(parents=True, exist_ok=True)
+    root = str(tmp_path / "proj")
+    fixture = {"root": root, "assistants": {"jp": "a_p", "js": "a_s"},
+               "continue": {"root": root + "-c", "assistants": {"jp": "a_p", "js": "a_s"}}}
+    book = {
+        "characters": [{"key": "ines", "title": "Ines"}],
+        "scenes": [{"key": "short_column", "pov": "ines", "summary": "s"}],
+        "style_notes": {c: {"body": f"note {c}"} for c in judge.STYLED},
+    }
+    return {"judges": judges, "book": book, "fixtures": {"frank": fixture},
+            "clients": {root: object(), root + "-c": object()}, "model_ids": {"m": "o/drafter"}}
+
+
+def _item():
+    return {"case": "frank", "model": "m", "prompt": "draft_scene", "brief": "short_column", "n": 1, "text": "x"}
+
+
+def _args(**kw):
+    return argparse.Namespace(**{"rules": True, "separation": True, "redo": False, **kw})
+
+
+def _counting_ask(monkeypatch):
+    calls = []
+
+    def fake(client, assistant_id, system, message, choices):
+        calls.append(system)
+        return {"answer": choices[0], "quote": "q", "cost_usd": 0.001}
+
+    monkeypatch.setattr(judge, "ask", fake)
+    return calls
+
+
+def test_judge_item_resumes_without_asking_again(tmp_path, monkeypatch):
+    calls = _counting_ask(monkeypatch)
+    ctx = _judge_ctx(tmp_path)
+    judge.judge_item(_item(), tmp_path, ctx, _args())
+    assert len(calls) == len(judge.RULES) + 1
+    judge.judge_item(_item(), tmp_path, ctx, _args())
+    assert len(calls) == len(judge.RULES) + 1
+
+
+def test_redo_rules_keeps_the_separation_verdict(tmp_path, monkeypatch):
+    calls = _counting_ask(monkeypatch)
+    ctx = _judge_ctx(tmp_path)
+    judge.judge_item(_item(), tmp_path, ctx, _args())
+    calls.clear()
+    _, record = judge.judge_item(_item(), tmp_path, ctx, _args(redo=True, separation=False))
+    assert len(calls) == len(judge.RULES)
+    assert record["separation"]["answer"] == "A"
+
+
+def test_a_changed_judge_model_discards_the_old_record(tmp_path, monkeypatch):
+    calls = _counting_ask(monkeypatch)
+    judge.judge_item(_item(), tmp_path, _judge_ctx(tmp_path), _args())
+    calls.clear()
+    changed = {**JUDGES, "primary": {"name": "jp", "model": "other/judge"}}
+    _, record = judge.judge_item(_item(), tmp_path, _judge_ctx(tmp_path, changed), _args())
+    assert len(calls) == len(judge.RULES) + 1
+    assert record["judge_model"] == "other/judge"
+
+
+def test_run_totals_keeps_a_slot_no_longer_configured(tmp_path, monkeypatch):
+    _counting_ask(monkeypatch)
+    judge.judge_item(_item(), tmp_path, _judge_ctx(tmp_path), _args())
+    totals = judge.run_totals(tmp_path, {"second": JUDGES["second"]})
+    assert totals["primary"]["calls"] == len(judge.RULES) + 1
+
+
+def test_band_refuses_runs_judged_by_different_models(tmp_path):
+    for run, model in (("a", "g/flash"), ("b", "other/judge")):
+        folder = tmp_path / run / "frank" / "m" / "draft_scene" / "short_column"
+        folder.mkdir(parents=True)
+        (folder / "judge_1.json").write_text(json.dumps({"judge": "primary", "judge_model": model}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        report.ensure_same_judges(tmp_path / "a", tmp_path / "b")
+
+
+def test_tally_refuses_answers_for_an_unjudged_run(tmp_path):
+    answers = {"run": str(tmp_path), "items": [
+        {"id": "d01", "case": "frank", "model": "m", "prompt": "draft_scene", "brief": "short_column", "n": 1,
+         "seeded": False, "answers": {"time_skip": "yes"}},
+    ]}
+    path = tmp_path / "answers.yaml"
+    path.write_text(json.dumps(answers), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        calibration.tally(path)

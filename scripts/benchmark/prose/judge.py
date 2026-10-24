@@ -22,6 +22,7 @@ import hashlib
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -130,14 +131,17 @@ def passage_context(book: dict[str, Any], item: dict[str, Any]) -> dict[str, str
     return {"pov": character_name(book, scene["pov"]), "summary": scene["summary"].strip()}
 
 
-def rule_message(context: dict[str, str], draft: str, question: str) -> str:
+def passage_lines(context: dict[str, str], draft: str) -> list[str]:
+    """What the judge sees before a question; the calibration sheet shows the writer the same."""
     parts = [f"Viewpoint character: {context['pov']}", ""]
     if "lead_in" in context:
-        parts += ["Lead-in (the scene so far; do not judge it):", context["lead_in"], "",
-                  "Continuation (judge only this):", draft.strip()]
-    else:
-        parts += ["Scene brief:", context["summary"], "", "Draft:", draft.strip()]
-    return "\n".join(parts + ["", f"Question: {question}"])
+        return parts + ["Lead-in (the scene so far; do not judge it):", context["lead_in"], "",
+                        "Continuation (judge only this):", draft.strip()]
+    return parts + ["Scene brief:", context["summary"], "", "Draft:", draft.strip()]
+
+
+def rule_message(context: dict[str, str], draft: str, question: str) -> str:
+    return "\n".join([*passage_lines(context, draft), "", f"Question: {question}"])
 
 
 def separation_message(draft: str, note_a: str, note_b: str) -> str:
@@ -192,11 +196,12 @@ def judge_item(
     which = pick_judge(ctx["model_ids"][item["model"]], judges)
     fixture = ctx["fixtures"][item["case"]]
     project = fixture["continue"] if item["prompt"] == "continue" else fixture
-    client = ctx["clients"].setdefault(project["root"], Client(ctx["base_url"], project["root"], timeout=CALL_TIMEOUT_S))
+    client = ctx["clients"][project["root"]]
     assistant_id = project["assistants"][judges[which]["name"]]
     path = judge_path(item, run_dir)
     record = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    if record.get("judge") != which:
+    # A record from another slot or another model is never resumed: its verdicts are not this judge's.
+    if record.get("judge") != which or record.get("judge_model") != judges[which]["model"]:
         record = {}
     if args.redo:
         # Clear only what this run asks again: --redo --rules keeps the separation verdict.
@@ -225,7 +230,8 @@ def run_totals(run_dir: Path, judges: dict[str, dict[str, Any]]) -> dict[str, An
     for path in run_dir.glob("*/*/*/*/judge_*.json"):
         record = json.loads(path.read_text(encoding="utf-8"))
         calls = [*record.get("rules", {}).values(), *([record["separation"]] if "separation" in record else [])]
-        bucket = totals[record["judge"]]
+        # A slot no longer in models.yaml still has its recorded calls and cost counted.
+        bucket = totals.setdefault(record["judge"], {"model": record.get("judge_model"), "cost_usd": 0.0, "calls": 0})
         bucket["calls"] += len(calls)
         bucket["cost_usd"] = round(bucket["cost_usd"] + sum(c.get("cost_usd") or 0 for c in calls), 6)
     return totals
@@ -238,23 +244,34 @@ def main() -> None:
     parser.add_argument("--separation", action="store_true", help="only the separation test")
     parser.add_argument("--redo", action="store_true", help="ask again even where a verdict is recorded")
     parser.add_argument("--cases", nargs="+", choices=CASES, default=list(CASES))
+    parser.add_argument("--workers", type=int, default=4, help="drafts judged at once (default 4)")
     args = parser.parse_args()
     if not (args.rules or args.separation):
         args.rules = args.separation = True
     judges = load_judges()
     run = json.loads((args.run_dir / "run.json").read_text(encoding="utf-8"))
+    base_url = discover_backend()
+    fixtures = {c: load_fixture(c) for c in args.cases}
+    # One client per project, made up front: httpx.Client is safe to share across the workers.
+    roots = {p["root"] for f in fixtures.values() for p in (f, f["continue"])}
     ctx = {
-        "judges": judges, "book": load_book(), "base_url": discover_backend(), "clients": {},
+        "judges": judges, "book": load_book(), "fixtures": fixtures,
+        "clients": {r: Client(base_url, r, timeout=CALL_TIMEOUT_S) for r in roots},
         "model_ids": {m["name"]: m["model"] for m in run["models"]},
-        "fixtures": {c: load_fixture(c) for c in args.cases},
     }
+    items = [
+        i for i in iter_drafts(args.run_dir)
+        if i["case"] in args.cases and i["meta"].get("status", "ok") == "ok"
+    ]
     try:
-        for item in iter_drafts(args.run_dir):
-            if item["case"] not in args.cases or item["meta"].get("status", "ok") != "ok":
-                continue
-            which, record = judge_item(item, args.run_dir, ctx, args)
-            answers = {r: v["answer"] for r, v in record["rules"].items()}
-            print(f"{item['case']}/{item['model']}/{item['prompt']}/{item['brief']} #{item['n']} [{which}]: {answers}", flush=True)
+        # Each draft writes only its own judge file, so drafts are independent.
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            futures = {pool.submit(judge_item, item, args.run_dir, ctx, args): item for item in items}
+            for future in as_completed(futures):
+                item = futures[future]
+                which, record = future.result()
+                answers = {r: v["answer"] for r, v in record["rules"].items()}
+                print(f"{item['case']}/{item['model']}/{item['prompt']}/{item['brief']} #{item['n']} [{which}]: {answers}", flush=True)
     finally:
         for client in ctx["clients"].values():
             client.close()

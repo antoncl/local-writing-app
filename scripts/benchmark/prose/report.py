@@ -185,6 +185,22 @@ def ensure_comparable(run_a: Path, run_b: Path) -> None:
         )
 
 
+def judge_models(run_dir: Path) -> set[str]:
+    """The judge model ids recorded under a run (empty when it was never judged)."""
+    models = set()
+    for path in run_dir.glob("*/*/*/*/judge_*.json"):
+        models.add(json.loads(path.read_text(encoding="utf-8")).get("judge_model", ""))
+    return models
+
+
+def ensure_same_judges(*runs: Path) -> None:
+    """Refuse judge metrics compared across runs judged by different models: the band and the
+    flags would measure the judge change, not the prose."""
+    found = {r.name: sorted(judge_models(r)) for r in runs}
+    if len({tuple(v) for v in found.values()}) > 1:
+        raise SystemExit(f"Refusing judge metrics: the runs were judged by different models: {found}")
+
+
 def band_between(summary_a: dict[str, Any], summary_b: dict[str, Any], level: str) -> dict[str, dict[str, float | None]]:
     out: dict[str, dict[str, float | None]] = {}
     for key in sorted(set(summary_a[level]) | set(summary_b[level])):
@@ -199,6 +215,8 @@ def band_between(summary_a: dict[str, Any], summary_b: dict[str, Any], level: st
 
 def make_band(run_a: Path, run_b: Path, calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     ensure_comparable(run_a, run_b)
+    if calibration is not None:
+        ensure_same_judges(run_a, run_b)
     sa, sb = summarize_run(run_a, calibration), summarize_run(run_b, calibration)
     return {
         "runs": [run_a.name, run_b.name],
@@ -255,6 +273,8 @@ def render_compare(new: dict[str, Any], sa: dict[str, Any], sb: dict[str, Any], 
 
 
 def compare(new_dir: Path, run_a: Path, run_b: Path, calibration: dict[str, Any] | None = None) -> str:
+    if calibration is not None:
+        ensure_same_judges(new_dir, run_a, run_b)
     band = make_band(run_a, run_b, calibration)
     runs = (summarize_run(r, calibration) for r in (new_dir, run_a, run_b))
     return render_compare(*runs, band)

@@ -103,8 +103,10 @@ is better.
    Rerun `setup_backend.py` (`--no-judges` skips them; `--models` filters drafters only).
 2. Judge a run: `judge.py <run>`. A draft written by the primary judge's model goes to
    `second`, so no model judges its own drafts. `--rules` or `--separation` runs one half;
-   a rerun resumes, and `--redo` asks again. It writes `judge_<n>.json` beside each draft
-   and `judge.json` in the run (the judges' model ids and cost).
+   a rerun resumes, and `--redo` asks again; a record from a different judge model is
+   never resumed. `--workers` (default 4) judges that many drafts at once. It writes
+   `judge_<n>.json` beside each draft and `judge.json` in the run (the judges' model ids
+   and cost). A band or compare with `--calibration` refuses runs judged by different models.
 3. Calibrate: `calibration.py sheet <run> --out <dir>` draws a sample and writes `sheet.md`
    and `answers.yaml`. Read the drafts and answer each rule yes (the failure is there) or
    no. Each rule needs at least 8 of each once answered; where a rule comes up short, add

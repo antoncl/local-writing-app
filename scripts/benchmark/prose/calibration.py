@@ -32,7 +32,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from checks import iter_drafts  # noqa: E402
 from fixture_gen import load_book  # noqa: E402
-from judge import RULES, judge_path, passage_context  # noqa: E402
+from judge import RULES, judge_path, passage_context, passage_lines  # noqa: E402
 
 MIN_CASES = 8
 MIN_AGREEMENT = 0.8
@@ -59,13 +59,8 @@ def render_sheet(items: list[dict[str, Any]], book: dict[str, Any]) -> str:
     lines = ["# Judge calibration sheet", "",
              "For each draft answer every question yes or no in answers.yaml: is the failure present?", ""]
     for item in items:
-        context = passage_context(book, item)
-        lines += [f"## {item['id']}", "", f"Viewpoint character: {context['pov']}", ""]
-        if "lead_in" in context:
-            lines += ["Lead-in:", "", context["lead_in"], "", "Continuation:", ""]
-        else:
-            lines += ["Brief:", "", context["summary"], "", "Draft:", ""]
-        lines += [item["text"].strip(), "", "Questions:", ""]
+        # The same passage the judge is shown, so both answer the same question.
+        lines += [f"## {item['id']}", "", *passage_lines(passage_context(book, item), item["text"]), "", "Questions:", ""]
         lines += [f"- `{rule}`: {question}" for rule, question in RULES.items()]
         lines.append("")
     return "\n".join(lines)
@@ -76,7 +71,8 @@ def make_sheet(run_dir: Path, out: Path, count: int, seed: int) -> None:
     picked = sample_drafts(drafts, count, seed)
     items = [{**d, "id": f"d{i:02d}"} for i, d in enumerate(picked, start=1)]
     answers = {
-        "run": str(run_dir),
+        # Absolute, so the tally finds the judge files from any working directory.
+        "run": str(run_dir.resolve()),
         "items": [
             {**{k: it[k] for k in ("id", "case", "model", "prompt", "brief", "n")},
              "seeded": False, "answers": dict.fromkeys(RULES)}
@@ -138,8 +134,13 @@ def tally(answers_path: Path) -> dict[str, Any]:
     raw = answers_path.read_bytes()
     answers = yaml.safe_load(raw)
     run_dir = Path(answers["run"])
+    pairs_by_model = tally_pairs(run_dir, answers["items"])
+    answered = [i for i in answers["items"] if any(str(a).lower() in ("yes", "no") for a in (i.get("answers") or {}).values())]
+    if answered and not pairs_by_model:
+        # Answers but no judge file at all: the run was never judged, or `run:` points elsewhere.
+        raise SystemExit(f"No judge verdicts found under {run_dir} for the {len(answered)} answered items: run judge.py first.")
     judges: dict[str, dict[str, Any]] = {}
-    for model, rules in tally_pairs(run_dir, answers["items"]).items():
+    for model, rules in pairs_by_model.items():
         for rule, pairs in rules.items():
             seeded = rule_agreement(pairs["seeded"])
             judges.setdefault(model, {})[rule] = {

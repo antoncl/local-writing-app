@@ -134,8 +134,26 @@ def _sheet(tmp_path: Path, seed_value: int = 5) -> Path:
     natural = _make_run(tmp_path, "natural", 3)
     seeded = _make_run(tmp_path, "seeded", 3, first_n=100, seeded=True)
     out = tmp_path / f"sheet{seed_value}"
-    calibration.make_sheet(natural, seeded, out, 3, seed_value)
+    calibration.make_sheet(natural, seeded, out, 0, None, seed_value)
     return out
+
+
+def test_natural_continuations_default_to_the_seeded_count(tmp_path):
+    natural = _make_run(tmp_path, "natural", 6)
+    seeded = _make_run(tmp_path, "seeded", 2, first_n=100, seeded=True)
+    calibration.make_sheet(natural, seeded, tmp_path / "out", 0, None, 5)
+    items = yaml.safe_load((tmp_path / "out" / "answers.yaml").read_text(encoding="utf-8"))["items"]
+    assert sum(not i["seeded"] for i in items) == 2
+
+
+def test_a_sheet_with_answers_is_never_overwritten(tmp_path):
+    out = _sheet(tmp_path)
+    doc = yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8"))
+    doc["items"][0]["answers"]["time_skip"] = "no"
+    (out / "answers.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        calibration.make_sheet(tmp_path / "natural", tmp_path / "seeded", out, 0, None, 5)
+    assert yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8")) == doc
 
 
 def test_sheet_interleaves_seeded_and_natural_deterministically(tmp_path):

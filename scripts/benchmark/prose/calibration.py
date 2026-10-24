@@ -1,6 +1,6 @@
 """Calibration of the model judge against the writer (#2615, measuring-prose-quality.md §7 steps 3-4).
 
-  calibration.py sheet RUN_DIR [--seeded SEEDED_RUN] --out DIR [--drafts 24] [--seed 2615]
+  calibration.py sheet RUN_DIR [--seeded SEEDED_RUN] --out DIR [--scenes 12] [--continuations N] [--seed 2615]
       A worksheet of drafts x rules for the writer: DIR/sheet.md to read and
       DIR/answers.yaml to fill (calibration_serve.py fills it from a page). Natural
       drafts are a stratified sample of RUN_DIR; seeded ones are every ok draft of
@@ -79,13 +79,41 @@ def sheet_item(item: dict[str, Any]) -> dict[str, Any]:
     return {**record, "answers": dict.fromkeys(RULES), "note": ""}
 
 
-def make_sheet(run_dir: Path, seeded_dir: Path | None, out: Path, count: int, seed: int) -> None:
-    drafts = [d for d in iter_drafts(run_dir) if d["meta"].get("status", "ok") == "ok"]
-    natural = [{**d, "run": str(run_dir.resolve()), "seeded": False} for d in sample_drafts(drafts, count, seed)]
+def sample_natural(drafts: list[dict[str, Any]], scenes: int, continuations: int, seed: int) -> list[dict[str, Any]]:
+    """`scenes` Draft scene drafts and `continuations` Continue drafts, each stratified by `sample_drafts`."""
+    by_prompt = {"draft_scene": scenes, "continue": continuations}
+    return [
+        d for prompt, count in by_prompt.items()
+        for d in sample_drafts([x for x in drafts if x["prompt"] == prompt], count, seed)
+    ]
+
+
+def has_answers(path: Path) -> bool:
+    """Whether an answers.yaml already holds any of the writer's answers or notes."""
+    if not path.is_file():
+        return False
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return any(
+        any(v is not None for v in (i.get("answers") or {}).values()) or i.get("note")
+        for i in doc.get("items") or []
+    )
+
+
+def make_sheet(run_dir: Path, seeded_dir: Path | None, out: Path, scenes: int, continuations: int | None, seed: int) -> None:
+    if has_answers(out / "answers.yaml"):
+        raise SystemExit(f"{out / 'answers.yaml'} already holds answers: refusing to overwrite the writer's reading.")
     seeded = [
         {**d, "run": str(seeded_dir.resolve()), "seeded": True, "seeded_rule": d["meta"]["seeded_rule"]}
         for d in (iter_drafts(seeded_dir) if seeded_dir else [])
         if d["meta"].get("status", "ok") == "ok"
+    ]
+    # Every seeded passage is a continuation, so by default as many natural continuations join them:
+    # otherwise a continuation would itself hint that a failure was planted.
+    continuations = len(seeded) if continuations is None else continuations
+    drafts = [d for d in iter_drafts(run_dir) if d["meta"].get("status", "ok") == "ok"]
+    natural = [
+        {**d, "run": str(run_dir.resolve()), "seeded": False}
+        for d in sample_natural(drafts, scenes, continuations, seed)
     ]
     items = interleave(natural, seeded, seed)
     answers = {"run": str(run_dir.resolve()), "items": [sheet_item(it) for it in items]}
@@ -206,14 +234,17 @@ def main() -> None:
     sheet.add_argument("run_dir", type=Path)
     sheet.add_argument("--seeded", type=Path, help="a calibration_seed.py run whose ok drafts join the sheet")
     sheet.add_argument("--out", type=Path, required=True)
-    sheet.add_argument("--drafts", type=int, default=24)
+    sheet.add_argument("--scenes", type=int, default=12, help="natural Draft scene drafts (default 12)")
+    sheet.add_argument(
+        "--continuations", type=int, help="natural Continue drafts (default: as many as the seeded passages)"
+    )
     sheet.add_argument("--seed", type=int, default=2615)
     score = sub.add_parser("tally", help="score the judge against the filled answers.yaml")
     score.add_argument("answers", type=Path)
     score.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "sheet":
-        make_sheet(args.run_dir, args.seeded, args.out, args.drafts, args.seed)
+        make_sheet(args.run_dir, args.seeded, args.out, args.scenes, args.continuations, args.seed)
         return
     calibration = tally(args.answers)
     args.out.write_text(json.dumps(calibration, indent=2), encoding="utf-8")

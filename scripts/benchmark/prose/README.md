@@ -115,6 +115,9 @@ is better.
    3. `judge.py <seeded>` judges them like any run.
    4. `calibration.py sheet <run> --seeded <seeded> --out <dir>` shuffles a sample of the
       natural drafts and every seeded passage into one list (`answers.yaml`, `sheet.md`).
+      The sample is `--scenes` Draft scene drafts (12) and, by default, as many Continue
+      drafts as there are seeded passages, so a continuation alone doesn't hint at a planted
+      failure. It refuses to overwrite an `answers.yaml` that already holds answers.
    5. `calibration_serve.py <dir>` opens the reading page: answer each rule yes, no or not
       sure. Answers save as you go, so you can stop and resume. The page never shows the
       judge's answers or which passages are seeded.

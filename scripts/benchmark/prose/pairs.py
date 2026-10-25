@@ -2,9 +2,9 @@
 
   pairs.py make BASELINE_RUN NEW_RUN --out DIR [--words 400] [--seed 2617] [--model NAME]
       Draws one pair per (style case, brief): the first ~WORDS words of a baseline and of a new
-      Draft scene draft of the primary model. Writes DIR/pairs.html (the page for the reader,
+      Draft scene draft of the primary model. Writes DIR/send/pairs.html (the page for the reader,
       shuffled and unlabelled, nothing of the key in it) and DIR/key.json (which side is new,
-      and where each excerpt came from: keep it, never send it with the page).
+      where each excerpt came from and the excerpts as shown: it stays in DIR, never sent).
   pairs.py tally DIR/key.json PICKS.json [PICKS2.json ...] [--out DIR/result.md]
       Reads one or more readers' downloaded picks files and reports new-preferred against
       baseline-preferred (overall, per reader and per style case, with a two-sided sign test)
@@ -181,10 +181,12 @@ def build_pairs(drawn: list[dict[str, Any]], words: int, book: dict[str, Any]) -
         pid = f"p{i:02d}"
         out.append({
             "page": {"id": pid, "pov": context["pov"], "summary": context["summary"], "A": a, "B": b},
+            # The key keeps the sentences exactly as the page showed them, so the tally maps cuts
+            # without re-deriving excerpts (a later change to the splitter can't move them).
             "key": {
                 "case": p["case"], "brief": p["brief"], "new_side": p["new_side"],
                 "baseline": draft_path(p["baseline"]), "new": draft_path(p["new"]),
-                "a_sha": sha(join_excerpt(a)), "b_sha": sha(join_excerpt(b)),
+                "A": a, "B": b,
             },
         })
     return out
@@ -206,12 +208,14 @@ def make(baseline_run: Path, new_run: Path, out: Path, words: int, seed: int, mo
         "model": name, "words": words, "seed": seed,
         "pairs": {b["page"]["id"]: b["key"] for b in built},
     }
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "pairs.html").write_text(html, encoding="utf-8")
+    # The page gets a folder of its own, so the folder a reader is sent never holds the key.
+    send = out / "send"
+    send.mkdir(parents=True, exist_ok=True)
+    (send / "pairs.html").write_text(html, encoding="utf-8")
     (out / "key.json").write_text(json.dumps(key, indent=2), encoding="utf-8")
     total = sum(count_words(join_excerpt(p[side])) for p in pages for side in ("A", "B"))
-    print(f"wrote {out / 'pairs.html'} and {out / 'key.json'}: {len(pages)} pairs, {total} words to read")
-    print("send only pairs.html: key.json says which side is new and must not go with the page.")
+    print(f"wrote {send / 'pairs.html'} and {out / 'key.json'}: {len(pages)} pairs, {total} words to read")
+    print(f"send only {send}: key.json says which side is new and stays where it is.")
 
 
 # --- the tally -----------------------------------------------------------------
@@ -242,32 +246,14 @@ def load_picks(path: Path, key: dict[str, Any]) -> dict[str, Any]:
     return picks
 
 
-def source_sides(key: dict[str, Any], pid: str) -> dict[str, list[list[str]]]:
-    """`{"A": paragraphs, "B": paragraphs}` re-derived from the source drafts; refused if either
-    no longer matches the excerpt the page showed."""
-    record = key["pairs"][pid]
-    new_side = record["new_side"]
-    base_side = "B" if new_side == "A" else "A"
-    sides: dict[str, list[list[str]]] = {}
-    for label, run_key, side in (("baseline", "baseline_run", base_side), ("new", "new_run", new_side)):
-        path = Path(key[run_key]) / record[label]
-        if not path.is_file():
-            raise SystemExit(f"{pid}: source draft {path} is missing.")
-        paragraphs = excerpt_paragraphs(path.read_text(encoding="utf-8"), key["words"])
-        if sha(join_excerpt(paragraphs)) != record["a_sha" if side == "A" else "b_sha"]:
-            raise SystemExit(f"{pid}: source draft {path} changed since the page was made.")
-        sides[side] = paragraphs
-    return sides
-
-
 def cut_sentences(key: dict[str, Any], picks: dict[str, Any]) -> dict[str, list[str]]:
-    """`{"new": [...], "baseline": [...]}`: the sentences one reader cut, mapped through the key."""
+    """`{"new": [...], "baseline": [...]}`: the sentences one reader cut, read from the excerpts the
+    key recorded and mapped to new or baseline through the key."""
     out: dict[str, list[str]] = {"new": [], "baseline": []}
     for pid, by_side in (picks.get("cuts") or {}).items():
-        if not any(by_side.values()):
-            continue
-        sides = source_sides(key, pid)
-        new_side = key["pairs"][pid]["new_side"]
+        record = key["pairs"][pid]
+        sides = {"A": record["A"], "B": record["B"]}
+        new_side = record["new_side"]
         for side, addresses in by_side.items():
             for para, sent in sorted({tuple(a) for a in addresses}):
                 try:
@@ -290,43 +276,51 @@ def count_picks(key: dict[str, Any], picks: dict[str, Any]) -> dict[str, dict[st
     return totals
 
 
-def add_counts(into: dict[str, dict[str, int]], more: dict[str, dict[str, int]]) -> None:
-    for case, counts in more.items():
-        bucket = into.setdefault(case, {"new": 0, "baseline": 0, "unanswered": 0})
-        for k, v in counts.items():
-            bucket[k] += v
+def pair_votes(key: dict[str, Any], readers: list[tuple[str, dict[str, Any]]]) -> dict[str, dict[str, int]]:
+    """Per style case plus `"all"`: one vote per pair, the side most readers kept (`new` or
+    `baseline`), a tie, or `unanswered` when no reader picked it. Readers judge the same 20 pairs,
+    so the pairs are the independent trials: pooling every reader's picks would overstate p."""
+    totals: dict[str, dict[str, int]] = {"all": {"new": 0, "baseline": 0, "tie": 0, "unanswered": 0}}
+    for pid, record in key["pairs"].items():
+        bucket = totals.setdefault(record["case"], {"new": 0, "baseline": 0, "tie": 0, "unanswered": 0})
+        picks = [(p.get("picks") or {}).get(pid) for _, p in readers]
+        new = sum(1 for x in picks if x == record["new_side"])
+        old = sum(1 for x in picks if x is not None and x != record["new_side"])
+        outcome = "unanswered" if new == old == 0 else "tie" if new == old else "new" if new > old else "baseline"
+        bucket[outcome] += 1
+        totals["all"][outcome] += 1
+    return totals
 
 
 def split_line(counts: dict[str, int]) -> str:
     p = sign_test(counts["new"], counts["baseline"])
-    return f"new {counts['new']}, baseline {counts['baseline']}, unanswered {counts['unanswered']} (p = {p:.3f})"
+    tie = f", tied {counts['tie']}" if counts.get("tie") else ""
+    return f"new {counts['new']}, baseline {counts['baseline']}{tie}, unanswered {counts['unanswered']} (p = {p:.3f})"
 
 
 def render_result(key: dict[str, Any], readers: list[tuple[str, dict[str, Any]]]) -> str:
     """The measurement section as Markdown for a PR body."""
-    pooled: dict[str, dict[str, int]] = {}
-    per_reader = []
+    votes = pair_votes(key, readers)
     cuts: dict[str, list[str]] = {"new": [], "baseline": []}
-    for label, picks in readers:
-        counts = count_picks(key, picks)
-        add_counts(pooled, counts)
-        per_reader.append((label, counts["all"]))
+    for _, picks in readers:
         for side, found in cut_sentences(key, picks).items():
             cuts[side] += found
+    unit = "per pair, the side most readers kept; ties dropped" if len(readers) > 1 else "answered pairs only"
     lines = [
         "### Blind pairs (H4)", "",
         f"Model `{key['model']}`, {len(key['pairs'])} pairs of about {key['words']} words, "
         f"{len(readers)} reader{'s' if len(readers) != 1 else ''}: {', '.join(r for r, _ in readers)}.", "",
-        f"**Preference** (two-sided sign test, answered picks only): {split_line(pooled['all'])}.", "",
+        f"**Preference** (two-sided sign test, {unit}): {split_line(votes['all'])}.", "",
     ]
     if len(readers) > 1:
         lines += ["| reader | new | baseline | unanswered | p |", "|---|---|---|---|---|"]
-        lines += [f"| {r} | {c['new']} | {c['baseline']} | {c['unanswered']} | {sign_test(c['new'], c['baseline']):.3f} |"
-                  for r, c in per_reader]
+        for label, picks in readers:
+            c = count_picks(key, picks)["all"]
+            lines.append(f"| {label} | {c['new']} | {c['baseline']} | {c['unanswered']} | {sign_test(c['new'], c['baseline']):.3f} |")
         lines.append("")
     lines += ["| style case | new | baseline | unanswered | p |", "|---|---|---|---|---|"]
-    for case in [c for c in CASES if c in pooled]:
-        c = pooled[case]
+    for case in [c for c in CASES if c in votes]:
+        c = votes[case]
         lines.append(f"| {case} | {c['new']} | {c['baseline']} | {c['unanswered']} | {sign_test(c['new'], c['baseline']):.3f} |")
     lines += ["", f"**Sentences cut:** new side {len(cuts['new'])}, baseline side {len(cuts['baseline'])}.", ""]
     for side in ("new", "baseline"):
@@ -339,9 +333,16 @@ def render_result(key: dict[str, Any], readers: list[tuple[str, dict[str, Any]]]
 def tally(key_path: Path, picks_paths: list[Path]) -> str:
     key = json.loads(key_path.read_text(encoding="utf-8"))
     readers = []
+    seen: dict[str, Path] = {}
     for i, path in enumerate(picks_paths, start=1):
         picks = load_picks(path, key)
-        readers.append((picks.get("reader") or f"reader {i}", picks))
+        name = (picks.get("reader") or "").strip()
+        # One file per reader: a second download of the same reading would count its picks twice.
+        same = name.casefold() if name else json.dumps(picks.get("picks"), sort_keys=True)
+        if same in seen:
+            raise SystemExit(f"{path} and {seen[same]} look like the same reader: pass only the latest file per reader.")
+        seen[same] = path
+        readers.append((name or f"reader {i}", picks))
     return render_result(key, readers)
 
 

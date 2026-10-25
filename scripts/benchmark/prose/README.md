@@ -176,14 +176,18 @@ calls a backend or a model.
 1. `pairs.py make BASELINE_RUN NEW_RUN --out DIR` draws one pair per (style case, brief): the
    first ~400 words, ending at a sentence, of one baseline and one new Draft scene draft of
    the primary model. A cell missing on either side is skipped and printed. It writes
-   `DIR/pairs.html` (shuffled, A/B unlabelled, nothing of the key in it) and `DIR/key.json`.
-2. Send or open `pairs.html`, **never `key.json`**. It works offline: pick Keep A or Keep B
+   `DIR/send/pairs.html` (shuffled, A/B unlabelled, nothing of the key in it) and
+   `DIR/key.json`, which also holds the excerpts exactly as shown.
+2. Send or open `DIR/send/` only; **`key.json` never leaves `DIR`**. It works offline: pick Keep A or Keep B
    per pair (keys `a`/`b`, `]`/`[`, Space for the next unpicked), click a sentence to mark it
    as one you would cut. Progress resumes from the browser's own storage.
 3. **Download picks** saves `picks-<page id>-<reader>.json` (**Copy picks** if downloads are blocked).
-4. `pairs.py tally DIR/key.json picks.json [picks2.json ...]` (one file per reader) refuses
-   a file from another page and writes `DIR/result.md`: new against baseline overall, per
-   reader and per style case with a two-sided sign test, and the cut sentences per side.
+4. `pairs.py tally DIR/key.json picks.json [picks2.json ...]` (one file per reader: two from
+   the same reader are refused) refuses a file from another page and writes `DIR/result.md`:
+   new against baseline with a two-sided sign test, per reader and per style case, and the
+   cut sentences per side. With several readers each pair casts one vote (the side most
+   readers kept; a tie is dropped), since readers judge the same pairs and pooling every pick
+   would overstate p.
 5. Paste `result.md` into the PR.
 
 ## Files

@@ -127,7 +127,9 @@ def test_draw_is_deterministic_for_a_seed(runs, tmp_path):
     a = _make(runs, tmp_path / "a")
     b = _make(runs, tmp_path / "b")
     assert a == b
-    assert (tmp_path / "a" / "pairs.html").read_text(encoding="utf-8") == (tmp_path / "b" / "pairs.html").read_text(encoding="utf-8")
+    assert (tmp_path / "a" / "send" / "pairs.html").read_text(encoding="utf-8") == (
+        tmp_path / "b" / "send" / "pairs.html"
+    ).read_text(encoding="utf-8")
     other = _make(runs, tmp_path / "c", seed=1)
     assert other["page_id"] != a["page_id"]
 
@@ -146,7 +148,9 @@ def test_primary_models_must_match(tmp_path):
 def test_page_carries_nothing_of_the_key(runs, tmp_path):
     out = tmp_path / "out"
     _make(runs, out)
-    html = (out / "pairs.html").read_text(encoding="utf-8")
+    # The page sits alone in the folder a reader is sent; the key stays one level up.
+    assert sorted(p.name for p in (out / "send").iterdir()) == ["pairs.html"]
+    html = (out / "send" / "pairs.html").read_text(encoding="utf-8")
     for token in ("runalpha", "runomega", MODEL, "other-model", '"new"', '"old"', '"baseline"', "draft_", "new_side", "key.json"):
         assert token not in html, token
     data = json.loads(html.split('id="pairs-data">', 1)[1].split("</script>", 1)[0])
@@ -195,8 +199,10 @@ def test_tally_maps_picks_through_new_side(runs, tmp_path):
     del doc["picks"][pid]
     partial.write_text(json.dumps(doc), encoding="utf-8")
     both = pairs.tally(kp, [partial, tmp_path / "p2.json"])
-    assert "new 19, baseline 20, unanswered 1" in both
-    assert "| frank |" in both and "ann" not in both and "bob" in both
+    # One vote per pair: 19 pairs split 1-1 (tied, dropped); the pair cy skipped goes to bob.
+    assert "new 0, baseline 1, tied 19, unanswered 0" in both
+    assert "| cy | 19 | 0 | 1 |" in both and "| bob | 0 | 20 | 0 |" in both
+    assert "| frank |" in both and "ann" not in both
 
 
 def test_tally_refuses_a_different_page_unknown_pair_and_bad_pick(runs, tmp_path):
@@ -237,12 +243,37 @@ def test_cut_sentences_map_to_the_right_side(runs, tmp_path):
     assert base_side != new_side
 
 
-def test_tally_refuses_a_changed_source(runs, tmp_path):
+def test_cuts_come_from_the_key_not_the_sources(runs, tmp_path):
     key = _make(runs, tmp_path / "out")
     kp = tmp_path / "out" / "key.json"
     record = key["pairs"]["p01"]
-    source = Path(key["new_run"]) / record["new"]
-    source.write_text(source.read_text(encoding="utf-8").replace("lamp", "candle"), encoding="utf-8")
-    cuts = _cut_on(key, "p01", record["new_side"])
-    with pytest.raises(SystemExit, match="changed since"):
-        pairs.tally(kp, [_picks(key, tmp_path / "c.json", cuts=cuts)])
+    shown = record[record["new_side"]][0][1]
+    # A source edited (or a splitter changed) after the page was made can't move a cut.
+    (Path(key["new_run"]) / record["new"]).write_text("Rewritten entirely.", encoding="utf-8")
+    result = pairs.tally(kp, [_picks(key, tmp_path / "c.json", cuts=_cut_on(key, "p01", record["new_side"]))])
+    assert shown in result.split("Cut on the new side", 1)[1]
+
+
+def test_majority_vote_per_pair(runs, tmp_path):
+    key = _make(runs, tmp_path / "out")
+    kp = tmp_path / "out" / "key.json"
+    files = [
+        _picks(key, tmp_path / "1.json", "ann", "new"),
+        _picks(key, tmp_path / "2.json", "bob", "new"),
+        _picks(key, tmp_path / "3.json", "cy", "baseline"),
+    ]
+    result = pairs.tally(kp, files)
+    assert "new 20, baseline 0, unanswered 0" in result
+    assert "side most readers kept" in result
+
+
+def test_two_files_from_one_reader_are_refused(runs, tmp_path):
+    key = _make(runs, tmp_path / "out")
+    kp = tmp_path / "out" / "key.json"
+    first = _picks(key, tmp_path / "early.json", "Anton")
+    later = _picks(key, tmp_path / "late.json", "anton ")
+    with pytest.raises(SystemExit, match="same reader"):
+        pairs.tally(kp, [first, later])
+    unnamed = [_picks(key, tmp_path / f"u{i}.json", "") for i in (1, 2)]
+    with pytest.raises(SystemExit, match="same reader"):
+        pairs.tally(kp, unnamed)

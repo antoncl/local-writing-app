@@ -354,6 +354,15 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("Prose craft* governs the words you write here", text)
         self.assertIn("- Point-of-view character: Honor Harrington", text)
 
+    def test_prose_craft_keeps_the_naming_and_subtext_rules(self) -> None:
+        # #2604's naming rule and the old Trust-the-reader subtext clause moved
+        # into Prose craft (#2620 review): without them drafts name strangers early
+        # and have characters announce their feelings.
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._preview(self.scene_ids[0])
+        self.assertIn("named only once the scene gives the name", text)
+        self.assertIn("Characters rarely say outright what they want or feel either", text)
+
     def test_finalize_roleplay_keeps_interiority_in_an_omniscient_book(self) -> None:
         # #2620 review: the resolved narration gives an omniscient book no viewpoint
         # character, but its narrator knows every mind — keep their interiority there.

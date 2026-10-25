@@ -325,4 +325,7 @@ not from guessing:
 ### Not changed
 
 No new rule beyond what the prompts already stated: the merge keeps both contents, and the
-viewpoint rule spells out the one Draft scene already had. Stock-phrase bans stay out (decision 2).
+viewpoint rule spells out the one Draft scene already had. Two of Draft scene's own sentences move
+in with them, approved after review (#2620): a stranger is named only once the scene gives the
+name (#2604), and characters rarely say outright what they want or feel. Stock-phrase bans stay
+out (decision 2).

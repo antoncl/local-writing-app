@@ -105,7 +105,10 @@ let items = [], doneCount = 0, cur = null, data = null, q = 0;
 
 async function api(path, options) {
   const r = await fetch(path, options);
-  if (!r.ok) throw new Error(path + " " + r.status);
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || path + " " + r.status);
+  }
   return r.json();
 }
 
@@ -187,7 +190,16 @@ function nextUnanswered(from) {
 async function open(id) {
   if (!id) return;
   if (noteTimer && data) queueSave(); // a note still waiting on its debounce belongs to the item we leave
-  const fresh = await api("/api/items/" + id);
+  let fresh;
+  try {
+    fresh = await api("/api/items/" + id);
+  } catch (err) {
+    // Show why the item cannot open, in place of whatever was on screen (or "Loading…").
+    cur = null; data = null;
+    $("item").hidden = true; $("empty").hidden = false;
+    $("empty").textContent = "Could not open " + id + ": " + err.message;
+    return;
+  }
   cur = id; data = fresh; q = Math.max(0, data.questions.findIndex((x) => !data.answers[x.rule]));
   location.hash = id;
   $("empty").hidden = true; $("item").hidden = false;

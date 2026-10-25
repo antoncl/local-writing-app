@@ -120,7 +120,10 @@ is better.
       failure. It refuses to overwrite an `answers.yaml` that already holds answers.
    5. `calibration_serve.py <dir>` opens the reading page: answer each rule yes, no or not
       sure. Answers save as you go, so you can stop and resume. The page never shows the
-      judge's answers or which passages are seeded.
+      judge's answers or which passages are seeded. Each answer records the question
+      wording it answered; the tally skips answers to a since-reworded question and warns
+      of any given before wording was recorded. While the page runs it keeps a
+      `<dir>/.serving` marker, which `calibration.py extend` refuses to work past.
 4. `calibration.py tally <dir>/answers.yaml --out calibration.json` prints each rule's
    agreement per judge model. The judge owns a rule only if it has at least 8 present and 8
    absent answers at 80% agreement or better on each, agrees on 80% of the seeded present
@@ -132,7 +135,8 @@ is better.
    the report, and `calibration.json` records the question each rule was tallied against, so
    a reworded question voids that rule's ownership until you retally. `--rules RULE ...` on
    `calibration_seed.py` seeds only those rules (new drafts number after the folder's
-   highest). To add to a sheet you have started, `calibration.py extend <dir> --run <run>
+   highest). Seeding never reuses a source passage another rule's seed in the same
+   `--out` already used, and a second run merges its models into the output's `run.json`. To add to a sheet you have started, `calibration.py extend <dir> --run <run>
    --seeded <seeded> --natural N` appends N more natural Continue drafts and every seeded
    passage not yet on it, numbered after the last id; existing items and answers are
    untouched.

@@ -123,6 +123,54 @@ def test_a_rerun_skips_seeds_already_written_ok(tmp_path):
     assert not any(seed.seeded_ok(tmp_path, e) for e in rest)
 
 
+def _candidates(count: int = 12) -> list[dict]:
+    return [{"case": "frank", "model": "m", "brief": BRIEF, "n": n, "text": "t"} for n in range(1, count + 1)]
+
+
+def _write_plan(out: Path, plan: list[dict]) -> None:
+    for entry in plan:
+        seed.write_seed(out, entry, "x", {"status": "ok"}, out, "s/model")
+
+
+def test_seeded_sources_lists_every_meta_any_status_and_can_skip_rules(tmp_path):
+    ok, failed, *_ = seed.plan_seeds(_candidates(), 1, 7, ["time_skip", "viewpoint_slip"])
+    seed.write_seed(tmp_path, ok, "x", {"status": "ok"}, tmp_path, "s/model")
+    seed.write_seed(tmp_path, failed, "", {"status": "error"}, tmp_path, "s/model")
+    both = {seed.source_address(ok["source"]), seed.source_address(failed["source"])}
+    assert seed.seeded_sources(tmp_path) == both
+    assert seed.seeded_sources(tmp_path, [ok["rule"]]) == {seed.source_address(failed["source"])}
+    assert seed.seeded_sources(tmp_path / "none") == set()
+
+
+def test_a_second_run_with_other_rules_never_reuses_a_source_and_a_rerun_plans_nothing(tmp_path):
+    first_rules, second_rules = ["time_skip", "summing_up_ending"], ["viewpoint_slip", "narration_euphemism"]
+    first = seed.plan_run(_candidates(), tmp_path, 2, 7, first_rules)
+    assert len(first) == 4
+    _write_plan(tmp_path, first)
+    used = seed.seeded_sources(tmp_path)
+    second = seed.plan_run(_candidates(), tmp_path, 2, 7, second_rules)
+    assert len(second) == 4 and not used & {seed.source_address(e["source"]) for e in second}
+    _write_plan(tmp_path, second)
+    assert seed.plan_run(_candidates(), tmp_path, 2, 7, second_rules) == []
+    assert seed.plan_run(_candidates(), tmp_path, 2, 7, first_rules) == []
+
+
+def test_run_json_merges_models_and_source_paths():
+    run = {"models": [{"name": "a", "model": "x/a"}], "prompts": 1}
+    first = seed.merge_run_json(None, run, Path("/src1"), "s/model")
+    assert first["seeded_from"] == [str(Path("/src1"))] and first["models"] == run["models"]
+    other = {"models": [{"name": "a", "model": "x/a"}, {"name": "b", "model": "x/b"}]}
+    merged = seed.merge_run_json(first, other, Path("/src2"), "s/model")
+    assert [m["name"] for m in merged["models"]] == ["a", "b"] and merged["prompts"] == 1
+    assert merged["seeded_from"] == [str(Path("/src1")), str(Path("/src2"))]
+    again = seed.merge_run_json(merged, other, Path("/src2"), "s/model")
+    assert again["seeded_from"] == merged["seeded_from"] and again["models"] == merged["models"]
+    old = seed.merge_run_json({**first, "seeded_from": "/old"}, run, Path("/src2"), "s/model")
+    assert old["seeded_from"] == ["/old", str(Path("/src2"))]
+    with pytest.raises(SystemExit):
+        seed.merge_run_json(merged, {"models": [{"name": "a", "model": "x/other"}]}, Path("/src3"), "s/model")
+
+
 def test_plan_seeds_exits_when_there_are_too_few():
     with pytest.raises(SystemExit):
         seed.plan_seeds([{"case": "frank", "model": "m", "brief": BRIEF, "n": 1}], 2, 7)
@@ -233,6 +281,15 @@ def test_extend_appends_keeps_answers_and_continues_ids(tmp_path):
     assert len(yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8"))["items"]) == 10
 
 
+def test_extend_refuses_while_the_reading_page_is_serving(tmp_path):
+    out = _sheet(tmp_path)
+    (out / serve.SERVING).write_text("{}", encoding="utf-8")
+    before = (out / "answers.yaml").read_text(encoding="utf-8")
+    with pytest.raises(SystemExit, match="stop it first"):
+        calibration.extend_sheet(out, _make_run(tmp_path, "natural", 5), _make_run(tmp_path, "seeded", 2, 200, True), 2, 9)
+    assert (out / "answers.yaml").read_text(encoding="utf-8") == before
+
+
 def test_extend_refuses_more_natural_drafts_than_remain(tmp_path):
     out = _sheet(tmp_path)  # the natural run has 3 drafts, all on the sheet
     with pytest.raises(SystemExit):
@@ -285,6 +342,23 @@ def _judged_run(root: Path, name: str, answer: str) -> Path:
     return run
 
 
+def test_tally_skips_answers_to_a_reworded_question_and_counts_unfingerprinted_ones(tmp_path):
+    natural = _judged_run(tmp_path, "nat", "no")
+    base = {"case": "frank", "model": "m", "prompt": "continue", "brief": BRIEF, "n": 1, "run": str(natural), "seeded": False}
+    current = judge.question_sha(judge.RULES["time_skip"])
+    items = [
+        {**base, "answers": {"time_skip": "no"}, "question_sha": {"time_skip": current}},
+        {**base, "answers": {"time_skip": "yes"}, "question_sha": {"time_skip": "000000000000"}},
+        {**base, "answers": {"time_skip": "no"}},
+    ]
+    path = tmp_path / "answers.yaml"
+    path.write_text(yaml.safe_dump({"run": str(natural), "items": items}), encoding="utf-8")
+    result = calibration.tally(path)
+    stats = result["judges"]["g/flash"]["time_skip"]
+    assert (stats["absent_n"], stats["present_n"]) == (2, 0)  # the stale yes is not counted
+    assert result["pre_fingerprint_answers"] == {"time_skip": 1}
+
+
 def test_tally_reads_each_items_run_and_skips_unsure_and_blank(tmp_path):
     natural, seeded = _judged_run(tmp_path, "nat", "no"), _judged_run(tmp_path, "seed", "yes")
     base = {"case": "frank", "model": "m", "prompt": "continue", "brief": BRIEF, "n": 1}
@@ -328,6 +402,40 @@ def test_item_payload_for_a_scene_shows_the_brief_summary():
     scene = BOOK["scenes"][0]
     payload = serve.item_payload(_item(prompt="draft_scene", brief=scene["key"]), BOOK, "t")
     assert payload["kind"] == "scene" and payload["context"] == scene["summary"].strip()
+
+
+def test_apply_answer_records_the_question_wording_and_clears_it_with_the_answer():
+    doc = {"items": [_item()]}
+    out = serve.apply_answer(doc, "d01", {"answers": {"time_skip": "yes", "viewpoint_slip": "unsure"}})
+    sha = out["items"][0]["question_sha"]
+    assert sha == {r: judge.question_sha(judge.RULES[r]) for r in ("time_skip", "viewpoint_slip")}
+    cleared = serve.apply_answer(out, "d01", {"answers": {"time_skip": None}})
+    assert list(cleared["items"][0]["question_sha"]) == ["viewpoint_slip"]
+    assert "question_sha" not in doc["items"][0]
+
+
+def test_request_allowed():
+    ok = {"Host": "127.0.0.1:8123", "Origin": "http://localhost:8123", "Content-Type": "application/json; charset=utf-8"}
+    assert serve.request_allowed("POST", ok, 8123)
+    assert serve.request_allowed("POST", {k: v for k, v in ok.items() if k != "Origin"}, 8123)
+    assert serve.request_allowed("GET", {"Host": "localhost:8123"}, 8123)
+    assert not serve.request_allowed("GET", {"Host": "evil.example:8123"}, 8123)  # DNS rebinding
+    assert not serve.request_allowed("GET", {}, 8123)
+    assert not serve.request_allowed("GET", {"Host": "127.0.0.1:9"}, 8123)
+    assert not serve.request_allowed("POST", {**ok, "Host": "evil.example"}, 8123)
+    assert not serve.request_allowed("POST", {**ok, "Origin": "http://evil.example"}, 8123)
+    assert not serve.request_allowed("POST", {**ok, "Content-Type": "text/plain"}, 8123)
+    assert not serve.request_allowed("POST", {"Host": ok["Host"]}, 8123)
+
+
+def test_a_missing_draft_file_is_a_500_with_the_path(tmp_path):
+    out = _sheet(tmp_path)
+    store = serve.Store(out)
+    for run in ("natural", "seeded"):
+        for draft in (tmp_path / run).rglob("draft_*.md"):
+            draft.unlink()
+    status, body = serve.route_get(store, "/api/items/d01")
+    assert status == 500 and body["error"].startswith("draft file missing: ") and "draft_" in body["error"]
 
 
 def test_item_status():
@@ -392,6 +500,14 @@ def test_the_server_lists_saves_atomically_and_hides_seeding(tmp_path):
         with pytest.raises(urllib.error.HTTPError) as missing:
             _request(base + "/api/items/d99")
         assert missing.value.code == 404
+        foreign = urllib.request.Request(base + "/api/items", headers={"Host": "evil.example"})
+        with pytest.raises(urllib.error.HTTPError) as rebound:
+            urllib.request.urlopen(foreign, timeout=10)
+        assert rebound.value.code == 403
+        plain = urllib.request.Request(base + "/api/items/d01", data=b"{}", headers={"Content-Type": "text/plain"})
+        with pytest.raises(urllib.error.HTTPError) as form:
+            urllib.request.urlopen(plain, timeout=10)
+        assert form.value.code == 403
     finally:
         server.shutdown()
         server.server_close()

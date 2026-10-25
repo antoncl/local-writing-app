@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from calibration_serve import draft_text, write_atomic  # noqa: E402
+from calibration_serve import SERVING, draft_text, write_atomic  # noqa: E402
 from checks import iter_drafts  # noqa: E402
 from fixture_gen import load_book  # noqa: E402
 from judge import (  # noqa: E402
@@ -153,6 +153,8 @@ def extend_sheet(out: Path, run_dir: Path, seeded_dir: Path, natural: int, seed:
     """Append `natural` Continue drafts of `run_dir` and every ok seeded draft not yet on DIR/answers.yaml.
     Existing items and answers are untouched; returns `(natural added, seeded added)`."""
     path = out / "answers.yaml"
+    if (out / SERVING).exists():
+        raise SystemExit(f"The reading page is serving {out}: stop it first; if it is not running, delete {out / SERVING}.")
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     on_sheet = {address(i, doc["run"]) for i in doc["items"]}
     drafts = [
@@ -223,14 +225,33 @@ def judge_answer(run_dir: Path, item: dict[str, Any], rule: str) -> tuple[str, s
     return record["judge_model"], verdict.get("answer", "missing")
 
 
+def answer_state(item: dict[str, Any], rule: str) -> str:
+    """`current`, `stale` (the writer answered a since-reworded question) or `legacy` (no wording recorded)."""
+    recorded = (item.get("question_sha") or {}).get(rule)
+    if recorded is None:
+        return "legacy"
+    return "current" if recorded == question_sha(RULES[rule]) else "stale"
+
+
+def legacy_answer_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Per rule, how many counted yes/no answers recorded no question wording (given before it was)."""
+    counts: dict[str, int] = {}
+    for item in items:
+        for rule, writer in (item.get("answers") or {}).items():
+            if str(writer).lower() in ("yes", "no") and answer_state(item, rule) == "legacy":
+                counts[rule] = counts.get(rule, 0) + 1
+    return counts
+
+
 def tally_pairs(default_run: Path, items: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, list[tuple[str, str]]]]]:
     """`{judge_model: {rule: {"all", "seeded", "natural": pairs}}}` over the answered items; each
-    item's judge file is read from its own `run` (else `default_run`). Unsure or blank is skipped."""
+    item's judge file is read from its own `run` (else `default_run`). Unsure, blank or an answer to a
+    since-reworded question is skipped."""
     out: dict[str, dict[str, dict[str, list[tuple[str, str]]]]] = {}
     for item in items:
         run_dir = Path(item.get("run") or default_run)
         for rule, writer in (item.get("answers") or {}).items():
-            if str(writer).lower() not in ("yes", "no"):
+            if str(writer).lower() not in ("yes", "no") or answer_state(item, rule) == "stale":
                 continue
             model, answer = judge_answer(run_dir, item, rule)
             if not model:
@@ -261,7 +282,8 @@ def tally(answers_path: Path) -> dict[str, Any]:
                 "natural_present_n": natural["present_n"], "natural_present_agree": natural["present_agree"],
                 "owned": owns_rule(pooled, seeded, natural), "question_sha": question_sha(RULES[rule]),
             }
-    return {"judges": judges, "answers_sha256": hashlib.sha256(raw).hexdigest()}
+    return {"judges": judges, "answers_sha256": hashlib.sha256(raw).hexdigest(),
+            "pre_fingerprint_answers": legacy_answer_counts(answers["items"])}
 
 
 def owned_rules(calibration: dict[str, Any], judge_model: str) -> set[str]:
@@ -320,6 +342,8 @@ def main() -> None:
     calibration = tally(args.answers)
     args.out.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
     print(render_table(calibration))
+    for rule, count in calibration["pre_fingerprint_answers"].items():
+        print(f"warning: {count} {rule} answers predate recorded question wording and are counted as given")
     print(f"wrote {args.out}")
 
 

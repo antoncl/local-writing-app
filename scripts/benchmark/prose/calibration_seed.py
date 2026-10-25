@@ -18,6 +18,8 @@ import json
 import random
 import re
 import sys
+from collections import Counter
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -182,7 +184,7 @@ def write_seed(out: Path, entry: dict[str, Any], text: str, fields: dict[str, An
     folder.mkdir(parents=True, exist_ok=True)
     meta = {
         **fields, "seeded_rule": entry["rule"], "seeder_model": seeder_model, "source_run": str(source_run),
-        "source": f"{source['case']}/{source['model']}/continue/{source['brief']}/draft_{source['n']}.md",
+        "source": source_address(source),
     }
     (folder / f"draft_{entry['n']}.md").write_text(text, encoding="utf-8")
     (folder / f"meta_{entry['n']}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -194,12 +196,65 @@ def seeded_ok(out: Path, entry: dict[str, Any]) -> bool:
     whatever number, so a rerun skips it."""
     source = entry["source"]
     folder = out / source["case"] / source["model"] / "continue" / source["brief"]
-    origin = f"{source['case']}/{source['model']}/continue/{source['brief']}/draft_{source['n']}.md"
+    origin = source_address(source)
     for meta in folder.glob("meta_*.json"):
         record = json.loads(meta.read_text(encoding="utf-8"))
         if record.get("status") == "ok" and record.get("seeded_rule") == entry["rule"] and record.get("source") == origin:
             return True
     return False
+
+
+def source_address(source: dict[str, Any]) -> str:
+    """The address of a source draft, as a seed's meta records it in `source`."""
+    return f"{source['case']}/{source['model']}/continue/{source['brief']}/draft_{source['n']}.md"
+
+
+def seeded_sources(out: Path, excluding_rules: Iterable[str] = ()) -> set[str]:
+    """The `source` of every meta_*.json in `out` (any status), except seeds of `excluding_rules`."""
+    skip = set(excluding_rules)
+    found: set[str] = set()
+    for meta in out.glob("*/*/continue/*/meta_*.json"):
+        record = json.loads(meta.read_text(encoding="utf-8"))
+        if record.get("source") and record.get("seeded_rule") not in skip:
+            found.add(record["source"])
+    return found
+
+
+def ok_counts(out: Path) -> Counter[str]:
+    """How many seeds in `out` were written with status ok, per rule."""
+    metas = (json.loads(m.read_text(encoding="utf-8")) for m in out.glob("*/*/continue/*/meta_*.json"))
+    return Counter(r["seeded_rule"] for r in metas if r.get("status") == "ok" and r.get("seeded_rule"))
+
+
+def plan_run(
+    candidates: list[dict[str, Any]], out: Path, per_rule: int, seed: int, rules: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """The seeds still to ask for. A source another rule's seed already used is never picked again; this
+    run's own rules are not excluded, so a rerun of the same command plans the same passages and skips
+    those already seeded ok; once every rule has `per_rule` ok seeds nothing is planned."""
+    chosen = rules or list(RULES)
+    ok = ok_counts(out)
+    if all(ok[rule] >= per_rule for rule in chosen):
+        return []  # done; other runs' sources since excluded would only shift the draw
+    used = seeded_sources(out, excluding_rules=chosen)
+    fresh = [c for c in candidates if source_address(c) not in used]
+    plan = plan_seeds(fresh, per_rule, seed, rules, highest_drafts(out))
+    return [e for e in plan if not seeded_ok(out, e)]
+
+
+def merge_run_json(existing: dict[str, Any] | None, run: dict[str, Any], source_run: Path, seeder_model: str) -> dict[str, Any]:
+    """`out/run.json` after this seeding run: existing fields kept, models united by name (one name with two
+    model ids is a SystemExit), `seeded_from` the distinct absolute source paths seen so far."""
+    existing = existing or {}
+    models = {m["name"]: m for m in existing.get("models", [])}
+    for model in run["models"]:
+        known = models.setdefault(model["name"], model)
+        if known["model"] != model["model"]:
+            raise SystemExit(f"{model['name']} is {known['model']} in the run.json already in the output, {model['model']} in {source_run}.")
+    earlier = existing.get("seeded_from") or []
+    earlier = [earlier] if isinstance(earlier, str) else earlier
+    seeded_from = list(dict.fromkeys([*earlier, str(source_run)]))
+    return {**run, **existing, "models": list(models.values()), "seeded_from": seeded_from, "seeder_model": seeder_model}
 
 
 def main() -> None:
@@ -223,17 +278,18 @@ def main() -> None:
         d for d in iter_drafts(source_run) if d["prompt"] == "continue" and d["meta"].get("status", "ok") == "ok"
     ]
     # The plan is deterministic for a seed, so a rerun resumes: a passage already seeded ok is kept.
-    plan = [e for e in plan_seeds(candidates, args.per_rule, args.seed, args.rules, highest_drafts(args.out)) if not seeded_ok(args.out, e)]
+    plan = plan_run(candidates, args.out, args.per_rule, args.seed, args.rules)
     if not plan:
         print(f"every passage in {args.out} is already seeded")
         return
+    run_json = args.out / "run.json"
+    existing = json.loads(run_json.read_text(encoding="utf-8")) if run_json.is_file() else None
+    merged = merge_run_json(existing, run, source_run, seeder["model"])
     book, base_url = load_book(), discover_backend()
     projects = {c: load_fixture(c)["continue"] for c in {e["source"]["case"] for e in plan}}
     clients = {c: Client(base_url, p["root"], timeout=CALL_TIMEOUT_S) for c, p in projects.items()}
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "run.json").write_text(
-        json.dumps({**run, "seeded_from": str(source_run), "seeder_model": seeder["model"]}, indent=2), encoding="utf-8"
-    )
+    run_json.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     total = 0.0
     try:
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:

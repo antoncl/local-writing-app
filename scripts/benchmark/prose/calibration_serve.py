@@ -18,6 +18,7 @@ import re
 import sys
 import tempfile
 import threading
+from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,12 +28,13 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixture_gen import load_book  # noqa: E402
-from judge import RULES, passage_context  # noqa: E402
+from judge import RULES, passage_context, question_sha  # noqa: E402
 
 PAGE = Path(__file__).resolve().parent / "calibration_page.html"
 ANSWERS = ("yes", "no", "unsure")
 MAX_BODY = 1 << 20
 ITEM_PATH = re.compile(r"^/api/items/([\w-]+)$")
+SERVING = ".serving"  # in DIR while the page runs: holds its pid and port, so `extend` leaves answers.yaml alone
 
 
 def item_status(item: dict[str, Any]) -> str:
@@ -76,6 +78,9 @@ def apply_answer(doc: dict[str, Any], item_id: str, payload: dict[str, Any]) -> 
     if not isinstance(note, str):
         raise ValueError("note must be a string")
     item["answers"] = {**dict.fromkeys(RULES), **(item.get("answers") or {}), **answers}
+    # Each answer records the wording it answered, so a reworded question never counts it in the tally.
+    item["question_sha"] = {k: v for k, v in (item.get("question_sha") or {}).items() if k not in answers}
+    item["question_sha"].update({rule: question_sha(RULES[rule]) for rule, value in answers.items() if value is not None})
     item["note"] = note
     return out
 
@@ -127,6 +132,20 @@ class Store:
             return {"status": item_status(next(i for i in doc["items"] if i["id"] == item_id))}
 
 
+def request_allowed(method: str, headers: Mapping[str, str], port: int) -> bool:
+    """Whether a request may be served: its Host is this server's own (a foreign one is DNS rebinding) and,
+    for a POST, its Origin (if sent) is this server's page and its body is JSON (so no cross-site form)."""
+    own = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    if headers.get("Host") not in own:
+        return False
+    if method != "POST":
+        return True
+    origin = headers.get("Origin")
+    if origin is not None and origin not in {f"http://{host}" for host in own}:
+        return False
+    return (headers.get("Content-Type") or "").split(";")[0].strip().lower() == "application/json"
+
+
 def route_get(store: Store, path: str) -> tuple[int, Any]:
     """`(status, body)` for a GET; the page is bytes, everything else JSON-able."""
     if path in ("/", "/index.html"):
@@ -134,7 +153,10 @@ def route_get(store: Store, path: str) -> tuple[int, Any]:
     if path == "/api/items":
         return HTTPStatus.OK, store.listing()
     match = ITEM_PATH.match(path)
-    payload = store.payload(match.group(1)) if match else None
+    try:
+        payload = store.payload(match.group(1)) if match else None
+    except OSError as exc:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"draft file missing: {exc.filename or exc}"}
     return (HTTPStatus.OK, payload) if payload else (HTTPStatus.NOT_FOUND, {"error": "not found"})
 
 
@@ -167,10 +189,20 @@ def make_handler(store: Store) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(data)
 
+        def _allowed(self, method: str) -> bool:
+            if request_allowed(method, self.headers, self.server.server_address[1]):
+                return True
+            self._reply(HTTPStatus.FORBIDDEN, {"error": "forbidden"})
+            return False
+
         def do_GET(self) -> None:
+            if not self._allowed("GET"):
+                return
             self._reply(*route_get(store, self.path))
 
         def do_POST(self) -> None:
+            if not self._allowed("POST"):
+                return
             size = int(self.headers.get("Content-Length") or 0)
             if size > MAX_BODY:
                 self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
@@ -193,6 +225,8 @@ def main() -> None:
     if not (args.directory / "answers.yaml").is_file():
         raise SystemExit(f"No answers.yaml in {args.directory}: run `calibration.py sheet` first.")
     server = make_server(args.directory, args.port)
+    marker = args.directory / SERVING
+    marker.write_text(json.dumps({"pid": os.getpid(), "port": server.server_address[1]}), encoding="utf-8")
     print(f"Calibration page: http://127.0.0.1:{server.server_address[1]}/  (Ctrl+C to stop)", flush=True)
     try:
         server.serve_forever()
@@ -200,6 +234,7 @@ def main() -> None:
         pass
     finally:
         server.server_close()
+        marker.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

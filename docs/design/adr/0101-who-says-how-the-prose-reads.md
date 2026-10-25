@@ -287,3 +287,42 @@ voice in prose*.
 - **The lore-side sentence in *Lore register*.** A project shadowing that snippet would lose it.
 - **A dedicated style kind the prompts can find by type.** A special case a writer can't reproduce,
   for a job decision 7's one sentence does.
+
+## Amendment 1 — *Prose craft* has four rules, and the viewpoint rule names what it excludes
+
+- **Status:** **Accepted** — 2026-10-25 (Anton), approved with the snippet's text. Issue: #2619 (S1).
+- **Amends** decision 2's list of rules. Everything else in decision 2 stands: static text, no
+  template logic, a one-clause reason per rule, the instruction rule and the narrowest-wins order.
+
+### What prompted it
+
+The harness's judge calibration (#2615; the outcome is recorded on #2611) had the writer answer
+the decision 2 rules as yes/no questions on 128 passages. Two things came out of the reading,
+not from guessing:
+
+- **"Explained afterwards" and "summing-up ending" are one failure to the writer.** A planted
+  mid-passage line, *"The laugh meant he had stolen the casks."*, was marked as a summing-up with
+  the note "though not the last paragraph". What the writer counts is an outside narrator telling
+  the reader what something means, wherever it stands. What the writer does **not** count is the
+  viewpoint character reading what they see, in their own terms: *"It was the surest sign that he
+  was lying"* was judged Ines's interiority. A rule against all interpretation would flatten close
+  third.
+- **Narration noticing what the viewpoint character couldn't is the commonest natural failure**
+  (12 of 70 natural passages), more than slips into another mind (7). The draft prompts' rule
+  ("holds only what the viewpoint character perceives") already implies it but never names it.
+
+### Decision
+
+- The two rules become one: **the narrator never tells the reader what something means.** A moment
+  is shown once and left; no sentence afterwards says what it meant or what someone realized, and
+  no closing paragraph steps back to sum up or look ahead. The viewpoint character may read what
+  they see, in their own terms and in the moment; an outside voice explaining it may not.
+- **The viewpoint rule names what it excludes:** how the viewpoint character looks from outside,
+  what happens out of their sight, and what they learn only later.
+- *Prose craft* therefore states four rules: no skipped time, viewpoint discipline, the narrator
+  never explains, plain dialogue tags. The text is fixed in `prose-craft.md` (#2619).
+
+### Not changed
+
+No new rule beyond what the prompts already stated: the merge keeps both contents, and the
+viewpoint rule spells out the one Draft scene already had. Stock-phrase bans stay out (decision 2).

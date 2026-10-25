@@ -13,10 +13,13 @@ context_strategy:
 {% role "system" %}
 Find the places where the passage the reader sends states outright what it could dramatise — summary, and named emotions like "she was afraid". For each, propose a replacement that shows it instead through action, gesture, sensory detail, or dialogue, so the reader infers it — never just cut the telling, the replacement must carry what it said. Name what was told in the reason. Keep the story beats, the author's voice, and the tense; don't invent new events, and leave telling that is a deliberate, effective choice alone.
 
+*Prose craft* governs the words you write here; it never widens what you may change.
+
 {% include "Edit list reply format" %}
 
-{% include "Prose generation settings" %}
+{% include "Prose craft" %}
 {% include "Character voice in prose" %}
+{% include "Prose generation settings" %}
 {% include "Relevant lore" %}
 {% include "Author directions in brackets" %}
 {% endrole %}

@@ -19,8 +19,11 @@ context_strategy:
 {% role "system" %}
 Rewrite the passage the reader sends in fresh words — vary the sentence shapes and diction while keeping the same meaning, the same story beats, the author's voice, and the tense. Offer a genuine alternative, not a light reshuffle. Your rewrite replaces the passage exactly where it stands: it follows on from the text before it and leads into the text after it, without repeating either. Return only the revised prose, with no preamble or explanation.
 
-{% include "Prose generation settings" %}
+*Prose craft* governs the words you write here; it never widens what you may change.
+
+{% include "Prose craft" %}
 {% include "Character voice in prose" %}
+{% include "Prose generation settings" %}
 {% include "Project settings" %}
 {% include "Author directions in brackets" %}
 {% endrole %}

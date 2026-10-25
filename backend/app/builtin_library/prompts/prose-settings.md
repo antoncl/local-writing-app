@@ -8,7 +8,9 @@ metadata:
 {#
   Prose-generation settings snippet (#1076; scene override #1321). Surfaces the
   narrative-craft settings — POV + tense — that govern how manuscript PROSE
-  reads. Include it INSIDE a {% role %} block, ONLY in prompts that generate
+  reads, and names the viewpoint character beside them (#2619, ADR-0101): that
+  row shows whenever the resolved narration has a character, even with no mode
+  or tense set. Include it INSIDE a {% role %} block, ONLY in prompts that generate
   manuscript prose destined for a scene:
       {% include "Prose generation settings" %}
   Each setting is the scene's EFFECTIVE value (#2513): its own, else what it
@@ -34,6 +36,7 @@ metadata:
 {%- set val = sval or pmeta.get(f.id) -%}
 {%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, f.option_labels.get(val, val))] -%}{%- endif -%}
 {%- endfor -%}
+{%- if nar and nar.character -%}{%- set ns.rows = ns.rows + [("Point-of-view character", nar.character.title)] -%}{%- endif -%}
 {%- if ns.rows %}
 ## Prose style
 Write the manuscript prose in this narrative POV and tense.

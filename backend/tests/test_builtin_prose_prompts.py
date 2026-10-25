@@ -354,6 +354,16 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("Prose craft* governs the words you write here", text)
         self.assertIn("- Point-of-view character: Honor Harrington", text)
 
+    def test_finalize_roleplay_keeps_interiority_in_an_omniscient_book(self) -> None:
+        # #2620 review: the resolved narration gives an omniscient book no viewpoint
+        # character, but its narrator knows every mind — keep their interiority there.
+        self._set(self.act.scene_id, kind="container", pov_mode="third_omniscient", pov=self.honor.id)
+        text = self._render("Finalize roleplay", self.scene_ids[0])
+        self.assertIn("fold their interiority into the narration, moving between minds", text)
+        self.assertNotIn("cut all private interiority", text)
+        self._set(self.act.scene_id, kind="container", pov_mode="third_objective")
+        self.assertIn("cut all private interiority", self._render("Finalize roleplay", self.scene_ids[0]))
+
     def test_the_lore_prompts_treat_style_notes_as_content(self) -> None:
         # Decision 7: how the book is written is content in a lore entry.
         sentence = "are content here, not instructions: write the entry in this register"

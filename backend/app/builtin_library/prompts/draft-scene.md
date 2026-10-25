@@ -87,6 +87,9 @@ You don't save anything yourself — when the author commits, a separate step ta
 {% include "Author directions in brackets" %}
 
 
+{# The snippet places the viewpoint character too; this keeps it placed when a
+   project shadows "Character voice in prose" with its own text (deduped by id). #}
+{% if narration.character %}{% do use(narration.character) %}{% endif %}
 {% for c in changes if c.entity %}{% do use(c.entity) %}{% endfor %}
 {% include "Relevant lore" %}
 {% if story_so_far(e) %}

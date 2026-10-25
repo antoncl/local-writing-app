@@ -23,8 +23,9 @@ context_strategy:
   passage, not the rest of the scene. The output is inserted at the cursor.
 
   The craft rules are the "Prose craft" snippet's (#2619, ADR-0101), the same
-  ones Draft scene is held to; the snippets also name and place the viewpoint
-  character, so this prompt does not.
+  ones Draft scene is held to. The snippets also name and place the viewpoint
+  character; this prompt places it as well, so a project that shadows
+  "Character voice in prose" with its own text still sends it (deduped by id).
 
   The order is for caching (ADR-0084): what rarely changes comes first; the
   text around the cursor and the direction — which change on every run — come
@@ -51,6 +52,8 @@ You continue a novel's prose from exactly where the author's cursor is. Pick up 
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}
+{% set narration = resolved_narration(scene) if scene else none %}
+{% if narration and narration.character %}{% do use(narration.character) %}{% endif %}
 {% include "Relevant lore" %}
 {{ auto_lore() }}
 {% if scene %}

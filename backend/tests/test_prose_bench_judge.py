@@ -181,11 +181,51 @@ def test_tally_splits_seeded_items(tmp_path):
     assert stats["absent_agree"] == 0.0 and stats["owned"] is False
 
 
+def _sha(rule: str) -> str:
+    return judge.question_sha(judge.RULES[rule])
+
+
 def test_owned_rules_void_on_a_different_model_id():
-    cal = {"judges": {"g/flash": {"time_skip": {"owned": True}, "viewpoint_slip": {"owned": False}}}}
+    cal = {"judges": {"g/flash": {
+        "time_skip": {"owned": True, "question_sha": _sha("time_skip")},
+        "viewpoint_slip": {"owned": False, "question_sha": _sha("viewpoint_slip")},
+    }}}
     assert calibration.owned_rules(cal, "g/flash") == {"time_skip"}
     assert calibration.owned_rules(cal, "g/flash-2") == set()
     assert calibration.owned_rules(cal, "") == set()
+
+
+def test_owned_rules_void_when_the_question_was_reworded():
+    old = judge.question_sha(judge.LEGACY_QUESTIONS["summing_up_ending"])
+    cal = {"judges": {"g/flash": {
+        "time_skip": {"owned": True, "question_sha": _sha("time_skip")},
+        "summing_up_ending": {"owned": True, "question_sha": old},
+        "explained_after_shown": {"owned": True},
+    }}}
+    assert calibration.owned_rules(cal, "g/flash") == {"time_skip"}
+
+
+def test_tally_records_the_question_each_rule_was_tallied_against(tmp_path):
+    run = _write_run(tmp_path, "g/flash", {"time_skip": "yes"})
+    item = {"case": "frank", "model": "m", "prompt": "draft_scene", "brief": "short_column", "n": 1,
+            "seeded": False, "answers": {"time_skip": "yes"}}
+    import yaml
+
+    answers = tmp_path / "answers.yaml"
+    answers.write_text(yaml.safe_dump({"run": str(run), "items": [item]}), encoding="utf-8")
+    assert calibration.tally(answers)["judges"]["g/flash"]["time_skip"]["question_sha"] == _sha("time_skip")
+
+
+def test_judge_answer_ignores_a_verdict_to_a_reworded_question(tmp_path):
+    run = _write_run(tmp_path, "g/flash", {"summing_up_ending": "yes", "time_skip": "yes"})
+    item = {"case": "frank", "model": "m", "prompt": "draft_scene", "brief": "short_column", "n": 1}
+    assert calibration.judge_answer(run, item, "summing_up_ending") == ("g/flash", "missing")
+    path = judge.judge_path(item, run)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["rules"]["summing_up_ending"]["question_sha"] = _sha("summing_up_ending")
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert calibration.judge_answer(run, item, "summing_up_ending") == ("g/flash", "yes")
+    assert calibration.judge_answer(run, item, "time_skip") == ("g/flash", "yes")
 
 
 # --- report ------------------------------------------------------------------
@@ -203,7 +243,7 @@ def test_judge_metrics_direction():
 
 def test_report_adds_only_owned_rules(tmp_path):
     run = _write_run(tmp_path, "g/flash", {"time_skip": "yes", "viewpoint_slip": "yes"})
-    cal = {"judges": {"g/flash": {"time_skip": {"owned": True}}}}
+    cal = {"judges": {"g/flash": {"time_skip": {"owned": True, "question_sha": _sha("time_skip")}}}}
     cell = report.summarize_run(run, cal)["cells"]["frank|m|draft_scene|short_column"]["metrics"]
     assert cell["judge_time_skip"] == 1.0
     assert cell["separation_correct"] == 0.0
@@ -285,6 +325,45 @@ def test_run_totals_keeps_a_slot_no_longer_configured(tmp_path, monkeypatch):
     judge.judge_item(_item(), tmp_path, _judge_ctx(tmp_path), _args())
     totals = judge.run_totals(tmp_path, {"second": JUDGES["second"]})
     assert totals["primary"]["calls"] == len(judge.RULES) + 1
+
+
+def test_judge_metrics_ignore_a_verdict_to_a_reworded_question(tmp_path):
+    run = _write_run(tmp_path, "g/flash", {"time_skip": "yes", "summing_up_ending": "yes"})
+    rules = ("time_skip", "summing_up_ending")
+    cal = {"judges": {"g/flash": {r: {"owned": True, "question_sha": _sha(r)} for r in rules}}}
+    cell = report.summarize_run(run, cal)["cells"]["frank|m|draft_scene|short_column"]["metrics"]
+    assert cell["judge_time_skip"] == 1.0 and "judge_summing_up_ending" not in cell
+
+
+def test_judge_item_records_the_question_and_re_asks_only_reworded_rules(tmp_path, monkeypatch):
+    calls = _counting_ask(monkeypatch)
+    ctx = _judge_ctx(tmp_path)
+    _, record = judge.judge_item(_item(), tmp_path, ctx, _args(separation=False))
+    assert all(v["question_sha"] == _sha(r) for r, v in record["rules"].items())
+    calls.clear()
+    monkeypatch.setitem(judge.RULES, "time_skip", "A reworded question?")
+    _, record = judge.judge_item(_item(), tmp_path, ctx, _args(separation=False))
+    assert len(calls) == 1
+    assert record["rules"]["time_skip"]["question_sha"] == judge.question_sha("A reworded question?")
+
+
+def test_a_verdict_without_question_sha_answered_the_legacy_wording(tmp_path, monkeypatch):
+    calls = _counting_ask(monkeypatch)
+    ctx = _judge_ctx(tmp_path)
+    judge.judge_item(_item(), tmp_path, ctx, _args(separation=False))
+    path = judge.judge_path(_item(), tmp_path)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    for verdict in record["rules"].values():
+        del verdict["question_sha"]
+    path.write_text(json.dumps(record), encoding="utf-8")
+    calls.clear()
+    _, record = judge.judge_item(_item(), tmp_path, ctx, _args(separation=False))
+    assert len(calls) == 2  # only the two reworded rules
+    assert record["rules"]["summing_up_ending"]["question_sha"] == _sha("summing_up_ending")
+    assert len(judge.question_sha("x")) == 12
+    assert set(judge.LEGACY_QUESTIONS) == set(judge.RULES)
+    changed = {r for r in judge.RULES if judge.LEGACY_QUESTIONS[r] != judge.RULES[r]}
+    assert changed == {"explained_after_shown", "summing_up_ending"}
 
 
 def test_band_refuses_runs_judged_by_different_models(tmp_path):

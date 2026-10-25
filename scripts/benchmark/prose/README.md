@@ -126,6 +126,16 @@ is better.
    absent answers at 80% agreement or better on each, agrees on 80% of the seeded present
    ones, and, if you found any natural present ones, on 80% of those too. Not-sure answers
    are never counted. Change the judge model and the calibration no longer applies.
+   When a rule's question is reworded, each verdict records the question it answered
+   (`question_sha`; verdicts from before count as the old wording). A plain `judge.py`
+   rerun re-asks only the reworded rules, a stale verdict counts as missing in the tally and
+   the report, and `calibration.json` records the question each rule was tallied against, so
+   a reworded question voids that rule's ownership until you retally. `--rules RULE ...` on
+   `calibration_seed.py` seeds only those rules (new drafts number after the folder's
+   highest). To add to a sheet you have started, `calibration.py extend <dir> --run <run>
+   --seeded <seeded> --natural N` appends N more natural Continue drafts and every seeded
+   passage not yet on it, numbered after the last id; existing items and answers are
+   untouched.
 5. `report.py <run> --calibration calibration.json` (also on `--band` and `--compare`)
    adds `judge_<rule>` for the owned rules (share of drafts with the failure; a rise is
    `worse`) and `separation_correct` (a fall is `worse`: the styles got harder to tell

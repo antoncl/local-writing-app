@@ -32,7 +32,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibration import owned_rules  # noqa: E402
 from checks import TARGET_WORDS, analyze, iter_drafts, load_phrases, load_samples  # noqa: E402
-from judge import RULES, judge_path  # noqa: E402
+from judge import RULES, judge_path, verdict_is_current  # noqa: E402
 
 PHRASES_PATH = Path(__file__).resolve().parent / "phrases.yaml"
 BOOK_PATH = Path(__file__).resolve().parent / "fixture" / "book.yaml"
@@ -95,7 +95,8 @@ def summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 def judge_metrics(run_dir: Path, item: dict[str, Any], calibration: dict[str, Any]) -> dict[str, float]:
     """Judge metrics for one draft: 1.0 yes / 0.0 no for the rules the calibration gives the judge's
-    model, plus separation if it ran. An unparsed or errored verdict is left out, never counted."""
+    model, plus separation if it ran. An unparsed, errored or stale (reworded question) verdict is left
+    out, never counted."""
     path = judge_path(item, run_dir)
     if not path.is_file():
         return {}
@@ -104,7 +105,7 @@ def judge_metrics(run_dir: Path, item: dict[str, Any], calibration: dict[str, An
     out = {
         f"judge_{rule}": 1.0 if verdict["answer"] == "yes" else 0.0
         for rule, verdict in record.get("rules", {}).items()
-        if rule in owned and verdict.get("answer") in ("yes", "no")
+        if rule in owned and verdict.get("answer") in ("yes", "no") and verdict_is_current(rule, verdict)
     }
     correct = record.get("separation", {}).get("correct")
     if correct is not None:

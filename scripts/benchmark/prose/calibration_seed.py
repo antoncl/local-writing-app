@@ -1,16 +1,19 @@
 """Plant one failure per passage for the judge's calibration (#2615).
 
-  calibration_seed.py SOURCE_RUN --out SEEDED_RUN [--per-rule 8] [--seed 2615] [--workers 4]
+  calibration_seed.py SOURCE_RUN --out SEEDED_RUN [--rules RULE ...] [--per-rule 8] [--seed 2615] [--workers 4]
 
-Picks `per-rule` Continue drafts from SOURCE_RUN for each rule, distinct across rules, and has the
+Picks `per-rule` Continue drafts from SOURCE_RUN for each rule (`--rules` limits which; default all),
+distinct across rules, and has the
 seeder model (`seeder:` in models.yaml; neither a judge nor a drafter) rewrite each to contain
 exactly that one failure. SEEDED_RUN is laid out as a run, so `judge.py SEEDED_RUN` judges it and
-`calibration.py sheet --seeded SEEDED_RUN` reads it. Seeded drafts are numbered from 100.
+`calibration.py sheet --seeded SEEDED_RUN` reads it. Seeded drafts are numbered from 100, or after the
+highest draft already in the folder.
 """
 
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import random
 import re
@@ -30,6 +33,7 @@ from setup_backend import load_judges, load_seeder  # noqa: E402
 
 FIRST_SEEDED_N = 100
 MIN_WORD_RATIO, MAX_WORD_RATIO = 0.5, 2.0
+MAX_WORDS_REMOVED = 25
 
 # One concrete instruction per rule: introduce this flaw once and nothing else.
 SEED_INSTRUCTIONS: dict[str, str] = {
@@ -43,11 +47,12 @@ SEED_INSTRUCTIONS: dict[str, str] = {
     ),
     "explained_after_shown": (
         "After a gesture, a look or a line of dialogue that the passage already shows, add one sentence in "
-        "which the narration spells out what it meant."
+        "which an outside narrator, not {pov}, explains to the reader what it meant: in a voice {pov} would "
+        "not use, stating it as fact rather than as {pov}'s guess."
     ),
     "summing_up_ending": (
-        "Replace the last sentence or add a final one that sums up, reflects on or states the meaning of "
-        "what has just happened, instead of ending inside the moment."
+        "Add a final sentence in which an outside narrator steps back from the moment to tell the reader "
+        "what the scene meant or would come to mean, in a voice and with a knowledge {pov} does not have."
     ),
     "narration_euphemism": (
         "Change one plain naming of a thing in the narration into a euphemism or a vague stand-in, where "
@@ -82,8 +87,16 @@ def clean_seed(text: str) -> str:
     return text
 
 
+def words_removed(source: str, result: str) -> int:
+    """How many of the source's words the rewrite drops (the old side of delete and replace edits)."""
+    old, new = source.split(), result.split()
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    return sum(i2 - i1 for tag, i1, i2, _, _ in ops if tag in ("delete", "replace"))
+
+
 def seed_problem(source: str, result: str) -> str | None:
-    """Why a (cleaned) rewrite is unusable, or None: empty, unchanged, or far from the source's length."""
+    """Why a (cleaned) rewrite is unusable, or None: empty, unchanged, far from the source's length,
+    or missing a stretch of the source (the seeder was seen deleting whole closing paragraphs)."""
     if not result.strip():
         return "empty reply"
     if result.strip() == source.strip():
@@ -91,6 +104,9 @@ def seed_problem(source: str, result: str) -> str | None:
     ratio = len(result.split()) / max(1, len(source.split()))
     if not MIN_WORD_RATIO <= ratio <= MAX_WORD_RATIO:
         return f"length {ratio:.2f}x the source, outside {MIN_WORD_RATIO}x-{MAX_WORD_RATIO}x"
+    removed = words_removed(source, result)
+    if removed > MAX_WORDS_REMOVED:
+        return f"deleted {removed} words of the source"
     return None
 
 
@@ -112,18 +128,32 @@ def seed_message(pov: str, lead_in: str, passage: str, rule: str) -> str:
     ])
 
 
-def plan_seeds(candidates: list[dict[str, Any]], per_rule: int, seed: int) -> list[dict[str, Any]]:
-    """`per_rule` distinct candidates per rule, each `{rule, source, n}` with `n` counted per folder from 100."""
-    need = per_rule * len(RULES)
+def highest_drafts(out: Path) -> dict[tuple[str, str, str], int]:
+    """The highest draft number already in each (case, model, brief) folder of `out`."""
+    found: dict[tuple[str, str, str], int] = {}
+    for path in out.glob("*/*/continue/*/draft_*.md"):
+        folder = (path.parts[-5], path.parts[-4], path.parts[-2])
+        found[folder] = max(found.get(folder, 0), int(path.stem.split("_")[1]))
+    return found
+
+
+def plan_seeds(
+    candidates: list[dict[str, Any]], per_rule: int, seed: int,
+    rules: list[str] | None = None, taken: dict[tuple[str, str, str], int] | None = None,
+) -> list[dict[str, Any]]:
+    """`per_rule` distinct candidates for each of `rules` (default all), each `{rule, source, n}` with `n`
+    counted per folder from 100, or after the highest draft number `taken` holds for that folder."""
+    chosen = list(rules or RULES)
+    need = per_rule * len(chosen)
     if len(candidates) < need:
         raise SystemExit(f"Only {len(candidates)} ok Continue drafts for {need} seeds ({per_rule} per rule): lower --per-rule.")
     picked = random.Random(seed).sample(candidates, need)
-    counters: dict[tuple[str, str, str], int] = {}
+    counters = {k: max(v, FIRST_SEEDED_N - 1) for k, v in (taken or {}).items()}
     plan = []
     for i, source in enumerate(picked):
         folder = (source["case"], source["model"], source["brief"])
         counters[folder] = counters.get(folder, FIRST_SEEDED_N - 1) + 1
-        plan.append({"rule": list(RULES)[i // per_rule], "source": source, "n": counters[folder]})
+        plan.append({"rule": chosen[i // per_rule], "source": source, "n": counters[folder]})
     return plan
 
 
@@ -160,19 +190,23 @@ def write_seed(out: Path, entry: dict[str, Any], text: str, fields: dict[str, An
 
 
 def seeded_ok(out: Path, entry: dict[str, Any]) -> bool:
-    """Whether this planned seed was already written with status ok (so a rerun skips it)."""
+    """Whether this planned seed (this source draft and rule) was already written with status ok, under
+    whatever number, so a rerun skips it."""
     source = entry["source"]
-    meta = out / source["case"] / source["model"] / "continue" / source["brief"] / f"meta_{entry['n']}.json"
-    if not meta.is_file():
-        return False
-    record = json.loads(meta.read_text(encoding="utf-8"))
-    return record.get("status") == "ok" and record.get("seeded_rule") == entry["rule"]
+    folder = out / source["case"] / source["model"] / "continue" / source["brief"]
+    origin = f"{source['case']}/{source['model']}/continue/{source['brief']}/draft_{source['n']}.md"
+    for meta in folder.glob("meta_*.json"):
+        record = json.loads(meta.read_text(encoding="utf-8"))
+        if record.get("status") == "ok" and record.get("seeded_rule") == entry["rule"] and record.get("source") == origin:
+            return True
+    return False
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("source_run", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--rules", nargs="+", choices=list(RULES), help="seed only these rules (default all)")
     parser.add_argument("--per-rule", type=int, default=8)
     parser.add_argument("--seed", type=int, default=2615)
     parser.add_argument("--workers", type=int, default=4, help="passages seeded at once (default 4)")
@@ -189,7 +223,7 @@ def main() -> None:
         d for d in iter_drafts(source_run) if d["prompt"] == "continue" and d["meta"].get("status", "ok") == "ok"
     ]
     # The plan is deterministic for a seed, so a rerun resumes: a passage already seeded ok is kept.
-    plan = [e for e in plan_seeds(candidates, args.per_rule, args.seed) if not seeded_ok(args.out, e)]
+    plan = [e for e in plan_seeds(candidates, args.per_rule, args.seed, args.rules, highest_drafts(args.out)) if not seeded_ok(args.out, e)]
     if not plan:
         print(f"every passage in {args.out} is already seeded")
         return

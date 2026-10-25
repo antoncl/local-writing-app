@@ -48,6 +48,36 @@ RULES: dict[str, str] = {
         "interval, for example by summarising hours or days in a sentence?"
     ),
     "explained_after_shown": (
+        "Does the narration spell out what a moment, gesture or line of dialogue means for the reader's "
+        "benefit, in a narrator's voice, rather than as the viewpoint character's own reading of it in "
+        "their own terms? A viewpoint character interpreting what they see is not this failure."
+    ),
+    "summing_up_ending": (
+        "Does the passage end with the narrator stepping back to state what the scene meant or will mean, "
+        "rather than ending inside the moment? A viewpoint character's own conclusion, in the moment and "
+        "in their terms, is not this failure."
+    ),
+    "narration_euphemism": (
+        "Does the narration use a euphemism or a vague stand-in where it could name the thing "
+        "plainly, in the viewpoint character's own terms?"
+    ),
+    "noticed_outside_viewpoint": (
+        "Does the narration notice something the viewpoint character would not notice, such as how "
+        "they look from outside or a fact about themselves they could not be aware of?"
+    ),
+}
+
+# The wordings before the two were reworded: a verdict with no `question_sha` answered these.
+LEGACY_QUESTIONS: dict[str, str] = {
+    "viewpoint_slip": (
+        "Does the narration ever report a thought, feeling or perception of a character other than "
+        "the viewpoint character, as if from inside them?"
+    ),
+    "time_skip": (
+        "Does the passage jump forward or back in time without the viewpoint character living the "
+        "interval, for example by summarising hours or days in a sentence?"
+    ),
+    "explained_after_shown": (
         "Does the narration spell out the meaning of a moment, gesture or line of dialogue that the "
         "scene has already shown?"
     ),
@@ -168,9 +198,24 @@ def ask(client: Client, assistant_id: str, system: str, message: str, choices: t
     }
 
 
-def is_done(verdict: dict[str, Any] | None) -> bool:
-    """A recorded verdict that need not be asked again (an error is retried on resume)."""
-    return verdict is not None and verdict.get("answer") != "error"
+def question_sha(question: str) -> str:
+    """A short fingerprint of a question's wording, recorded with the verdict that answered it."""
+    return hashlib.sha256(question.encode("utf-8")).hexdigest()[:12]
+
+
+def verdict_is_current(rule: str, verdict: dict[str, Any]) -> bool:
+    """Whether a rule verdict answered the rule's present wording; one with no `question_sha`
+    was written before verdicts recorded it and answered `LEGACY_QUESTIONS[rule]`."""
+    recorded = verdict.get("question_sha") or question_sha(LEGACY_QUESTIONS.get(rule, ""))
+    return recorded == question_sha(RULES[rule])
+
+
+def is_done(verdict: dict[str, Any] | None, rule: str | None = None) -> bool:
+    """A recorded verdict that need not be asked again (an error is retried on resume); for a rule
+    verdict also one that answered the rule's present wording."""
+    if verdict is None or verdict.get("answer") == "error":
+        return False
+    return rule is None or verdict_is_current(rule, verdict)
 
 
 def judge_path(item: dict[str, Any], run_dir: Path) -> Path:
@@ -214,9 +259,10 @@ def judge_item(
     if args.rules:
         context = passage_context(book, item)
         for rule, question in RULES.items():
-            if not is_done(record["rules"].get(rule)):
+            if not is_done(record["rules"].get(rule), rule):
                 message = rule_message(context, item["text"], question)
-                record["rules"][rule] = ask(client, assistant_id, SYSTEM, message, ("yes", "no"))
+                verdict = ask(client, assistant_id, SYSTEM, message, ("yes", "no"))
+                record["rules"][rule] = {**verdict, "question_sha": question_sha(question)}
     wants_separation = args.separation and item["prompt"] == "draft_scene" and item["case"] in STYLED
     if wants_separation and not is_done(record.get("separation")):
         record["separation"] = run_separation(client, assistant_id, book, item)

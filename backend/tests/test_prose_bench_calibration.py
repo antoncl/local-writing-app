@@ -66,8 +66,17 @@ def test_seed_problem():
     assert seed.seed_problem(source, source + "\n") == "identical to the source"
     assert "outside" in seed.seed_problem(source, " ".join(["w"] * 40))
     assert "outside" in seed.seed_problem(source, " ".join(["w"] * 201))
-    assert seed.seed_problem(source, " ".join(["w"] * 50)) is None
-    assert seed.seed_problem(source, " ".join(["w"] * 200)) is None
+    assert seed.seed_problem(source, " ".join(["word"] * 80)) is None
+    assert seed.seed_problem(source, " ".join(["word"] * 200)) is None
+
+
+def test_seed_problem_flags_deleted_source_words():
+    words = [f"w{i}" for i in range(100)]
+    source = " ".join(words)
+    assert seed.seed_problem(source, " ".join([*words[:75], "added", "words"])) is None  # 25 removed
+    assert seed.seed_problem(source, " ".join([*words[:74], *["added"] * 20])) == "deleted 26 words of the source"
+    closing_paragraph_gone = " ".join([*words[:60], *words[90:], *["more"] * 30])
+    assert seed.seed_problem(source, closing_paragraph_gone) == "deleted 30 words of the source"
 
 
 def test_seeder_conflict_with_a_judge_or_a_drafter():
@@ -85,6 +94,23 @@ def test_plan_seeds_is_distinct_deterministic_and_numbers_from_100():
     assert len({id(e["source"]) for e in plan}) == 12
     assert [e["rule"] for e in plan] == [r for r in judge.RULES for _ in range(2)]
     assert sorted(e["n"] for e in plan) == list(range(100, 112))
+
+
+def test_plan_seeds_limits_rules_and_numbers_after_existing_drafts():
+    candidates = [{"case": "frank", "model": "m", "brief": BRIEF, "n": n, "text": "t"} for n in range(1, 13)]
+    rules = ["time_skip", "summing_up_ending"]
+    taken = {("frank", "m", BRIEF): 105}
+    plan = seed.plan_seeds(candidates, 2, 7, rules, taken)
+    assert plan == seed.plan_seeds(candidates, 2, 7, rules, taken)
+    assert [e["rule"] for e in plan] == ["time_skip"] * 2 + ["summing_up_ending"] * 2
+    assert sorted(e["n"] for e in plan) == [106, 107, 108, 109]
+
+
+def test_highest_drafts_reads_the_out_folder(tmp_path):
+    source = {"case": "frank", "model": "m", "brief": BRIEF, "n": 1}
+    seed.write_seed(tmp_path, {"rule": "time_skip", "n": 103, "source": source}, "x", {"status": "ok"}, tmp_path, "s/m")
+    assert seed.highest_drafts(tmp_path) == {("frank", "m", BRIEF): 103}
+    assert seed.highest_drafts(tmp_path / "none") == {}
 
 
 def test_a_rerun_skips_seeds_already_written_ok(tmp_path):
@@ -182,6 +208,43 @@ def test_sheet_markdown_does_not_reveal_seeding(tmp_path):
     text = (_sheet(tmp_path) / "sheet.md").read_text(encoding="utf-8").lower()
     assert "seeded" not in text and "time_skip" in text  # the rule questions are shown, the rule key only as a label
     assert "## d01" in text
+
+
+def test_extend_appends_keeps_answers_and_continues_ids(tmp_path):
+    out = _sheet(tmp_path)
+    doc = yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8"))
+    doc["items"][0]["answers"]["time_skip"] = "yes"
+    doc["items"][0]["note"] = "mine"
+    (out / "answers.yaml").write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    natural = _make_run(tmp_path, "natural", 5)  # drafts 1-3 are on the sheet, 4-5 are new
+    seeded = _make_run(tmp_path, "seeded", 2, first_n=200, seeded=True)  # 100-102 are on the sheet
+    assert calibration.extend_sheet(out, natural, seeded, 2, 9) == (2, 2)
+    after = yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8"))
+    assert after["items"][:6] == doc["items"]
+    new = after["items"][6:]
+    assert [i["id"] for i in new] == ["d07", "d08", "d09", "d10"]
+    assert sorted(i["n"] for i in new) == [4, 5, 200, 201]
+    assert sum(i["seeded"] for i in new) == 2 and not any(any(i["answers"].values()) for i in new)
+    addresses = [(i["run"], i["n"]) for i in after["items"]]
+    assert len(set(addresses)) == len(addresses)
+    text = (out / "sheet.md").read_text(encoding="utf-8")
+    assert "## d10" in text and "## d01" in text and "seeded" not in text.lower()
+    assert calibration.extend_sheet(out, natural, seeded, 0, 9) == (0, 0)  # nothing new is left to add
+    assert len(yaml.safe_load((out / "answers.yaml").read_text(encoding="utf-8"))["items"]) == 10
+
+
+def test_extend_refuses_more_natural_drafts_than_remain(tmp_path):
+    out = _sheet(tmp_path)  # the natural run has 3 drafts, all on the sheet
+    with pytest.raises(SystemExit):
+        calibration.extend_sheet(out, tmp_path / "natural", tmp_path / "seeded", 1, 9)
+
+
+def test_the_reading_page_picks_up_appended_items(tmp_path):
+    out = _sheet(tmp_path)
+    natural = _make_run(tmp_path, "natural", 4)
+    calibration.extend_sheet(out, natural, tmp_path / "seeded", 1, 9)
+    store = serve.Store(out)
+    assert store.listing()["total"] == 7 and store.payload("d07")["id"] == "d07"
 
 
 # --- ownership -----------------------------------------------------------------

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibration</title>
+<style>
+  :root {
+    --bg: #faf8f4; --panel: #f1eee7; --text: #26231f; --muted: #6f6a60; --line: #ddd8cc;
+    --accent: #2f5d8a; --accent-text: #ffffff; --ok: #3f7a4f; --warn: #a4572a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --panel: #232220; --text: #e4e0d8; --muted: #9a958a; --line: #34322e;
+      --accent: #7fa8d4; --accent-text: #14120f; --ok: #7fbf8f; --warn: #d9996a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; display: flex; }
+  button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+           border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  aside { width: 190px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; }
+  #progress { margin-bottom: 8px; color: var(--muted); }
+  #next { width: 100%; margin-bottom: 12px; }
+  #list { list-style: none; margin: 0; padding: 0; }
+  #list li { display: flex; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+  #list li:hover { background: var(--panel); }
+  #list li.current { background: var(--panel); outline: 1px solid var(--accent); }
+  #list .mark { width: 1.2em; text-align: center; color: var(--muted); }
+  #list li.done .mark { color: var(--ok); }
+  #list li.partial .mark { color: var(--warn); }
+  main { flex: 1; overflow-y: auto; padding: 22px 28px 60px; }
+  .cols { display: flex; gap: 40px; align-items: flex-start; flex-wrap: wrap; }
+  .reading { flex: 1 1 36rem; min-width: 0; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .meta { color: var(--muted); margin-bottom: 12px; }
+  details { color: var(--muted); margin-bottom: 18px; max-width: 65ch; }
+  details summary { cursor: pointer; }
+  details p { white-space: pre-line; margin: 8px 0 0; }
+  .passage { max-width: 65ch; font: 18px/1.7 Georgia, "Times New Roman", serif; }
+  .passage p { margin: 0 0 1em; white-space: pre-line; }
+  .questions { flex: 0 0 22rem; max-width: 100%; position: sticky; top: 0; }
+  .q { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; }
+  .q.current { outline: 2px solid var(--accent); }
+  .q p { margin: 0 0 8px; }
+  .q .row { display: flex; gap: 6px; }
+  .q button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  textarea { width: 100%; min-height: 70px; margin-top: 6px; font: inherit; color: inherit;
+             background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+  #saved { color: var(--muted); font-size: 12px; margin-top: 6px; min-height: 1.2em; }
+  #saved.fail { color: var(--warn); }
+  #help { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: none; align-items: center; justify-content: center; }
+  #help.open { display: flex; }
+  #help div { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 18px 24px; }
+  #help h2 { font-size: 15px; margin: 0 0 8px; }
+  #help dt { float: left; clear: left; width: 6.5em; font-family: monospace; }
+  #help dd { margin: 0 0 4px 6.5em; }
+  #helpbtn { position: fixed; right: 12px; bottom: 12px; border-radius: 50%; width: 28px; height: 28px; padding: 0; }
+</style>
+</head>
+<body>
+<aside>
+  <div id="progress"></div>
+  <button id="next" type="button">Next unanswered</button>
+  <ul id="list"></ul>
+</aside>
+<main>
+  <div id="empty">Loading…</div>
+  <div id="item" hidden>
+    <h1 id="title"></h1>
+    <div class="meta" id="meta"></div>
+    <div class="cols">
+      <div class="reading">
+        <details><summary id="ctxlabel">Context</summary><p id="context"></p></details>
+        <div class="passage" id="passage"></div>
+      </div>
+      <div class="questions">
+        <div id="questions"></div>
+        <textarea id="note" placeholder="Note (optional)" aria-label="Note"></textarea>
+        <div id="saved"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<button id="helpbtn" type="button" aria-label="Keyboard help">?</button>
+<div id="help"><div>
+  <h2>Keyboard</h2>
+  <dl>
+    <dt>y / n / u</dt><dd>Yes / No / Not sure, then the next question</dd>
+    <dt>↑ ↓ / k j</dt><dd>Previous / next question</dd>
+    <dt>] / [</dt><dd>Next / previous draft</dd>
+    <dt>Space</dt><dd>Next unanswered draft</dd>
+    <dt>?</dt><dd>This help (Esc closes)</dd>
+  </dl>
+</div></div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MARKS = { untouched: "○", partial: "◐", done: "●" };
+const LABELS = { yes: "Yes", no: "No", unsure: "Not sure" };
+let items = [], doneCount = 0, cur = null, data = null, q = 0;
+
+async function api(path, options) {
+  const r = await fetch(path, options);
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || path + " " + r.status);
+  }
+  return r.json();
+}
+
+// ---- saving: every change is queued per item and retried with backoff until it lands ----
+const pending = new Map();
+let pumping = false, noteTimer = null;
+
+function setSaved(text, fail) {
+  const el = $("saved");
+  el.textContent = text;
+  el.classList.toggle("fail", !!fail);
+}
+
+function queueSave() {
+  if (!data) return;
+  clearTimeout(noteTimer);
+  noteTimer = null;
+  pending.set(data.id, { answers: { ...data.answers }, note: $("note").value });
+  setSaved("Saving…");
+  pump();
+}
+
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  let delay = 1000;
+  while (pending.size) {
+    const [id, payload] = pending.entries().next().value;
+    try {
+      const res = await api("/api/items/" + id, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      });
+      if (pending.get(id) === payload) pending.delete(id);
+      const entry = items.find((i) => i.id === id);
+      if (entry) entry.status = res.status;
+      renderList();
+      setSaved(pending.size ? "Saving…" : "Saved");
+      delay = 1000;
+    } catch (err) {
+      setSaved("Save failed — retrying", true);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 15000);
+    }
+  }
+  pumping = false;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (pending.size) { e.preventDefault(); e.returnValue = ""; }
+});
+
+// ---- list and navigation ----
+function renderList() {
+  const done = items.filter((i) => i.status === "done").length;
+  $("progress").textContent = done + " of " + items.length + " done";
+  const ul = $("list");
+  ul.textContent = "";
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = it.status + (it.id === cur ? " current" : "");
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.textContent = MARKS[it.status];
+    li.append(mark, document.createTextNode(it.id));
+    li.addEventListener("click", () => open(it.id));
+    ul.append(li);
+  }
+}
+
+function nextUnanswered(from) {
+  const start = Math.max(0, items.findIndex((i) => i.id === from));
+  for (let k = 1; k <= items.length; k++) {
+    const it = items[(start + k) % items.length];
+    if (it.status !== "done") return it.id;
+  }
+  return null;
+}
+
+async function open(id) {
+  if (!id) return;
+  if (noteTimer && data) queueSave(); // a note still waiting on its debounce belongs to the item we leave
+  let fresh;
+  try {
+    fresh = await api("/api/items/" + id);
+  } catch (err) {
+    // Show why the item cannot open, in place of whatever was on screen (or "Loading…").
+    cur = null; data = null;
+    $("item").hidden = true; $("empty").hidden = false;
+    $("empty").textContent = "Could not open " + id + ": " + err.message;
+    return;
+  }
+  cur = id; data = fresh; q = Math.max(0, data.questions.findIndex((x) => !data.answers[x.rule]));
+  location.hash = id;
+  $("empty").hidden = true; $("item").hidden = false;
+  $("title").textContent = data.id;
+  $("meta").textContent = (data.kind === "continuation" ? "Continuation" : "Scene draft") + " · viewpoint: " + data.pov;
+  $("ctxlabel").textContent = data.kind === "continuation" ? "Lead-in (context, not judged)" : "Scene brief";
+  $("context").textContent = data.context;
+  const passage = $("passage");
+  passage.textContent = "";
+  for (const para of data.text.split(/\n{2,}/)) {
+    const p = document.createElement("p");
+    p.textContent = para;
+    passage.append(p);
+  }
+  $("note").value = data.note;
+  $("saved").textContent = "";
+  renderQuestions(); renderList();
+  $("item").parentElement.scrollTop = 0;
+}
+
+function step(delta) {
+  const k = items.findIndex((i) => i.id === cur) + delta;
+  if (k >= 0 && k < items.length) open(items[k].id);
+}
+
+// ---- questions ----
+function renderQuestions() {
+  const box = $("questions");
+  box.textContent = "";
+  data.questions.forEach((item, idx) => {
+    const div = document.createElement("div");
+    div.className = "q" + (idx === q ? " current" : "");
+    const p = document.createElement("p");
+    p.textContent = item.question;
+    const row = document.createElement("div");
+    row.className = "row";
+    for (const value of ["yes", "no", "unsure"]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = LABELS[value];
+      b.className = data.answers[item.rule] === value ? "on" : "";
+      b.setAttribute("aria-pressed", String(data.answers[item.rule] === value));
+      b.addEventListener("click", () => { q = idx; choose(item.rule, value, false); b.blur(); });
+      row.append(b);
+    }
+    div.append(p, row);
+    box.append(div);
+  });
+}
+
+function choose(rule, value, fromKey) {
+  // Clicking the chosen answer clears it; the keys always set it.
+  data.answers[rule] = fromKey ? value : (data.answers[rule] === value ? null : value);
+  // A click or a key that answers moves the current question on, so the next key never lands on
+  // the question just answered: to the next blank one below, else simply the next one.
+  if (data.answers[rule] !== null) {
+    const blank = data.questions.findIndex((x, i) => i > q && data.answers[x.rule] == null);
+    q = blank >= 0 ? blank : Math.min(q + 1, data.questions.length - 1);
+  }
+  renderQuestions();
+  queueSave();
+}
+
+// ---- keyboard ----
+function toggleHelp(force) { $("help").classList.toggle("open", force); }
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "TEXTAREA" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const key = e.key;
+  if (key === "Escape") return toggleHelp(false);
+  if (key === "?") return toggleHelp();
+  if (!data) return;
+  const rule = data.questions[q].rule;
+  if (key === "y" || key === "n" || key === "u") choose(rule, { y: "yes", n: "no", u: "unsure" }[key], true);
+  else if (key === "ArrowDown" || key === "j") { q = Math.min(q + 1, data.questions.length - 1); renderQuestions(); }
+  else if (key === "ArrowUp" || key === "k") { q = Math.max(q - 1, 0); renderQuestions(); }
+  else if (key === "]") step(1);
+  else if (key === "[") step(-1);
+  else if (key === " ") open(nextUnanswered(cur));
+  else return;
+  e.preventDefault();
+});
+
+$("note").addEventListener("input", () => {
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(queueSave, 600);
+});
+$("note").addEventListener("blur", queueSave);
+$("next").addEventListener("click", () => open(nextUnanswered(cur)));
+$("helpbtn").addEventListener("click", () => toggleHelp());
+$("help").addEventListener("click", () => toggleHelp(false));
+
+async function start() {
+  const listing = await api("/api/items");
+  items = listing.items;
+  renderList();
+  const wanted = location.hash.slice(1);
+  const first = items.find((i) => i.status !== "done") || items[0];
+  const id = items.some((i) => i.id === wanted) ? wanted : first && first.id;
+  if (id) await open(id); else $("empty").textContent = "No drafts in this sheet.";
+}
+window.addEventListener("hashchange", () => {
+  const id = location.hash.slice(1);
+  if (id !== cur && items.some((i) => i.id === id)) open(id);
+});
+start().catch((err) => { $("empty").textContent = "Could not load: " + err.message; });
+</script>
+</body>
+</html>

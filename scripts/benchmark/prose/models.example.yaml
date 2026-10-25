@@ -36,3 +36,34 @@ models:
   #   max_tokens: 4096
   #   temperature: 0.8
   #   primary: false
+
+# The judges (H2, measuring-prose-quality.md section 4.2). Optional; each entry has the
+# shape of a `models:` entry without `primary`. setup_backend.py gives them an assistant in
+# every fixture project (skip with --no-judges). The judge must be a different family from
+# the primary drafter, and is never used on its own model's drafts: judge.py sends a draft
+# written by the primary judge's model to `second` instead.
+# judges:
+#   primary:
+#     name: judge-primary
+#     provider: openrouter
+#     model: google/gemini-3.6-flash
+#     max_tokens: 1024
+#     temperature: 0
+#   second:
+#     name: judge-second
+#     provider: openrouter
+#     model: deepseek/deepseek-v4-flash
+#     max_tokens: 1024
+#     temperature: 0
+
+# The seeder (calibration_seed.py). Optional; the shape of a `models:` entry without
+# `primary`. It rewrites passages to contain exactly one planted failure, so the judge can be
+# calibrated on every rule. It is neither the judge nor a drafter: calibration_seed.py refuses
+# a seeder whose model is either. setup_backend.py gives it an assistant like the judges'
+# (skip with --no-judges).
+# seeder:
+#   name: seeder
+#   provider: openrouter
+#   model: deepseek/deepseek-v4-pro
+#   max_tokens: 2048
+#   temperature: 0.7

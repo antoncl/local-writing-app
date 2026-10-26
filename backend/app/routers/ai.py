@@ -345,6 +345,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     col=exc.col,
                     undefined_name=exc.undefined_name,
                     undefined_namespace=exc.undefined_namespace,
+                    undefined_bare=exc.undefined_bare,
                 ),
                 effective_inputs=effective_inputs,
                 input_conflicts=input_conflicts,

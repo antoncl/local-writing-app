@@ -9,9 +9,15 @@ metadata:
   Scene brief snippet (#2511): the scene as its author designed it — its summary,
   then every field the author filled in, each under its label and description,
   so a field the author adds to the scene's schema reaches the model without
-  any prompt naming it. Set `brief_scene` to the scene
-  node, then include it inside a {% role %} block:
-      {% set brief_scene = e %}{% include "Scene brief" %}
+  any prompt naming it. Include it inside a {% role %} block:
+      {% include "Scene brief" %}
+
+  Depends on: the scene the prompt is about. That is `prose_scene` when the
+  including prompt sets it (a prompt working on a picked scene, as Draft scene
+  does: `{% set prose_scene = e %}` before the include), else the render
+  context's `scene` (the editor's scene, or the preview's target scene). With
+  neither, it renders nothing. The same convention as "Character voice in
+  prose" and "Prose generation settings" (#2634), so one `set` serves all three.
 
   Which fields: the ones the AI may write ("AI may write this field when
   committing a brainstorm" — `proposable`), plus references, which are story
@@ -28,7 +34,8 @@ metadata:
 #}
 {#- A list item value by its option label, when its member has options. -#}
 {% macro shown(member, value) %}{{ member.option_labels.get(value, value) if (member and value is string) else value }}{% endmacro %}
-{% set s = brief_scene %}
+{% set s = prose_scene if prose_scene is defined else (scene if scene is defined else none) %}
+{% if s %}
 ## This scene: {{ s.title }}
 {{ s.summary }}
 
@@ -66,3 +73,4 @@ _{{ f.description }}_
 {% endif %}
 {% endif %}
 {% endfor %}
+{% endif %}

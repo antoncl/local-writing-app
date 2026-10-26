@@ -21,10 +21,13 @@ metadata:
   fields — or a chat reply — into first person. The general facts (language,
   spelling, units, …) live in `Project settings`. Empty settings are
   omitted, so the block disappears when nothing is set.
-  The scene is the editor's current one; a prompt that works on a picked scene
-  sets `prose_scene` to it first (#2604), so this block and the prompt's own
-  viewpoint rule read the same narration. A scene's narration shows even when
-  the project itself sets none.
+  Depends on: the scene the prompt is about. That is `prose_scene` when the
+  including prompt sets it (a prompt working on a picked scene, #2604:
+  `{% set prose_scene = e %}` before the include, so this block and the prompt's
+  own viewpoint rule read the same narration), else the render context's `scene`
+  (the editor's scene, or the preview's target scene). The same convention as
+  "Character voice in prose" and "Scene brief" (#2634). A scene's narration shows
+  even when the project itself sets none.
 #}
 {%- set pscene = prose_scene if prose_scene is defined else (scene if scene is defined else none) -%}
 {%- set nar = resolved_narration(pscene) if pscene else none -%}

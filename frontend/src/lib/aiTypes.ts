@@ -195,6 +195,9 @@ export type PreviewErrorInfo = {
   // object (`project.language` → "project"), so the frontend can report a
   // wrong path instead of an undeclared input. Absent for undeclared inputs.
   undefined_namespace?: string | null;
+  // True when the undefined was a bare name (`brief_scene`), not an attribute
+  // miss. Never a missing input: inputs are reached only as `inputs.x` (#2634).
+  undefined_bare?: boolean;
 };
 
 export type AIPreviewResponse = {

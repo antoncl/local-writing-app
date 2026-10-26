@@ -111,7 +111,6 @@ What happens next, so this scene doesn't contradict or pre-empt it. Do not write
 {{ following.summary }}
 
 {% endif %}
-{% set brief_scene = e %}
 {% include "Scene brief" %}
 {% if changes %}
 

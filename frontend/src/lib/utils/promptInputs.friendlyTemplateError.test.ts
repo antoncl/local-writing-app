@@ -56,6 +56,21 @@ describe("friendlyTemplateError", () => {
     expect(msg).toContain("required input `Brief`");
   });
 
+  // #2634: a bare undefined name is never a missing input (inputs are reached only
+  // as `inputs.x`). Previewing "Scene brief" alone used to say "add an input".
+  it("treats a bare undefined name as a variable the template expects, not an input", () => {
+    const msg = friendlyTemplateError({ ...undef("brief_scene"), undefined_bare: true }, [], {});
+    expect(msg).toContain("`brief_scene` isn't defined here");
+    expect(msg).toContain("preview that prompt instead");
+    expect(msg).not.toContain("inputs.");
+    expect(msg).not.toContain("type editor");
+  });
+
+  it("suggests the inputs accessor when a bare name matches a declared input", () => {
+    const msg = friendlyTemplateError({ ...undef("genre"), undefined_bare: true }, [input("genre")], {});
+    expect(msg).toBe("`genre` isn't defined here. To read the input of that name, write `inputs.genre`.");
+  });
+
   it("reports a wrong path on a populated namespace (not a missing input)", () => {
     const msg = friendlyTemplateError(undef("language", "project"), [], {});
     expect(msg).toContain("`project.language`");

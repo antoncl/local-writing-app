@@ -663,6 +663,9 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(error["kind"], "undefined")
         self.assertEqual(error["undefined_name"], "nonexistent")
         self.assertIsNone(error["line"])
+        # A bare name is never a missing input (#2634): the frontend must not
+        # tell the author to declare one.
+        self.assertTrue(error["undefined_bare"])
 
     def test_undefined_input_attribute_carries_attr_name(self) -> None:
         # `inputs.character` with no character supplied is the canonical
@@ -684,6 +687,8 @@ class PreviewEndpointTests(unittest.TestCase):
         # `inputs.*` keeps its dedicated messaging — no namespace is reported, so
         # the frontend still explains it as an undeclared/empty input (#1019).
         self.assertIsNone(error["undefined_namespace"])
+        # An attribute miss on `inputs`, not a bare name (#2634).
+        self.assertFalse(error["undefined_bare"])
 
     def test_project_field_sugar_supersedes_namespace_miss(self) -> None:
         # ADR-0060 §3 overturns #1019's "namespace attribute miss": `project.<field>`

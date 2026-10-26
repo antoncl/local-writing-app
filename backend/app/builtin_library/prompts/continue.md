@@ -62,7 +62,6 @@ You continue a novel's prose from exactly where the author's cursor is. Pick up 
 {{ story_so_far(scene) }}
 
 {% endif %}
-{% set brief_scene = scene %}
 {% include "Scene brief" %}
 
 {% endif %}

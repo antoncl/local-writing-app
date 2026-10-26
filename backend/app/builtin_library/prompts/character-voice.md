@@ -19,9 +19,13 @@ metadata:
 
   It also places the viewpoint character's entry (#2619, ADR-0101 decision 3),
   so all ten prose built-ins send the character whose voice the narration
-  carries. The scene is resolved as "Prose generation settings" does: the
-  prompt's `prose_scene`, else the editor's `scene`, else none. A prompt that
-  already places the character itself is deduped by id.
+  carries. A prompt that already places the character itself is deduped by id.
+
+  Depends on: the scene the prompt is about. That is `prose_scene` when the
+  including prompt sets it (`{% set prose_scene = e %}` before the include),
+  else the render context's `scene` (the editor's scene, or the preview's target
+  scene); with neither, no character is placed. The same convention as "Prose
+  generation settings" and "Scene brief" (#2634).
 
   A voice has two parts (#2625, ADR-0101 decision 6): the narrating voice holds
   only while that character is the viewpoint, the speaking voice whenever they

@@ -58,6 +58,13 @@ def test_parse_verdict_no_json_is_unparsed():
     assert judge.parse_verdict("I think so.")["answer"] == "unparsed"
 
 
+def test_parse_verdict_reads_the_answer_from_broken_json():
+    # #2623: a quote with an unescaped quotation mark broke the JSON; the answer still stands.
+    broken = '```json\n{"answer": "C", "quote": "\\"Like dat, yeh are.""}\n```'
+    assert judge.parse_verdict(broken, ("A", "B", "C", "D")) == {"answer": "C", "quote": ""}
+    assert judge.parse_verdict('{"answer": "maybe", "quote": "x""}')["answer"] == "unparsed"
+
+
 def test_parse_verdict_separation_choices():
     assert judge.parse_verdict('{"answer": "b", "quote": "q"}', ("A", "B"))["answer"] == "B"
     assert judge.parse_verdict('{"answer": "yes"}', ("A", "B"))["answer"] == "unparsed"

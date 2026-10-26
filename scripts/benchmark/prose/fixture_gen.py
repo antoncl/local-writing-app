@@ -70,17 +70,26 @@ def load_fixture(case: str) -> dict[str, Any]:
 
 
 def write_fixture(case: str, fixture: dict[str, Any]) -> None:
-    (case_root(case) / "fixture.json").write_text(json.dumps(fixture, indent=2), encoding="utf-8")
+    write_json(case_root(case), fixture)
 
 
-def _remove_case(case: str) -> None:
-    """Delete one case's two folders - and only if each resolves inside the fixture root."""
+def builder_root(key: str) -> Path:
+    """The builder test's workspace project for one author (#2623)."""
+    return FIXTURE_ROOT / f"builder-{key}"
+
+
+def _remove_roots(*roots: Path) -> None:
+    """Delete folders - and only those that resolve inside the fixture root."""
     root = FIXTURE_ROOT.resolve()
-    for target in (case_root(case).resolve(), continue_case_root(case).resolve()):
+    for target in (r.resolve() for r in roots):
         if root not in target.parents:
             raise SystemExit(f"Refusing to delete {target}: not inside {root}")
         if target.exists():
             shutil.rmtree(target)
+
+
+def _remove_case(case: str) -> None:
+    _remove_roots(case_root(case), continue_case_root(case))
 
 
 def _save_lore(project: Client, entry: dict[str, Any], body: str, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -142,8 +151,11 @@ def _make_characters(project: Client, book: dict[str, Any]) -> dict[str, str]:
 
 def _make_note(project: Client, book: dict[str, Any], case: str) -> dict[str, str] | None:
     note = book["style_notes"].get(case)
-    if note is None:
-        return None
+    return None if note is None else _create_note(project, note)
+
+
+def _create_note(project: Client, note: dict[str, str]) -> dict[str, str]:
+    """A style note (`title`, `body`) set to context policy always."""
     created = project.post("/api/lore", {"title": note["title"], "entry_type": "lore:note"})
     _save_lore(project, created, note["body"], {"context_policy": "always"})
     return {"id": created["id"], "title": note["title"]}
@@ -239,6 +251,36 @@ def build_case(base_url: str, book: dict[str, Any], case: str) -> dict[str, Any]
             "cases": continues,
         },
     }
+
+
+def build_style_project(base_url: str, root: Path, book: dict[str, Any]) -> dict[str, Any]:
+    """One briefs project like a style case's, with no style note."""
+    project, made_root = _new_project(base_url, root, book)
+    try:
+        characters = _make_characters(project, book)
+        scenes = _make_briefs(project, book, characters)
+    finally:
+        project.close()
+    return {"root": made_root, "book_sha256": book_sha256(), "characters": characters, "scenes": scenes}
+
+
+def ensure_project(base_url: str, book: dict[str, Any], root: Path, regen: bool = False) -> dict[str, Any]:
+    """Build (or reuse) a project at `root` and record it in its `fixture.json`. A recorded project is
+    reused only when it was built from the same book; any other is deleted and rebuilt."""
+    path = root / "fixture.json"
+    if not regen and path.is_file():
+        fixture = json.loads(path.read_text(encoding="utf-8"))
+        if fixture.get("book_sha256") == book_sha256():
+            return fixture
+    _remove_roots(root)
+    root.parent.mkdir(parents=True, exist_ok=True)
+    fixture = build_style_project(base_url, root, book)
+    write_json(root, fixture)
+    return fixture
+
+
+def write_json(root: Path, fixture: dict[str, Any]) -> None:
+    (root / "fixture.json").write_text(json.dumps(fixture, indent=2), encoding="utf-8")
 
 
 def ensure_case(base_url: str, book: dict[str, Any], case: str, regen: bool) -> dict[str, Any]:

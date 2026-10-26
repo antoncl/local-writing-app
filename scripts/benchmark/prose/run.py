@@ -152,27 +152,29 @@ def cost_of(*values: Any) -> float:
     return sum(v for v in values if isinstance(v, int | float))
 
 
-def start_chat(project: Client, prompt: dict[str, Any], assistant_id: str, scene: dict[str, str], n: int) -> dict[str, Any]:
+def open_chat(
+    project: Client, prompt: dict[str, Any], assistant_id: str, title: str, subject: str, inputs: dict[str, Any]
+) -> dict[str, Any]:
     chat = project.post(
         "/api/chats",
-        {
-            "prompt_entry_id": prompt["id"],
-            "assistant_id": assistant_id,
-            "title": f"{scene['title']} - {prompt['title']} (draft {n})",
-            "subject": scene["id"],
-        },
+        {"prompt_entry_id": prompt["id"], "assistant_id": assistant_id, "title": title, "subject": subject},
     )
     # The launch's seeded inputs, saved before the pane opens (chatSessions.svelte.ts).
-    ref = {"id": scene["id"], "kind": "manuscript", "title": scene["title"], "entry_type": "manuscript:scene"}
     project.put(
         f"/api/nodes/{chat['id']}",
         {
             "title": chat["title"], "prompt_entry_id": chat["prompt_entry_id"],
             "assistant_id": chat["assistant_id"], "system_prompt": "", "subject": chat["subject"],
-            "pinned": False, "context_items": [], "messages": [], "inputs": {"entry": [ref]},
+            "pinned": False, "context_items": [], "messages": [], "inputs": inputs,
         },
     )
     return chat
+
+
+def start_chat(project: Client, prompt: dict[str, Any], assistant_id: str, scene: dict[str, str], n: int) -> dict[str, Any]:
+    ref = {"id": scene["id"], "kind": "manuscript", "title": scene["title"], "entry_type": "manuscript:scene"}
+    title = f"{scene['title']} - {prompt['title']} (draft {n})"
+    return open_chat(project, prompt, assistant_id, title, scene["id"], {"entry": [ref]})
 
 
 def blank_input_value(input_type: str) -> Any:
@@ -211,24 +213,31 @@ def preview_inputs(prompt: dict[str, Any], drafts: dict[str, Any]) -> dict[str, 
     return inputs
 
 
-def render_lock(project: Client, prompt: dict[str, Any], assistant_id: str, scene: dict[str, str]) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
-    drafts = {"entry": encode_pick(scene["id"], scene["title"])}
-    inputs = preview_inputs(prompt, drafts)
+def preview_lock(
+    project: Client, prompt: dict[str, Any], assistant_id: str, drafts: dict[str, Any], subject: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Render the prompt as the app does and return `(lock, raw preview)`."""
     preview = project.post(
         "/api/ai/preview",
         {
             "assistant_id": assistant_id,
             "template_source": prompt["body"],
             "target_scene_id": "",
-            "subject": scene["id"],
-            "inputs": inputs,
+            "subject": subject,
+            "inputs": preview_inputs(prompt, drafts),
             "resolution_scene_id": "",
             "commit": False,
         },
     )
     if preview.get("error"):
         raise StepFailed("error", f"Couldn't render prompt template: {preview['error'].get('message')}")
-    return lock_from_preview(preview), drafts, preview
+    return lock_from_preview(preview), preview
+
+
+def render_lock(project: Client, prompt: dict[str, Any], assistant_id: str, scene: dict[str, str]) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
+    drafts = {"entry": encode_pick(scene["id"], scene["title"])}
+    lock, preview = preview_lock(project, prompt, assistant_id, drafts, scene["id"])
+    return lock, drafts, preview
 
 
 def extract_draft(project: Client, scene_id: str, assistant_id: str, chat_id: str, history: list[dict[str, Any]], meta: dict[str, Any]) -> str:

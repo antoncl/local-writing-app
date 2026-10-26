@@ -1,0 +1,917 @@
+# Pages for the style builder test (measuring-prose-quality.md §3, §4.3; #2623).
+# Public-domain texts from Project Gutenberg. `pages` is the builder's input; `excerpts` are
+# three later passages of the same book the builder never sees, which the judge matches to
+# the inferred notes. `leak_terms` are names that would identify the author or the work: an
+# inferred note containing any of them fails the builder test outright.
+authors:
+- key: crane
+  author: Stephen Crane
+  work: 'Maggie: A Girl of the Streets'
+  source: 'Project Gutenberg eBook #447 (public domain in the USA)'
+  leak_terms:
+  - Crane
+  - Maggie
+  - Jimmie
+  - Rum Alley
+  pages: '"I met a chump deh odder day way up in deh city," he said. "I was goin'' teh see a frien'' of
+    mine. When I was a-crossin'' deh street deh chump runned plump inteh me, an'' den he turns aroun''
+    an'' says, ''Yer insolen'' ruffin,'' he says, like dat. ''Oh, gee,'' I says, ''oh, gee, go teh hell
+    and git off deh eart'','' I says, like dat. See? ''Go teh hell an'' git off deh eart'','' like dat.
+    Den deh blokie he got wild. He says I was a contempt''ble scoun''el, er somet''ing like dat, an''
+    he says I was doom'' teh everlastin'' pe''dition an'' all like dat. ''Gee,'' I says, ''gee! Deh hell
+    I am,'' I says. ''Deh hell I am,'' like dat. An'' den I slugged ''im. See?"
+
+
+    With Jimmie in his company, Pete departed in a sort of a blaze of glory from the Johnson home. Maggie,
+    leaning from the window, watched him as he walked down the street.
+
+
+    Here was a formidable man who disdained the strength of a world full of fists. Here was one who had
+    contempt for brass-clothed power; one whose knuckles could defiantly ring against the granite of law.
+    He was a knight.
+
+
+    Turning, Maggie contemplated the dark, dust-stained walls, and the scant and crude furniture of her
+    home. A clock, in a splintered and battered oblong box of varnished wood, she suddenly regarded as
+    an abomination. She noted that it ticked raspingly. The almost vanished flowers in the carpet-pattern,
+    she conceived to be newly hideous. Some faint attempts she had made with blue ribbon, to freshen the
+    appearance of a dingy curtain, she now saw to be piteous.
+
+
+    She reflected upon the collar and cuff factory. It began to appear to her mind as a dreary place of
+    endless grinding. Pete''s elegant occupation brought him, no doubt, into contact with people who had
+    money and manners. It was probable that he had a large acquaintance of pretty girls. He must have
+    great sums of money to spend.
+
+
+    To her the earth was composed of hardships and insults. She felt instant admiration for a man who
+    openly defied it. She thought that if the grim angel of death should clutch his heart, Pete would
+    shrug his shoulders and say: "Oh, ev''ryt''ing goes."
+
+
+    She anticipated that he would come again shortly. She spent some of her week''s pay in the purchase
+    of flowered cretonne for a lambrequin. She made it with infinite care and hung it to the slightly-careening
+    mantel, over the stove, in the kitchen. She studied it with painful anxiety from different points
+    in the room. She wanted it to look well on Sunday night when, perhaps, Jimmie''s friend would come.
+    On Sunday night, however, Pete did not appear.
+
+
+    A few evenings later Pete entered with fascinating innovations in his apparel. As she had seen him
+    twice and he had different suits on each time, Maggie had a dim impression that his wardrobe was prodigiously
+    extensive.
+
+
+    Over the eternal collars and cuffs in the factory Maggie spent the most of three days in making imaginary
+    sketches of Pete and his daily environment. She imagined some half dozen women in love with him and
+    thought he must lean dangerously toward an indefinite one, whom she pictured with great charms of
+    person, but with an altogether contemptible disposition.
+
+
+    She saw the golden glitter of the place where Pete was to take her. An entertainment of many hues
+    and many melodies where she was afraid she might appear small and mouse-colored.
+
+
+    Her mother drank whiskey all Friday morning. With lurid face and tossing hair she cursed and destroyed
+    furniture all Friday afternoon. When Maggie came home at half-past six her mother lay asleep amidst
+    the wreck of chairs and a table. Fragments of various household utensils were scattered about the
+    floor. She had vented some phase of drunken fury upon the lambrequin. It lay in a bedraggled heap
+    in the corner.
+
+
+    "Hah," she snorted, sitting up suddenly, "where deh hell yeh been? Why deh hell don'' yeh come home
+    earlier? Been loafin'' ''round deh streets. Yer gettin'' teh be a reg''lar devil."
+
+
+    When Pete arrived Maggie, in a worn black dress, was waiting for him in the midst of a floor strewn
+    with wreckage. The curtain at the window had been pulled by a heavy hand and hung by one tack, dangling
+    to and fro in the draft through the cracks at the sash. The knots of blue ribbons appeared like violated
+    flowers. The fire in the stove had gone out. The displaced lids and open doors showed heaps of sullen
+    grey ashes. The remnants of a meal, ghastly, like dead flesh, lay in a corner. Maggie''s red mother,
+    stretched on the floor, blasphemed and gave her daughter a bad name.
+
+
+    An orchestra of yellow silk women and bald-headed men on an elevated stage near the centre of a great
+    green-hued hall, played a popular waltz. The place was crowded with people grouped about little tables.
+    A battalion of waiters slid among the throng, carrying trays of beer glasses and making change from
+    the inexhaustible vaults of their trousers pockets. Little boys, in the costumes of French chefs,
+    paraded up and down the irregular aisles vending fancy cakes. There was a low rumble of conversation
+    and a subdued clinking of glasses. Clouds of tobacco smoke rolled and wavered high in air about the
+    dull gilt of the chandeliers.
+
+
+    The vast crowd had an air throughout of having just quitted labor. Men with calloused hands and attired
+    in garments that showed the wear of an endless trudge for a living, smoked their pipes contentedly
+    and spent five, ten, or perhaps fifteen cents for beer. There was a mere sprinkling of kid-gloved
+    men who smoked cigars purchased elsewhere. The great body of the crowd was composed of people who
+    showed that all day they strove with their hands. Quiet Germans, with maybe their wives and two or
+    three children, sat listening to the music, with the expressions of happy cows. An occasional party
+    of sailors from a war-ship, their faces pictures of sturdy health, spent the earlier hours of the
+    evening at the small round tables. Very infrequent tipsy men, swollen with the value of their opinions,
+    engaged their companions in earnest and confidential conversation. In the balcony, and here and there
+    below, shone the impassive faces of women. The nationalities of the Bowery beamed upon the stage from
+    all directions.
+
+
+    Leaning back he regarded with eyes of superiority the scene before them. This attitude affected Maggie
+    strongly. A man who could regard such a sight with indifference must be accustomed to very great things.
+
+
+    It was obvious that Pete had been to this place many times before, and was very familiar with it.
+    A knowledge of this fact made Maggie feel little and new.
+
+
+    Maggie perceived that Pete brought forth all his elegance and all his knowledge of high-class customs
+    for her benefit. Her heart warmed as she reflected upon his condescension.
+
+
+    The orchestra of yellow silk women and bald-headed men gave vent to a few bars of anticipatory music
+    and a girl, in a pink dress with short skirts, galloped upon the stage. She smiled upon the throng
+    as if in acknowledgment of a warm welcome, and began to walk to and fro, making profuse gesticulations
+    and singing, in brazen soprano tones, a song, the words of which were inaudible. When she broke into
+    the swift rattling measures of a chorus some half-tipsy men near the stage joined in the rollicking
+    refrain and glasses were pounded rhythmically upon the tables. People leaned forward to watch her
+    and to try to catch the words of the song. When she vanished there were long rollings of applause.
+
+
+    Obedient to more anticipatory bars, she reappeared amidst the half-suppressed cheering of the tipsy
+    men. The orchestra plunged into dance music and the laces of the dancer fluttered and flew in the
+    glare of gas jets. She divulged the fact that she was attired in some half dozen skirts. It was patent
+    that any one of them would have proved adequate for the purpose for which skirts are intended. An
+    occasional man bent forward, intent upon the pink stockings. Maggie wondered at the splendor of the
+    costume and lost herself in calculations of the cost of the silks and laces.
+
+
+    The dancer''s smile of stereotyped enthusiasm was turned for ten minutes upon the faces of her audience.
+    In the finale she fell into some of those grotesque attitudes which were at the time popular among
+    the dancers in the theatres up-town, giving to the Bowery public the phantasies of the aristocratic
+    theatre-going public, at reduced rates.
+
+
+    A ventriloquist followed the dancer. He held two fantastic dolls on his knees. He made them sing mournful
+    ditties and say funny things about geography and Ireland.
+
+
+    Two girls, on the bills as sisters, came forth and sang a duet that is heard occasionally at concerts
+    given under church auspices. They supplemented it with a dance which of course can never be seen at
+    concerts given under church auspices.'
+  excerpts:
+  - 'The interior of the place was papered in olive and bronze tints of imitation leather. A shining bar
+    of counterfeit massiveness extended down the side of the room. Behind it a great mahogany-appearing
+    sideboard reached the ceiling. Upon its shelves rested pyramids of shimmering glasses that were never
+    disturbed. Mirrors set in the face of the sideboard multiplied them. Lemons, oranges and paper napkins,
+    arranged with mathematical precision, sat among the glasses. Many-hued decanters of liquor perched
+    at regular intervals on the lower shelves. A nickel-plated cash register occupied a position in the
+    exact centre of the general effect. The elementary senses of it all seemed to be opulence and geometrical
+    accuracy.
+
+
+    Across from the bar a smaller counter held a collection of plates upon which swarmed frayed fragments
+    of crackers, slices of boiled ham, dishevelled bits of cheese, and pickles swimming in vinegar. An
+    odor of grasping, begrimed hands and munching mouths pervaded.
+
+
+    Pete, in a white jacket, was behind the bar bending expectantly toward a quiet stranger. "A beeh,"
+    said the man. Pete drew a foam-topped glassful and set it dripping upon the bar.
+
+
+    At this moment the light bamboo doors at the entrance swung open and crashed against the siding. Jimmie
+    and a companion entered. They swaggered unsteadily but belligerently toward the bar and looked at
+    Pete with bleared and blinking eyes.
+
+
+    Pete slid a bottle and two glasses along the bar. He bended his head sideways as he assiduously polished
+    away with a napkin at the gleaming wood. He had a look of watchfulness upon his features.
+
+
+    "Oh, hell, yes," said the companion, sneering widely. "He''s great, he is. Git onto deh mug on deh
+    blokie. Dat''s enough to make a feller turn hand-springs in ''is sleep."
+
+
+    As Pete confronted them with the bottle and the glasses, they laughed in his face. Jimmie''s companion,
+    evidently overcome with merriment, pointed a grimy forefinger in Pete''s direction.'
+  - 'Again he wondered vaguely if some of the women of his acquaintance had brothers. Nevertheless, his
+    mind did not for an instant confuse himself with those brothers nor his sister with theirs. After
+    the mother had, with great difficulty, suppressed the neighbors, she went among them and proclaimed
+    her grief. "May Gawd forgive dat girl," was her continual cry. To attentive ears she recited the whole
+    length and breadth of her woes.
+
+
+    "I bringed ''er up deh way a dauter oughta be bringed up an'' dis is how she served me! She went teh
+    deh devil deh first chance she got! May Gawd forgive her."
+
+
+    When arrested for drunkenness she used the story of her daughter''s downfall with telling effect upon
+    the police justices. Finally one of them said to her, peering down over his spectacles: "Mary, the
+    records of this and other courts show that you are the mother of forty-two daughters who have been
+    ruined. The case is unparalleled in the annals of this court, and this court thinks--"
+
+
+    Of course Jimmie publicly damned his sister that he might appear on a higher social plane. But, arguing
+    with himself, stumbling about in ways that he knew not, he, once, almost came to a conclusion that
+    his sister would have been more firmly good had she better known why. However, he felt that he could
+    not hold such a view. He threw it hastily aside.
+
+
+    In a hilarious hall there were twenty-eight tables and twenty-eight women and a crowd of smoking men.
+    Valiant noise was made on a stage at the end of the hall by an orchestra composed of men who looked
+    as if they had just happened in. Soiled waiters ran to and fro, swooping down like hawks on the unwary
+    in the throng; clattering along the aisles with trays covered with glasses; stumbling over women''s
+    skirts and charging two prices for everything but beer, all with a swiftness that blurred the view
+    of the cocoanut palms and dusty monstrosities painted upon the walls of the room. A bouncer, with
+    an immense load of business upon his hands, plunged about in the crowd, dragging bashful strangers
+    to prominent chairs, ordering waiters here and there and quarreling furiously with men who wanted
+    to sing with the orchestra.'
+  - 'He went hastily over to the side door. Opening it and looking out, he perceived Maggie standing,
+    as if undecided, on the corner. She was searching the place with her eyes.
+
+
+    As she turned her face toward him Pete beckoned to her hurriedly, intent upon returning with speed
+    to a position behind the bar and to the atmosphere of respectability upon which the proprietor insisted.
+
+
+    "Oh, my Gawd," cried he, vehemently. "What deh hell do yeh wanna hang aroun'' here fer? Do yeh wanna
+    git me inteh trouble?" he demanded with an air of injury.
+
+
+    "Say, yehs makes me tired. See? What deh hell deh yeh wanna tag aroun'' atter me fer? Yeh''ll git
+    me inteh trouble wid deh ol'' man an'' dey''ll be hell teh pay! If he sees a woman roun'' here he''ll
+    go crazy an'' I''ll lose me job! See? Yer brudder come in here an'' raised hell an'' deh ol'' man
+    hada put up fer it! An'' now I''m done! See? I''m done."
+
+
+    The girl seemed to have a struggle with herself. She was apparently bewildered and could not find
+    speech. Finally she asked in a low voice: "But where kin I go?"
+
+
+    The question exasperated Pete beyond the powers of endurance. It was a direct attempt to give him
+    some responsibility in a matter that did not concern him. In his indignation he volunteered information.
+
+
+    Soon the girl discovered that if she walked with such apparent aimlessness, some men looked at her
+    with calculating eyes. She quickened her step, frightened. As a protection, she adopted a demeanor
+    of intentness as if going somewhere.
+
+
+    After a time she left rattling avenues and passed between rows of houses with sternness and stolidity
+    stamped upon their features. She hung her head for she felt their eyes grimly upon her.'
+- key: chopin
+  author: Kate Chopin
+  work: The Awakening
+  source: 'Project Gutenberg eBook #160 (public domain in the USA)'
+  leak_terms:
+  - Chopin
+  - Awakening
+  - Edna
+  - Pontellier
+  - Grand Isle
+  pages: '“I felt giddy and almost overcome,” Edna said, lifting her hands instinctively to her head and
+    pushing her straw hat up from her forehead. “I couldn’t have stayed through the service.” They were
+    outside in the shadow of the church. Robert was full of solicitude.
+
+
+    “It was folly to have thought of going in the first place, let alone staying. Come over to Madame
+    Antoine’s; you can rest there.” He took her arm and led her away, looking anxiously and continuously
+    down into her face.
+
+
+    How still it was, with only the voice of the sea whispering through the reeds that grew in the salt-water
+    pools! The long line of little gray, weather-beaten houses nestled peacefully among the orange trees.
+    It must always have been God’s day on that low, drowsy island, Edna thought. They stopped, leaning
+    over a jagged fence made of sea-drift, to ask for water. A youth, a mild-faced Acadian, was drawing
+    water from the cistern, which was nothing more than a rusty buoy, with an opening on one side, sunk
+    in the ground. The water which the youth handed to them in a tin pail was not cold to taste, but it
+    was cool to her heated face, and it greatly revived and refreshed her.
+
+
+    Madame Antoine’s cot was at the far end of the village. She welcomed them with all the native hospitality,
+    as she would have opened her door to let the sunlight in. She was fat, and walked heavily and clumsily
+    across the floor. She could speak no English, but when Robert made her understand that the lady who
+    accompanied him was ill and desired to rest, she was all eagerness to make Edna feel at home and to
+    dispose of her comfortably.
+
+
+    The whole place was immaculately clean, and the big, four-posted bed, snow-white, invited one to repose.
+    It stood in a small side room which looked out across a narrow grass plot toward the shed, where there
+    was a disabled boat lying keel upward.
+
+
+    Madame Antoine had not gone to mass. Her son Tonie had, but she supposed he would soon be back, and
+    she invited Robert to be seated and wait for him. But he went and sat outside the door and smoked.
+    Madame Antoine busied herself in the large front room preparing dinner. She was boiling mullets over
+    a few red coals in the huge fireplace.
+
+
+    Edna, left alone in the little side room, loosened her clothes, removing the greater part of them.
+    She bathed her face, her neck and arms in the basin that stood between the windows. She took off her
+    shoes and stockings and stretched herself in the very center of the high, white bed. How luxurious
+    it felt to rest thus in a strange, quaint bed, with its sweet country odor of laurel lingering about
+    the sheets and mattress! She stretched her strong limbs that ached a little. She ran her fingers through
+    her loosened hair for a while. She looked at her round arms as she held them straight up and rubbed
+    them one after the other, observing closely, as if it were something she saw for the first time, the
+    fine, firm quality and texture of her flesh. She clasped her hands easily above her head, and it was
+    thus she fell asleep.
+
+
+    She slept lightly at first, half awake and drowsily attentive to the things about her. She could hear
+    Madame Antoine’s heavy, scraping tread as she walked back and forth on the sanded floor. Some chickens
+    were clucking outside the windows, scratching for bits of gravel in the grass. Later she half heard
+    the voices of Robert and Tonie talking under the shed. She did not stir. Even her eyelids rested numb
+    and heavily over her sleepy eyes. The voices went on—Tonie’s slow, Acadian drawl, Robert’s quick,
+    soft, smooth French. She understood French imperfectly unless directly addressed, and the voices were
+    only part of the other drowsy, muffled sounds lulling her senses.
+
+
+    When Edna awoke it was with the conviction that she had slept long and soundly. The voices were hushed
+    under the shed. Madame Antoine’s step was no longer to be heard in the adjoining room. Even the chickens
+    had gone elsewhere to scratch and cluck. The mosquito bar was drawn over her; the old woman had come
+    in while she slept and let down the bar. Edna arose quietly from the bed, and looking between the
+    curtains of the window, she saw by the slanting rays of the sun that the afternoon was far advanced.
+    Robert was out there under the shed, reclining in the shade against the sloping keel of the overturned
+    boat. He was reading from a book. Tonie was no longer with him. She wondered what had become of the
+    rest of the party. She peeped out at him two or three times as she stood washing herself in the little
+    basin between the windows.
+
+
+    Madame Antoine had laid some coarse, clean towels upon a chair, and had placed a box of poudre de
+    riz within easy reach. Edna dabbed the powder upon her nose and cheeks as she looked at herself closely
+    in the little distorted mirror which hung on the wall above the basin. Her eyes were bright and wide
+    awake and her face glowed.
+
+
+    When she had completed her toilet she walked into the adjoining room. She was very hungry. No one
+    was there. But there was a cloth spread upon the table that stood against the wall, and a cover was
+    laid for one, with a crusty brown loaf and a bottle of wine beside the plate. Edna bit a piece from
+    the brown loaf, tearing it with her strong, white teeth. She poured some of the wine into the glass
+    and drank it down. Then she went softly out of doors, and plucking an orange from the low-hanging
+    bough of a tree, threw it at Robert, who did not know she was awake and up.
+
+
+    “How many years have I slept?” she inquired. “The whole island seems changed. A new race of beings
+    must have sprung up, leaving only you and me as past relics. How many ages ago did Madame Antoine
+    and Tonie die? and when did our people from Grand Isle disappear from the earth?”
+
+
+    “You have slept precisely one hundred years. I was left here to guard your slumbers; and for one hundred
+    years I have been out under the shed reading a book. The only evil I couldn’t prevent was to keep
+    a broiled fowl from drying up.”
+
+
+    “If it has turned to stone, still will I eat it,” said Edna, moving with him into the house. “But
+    really, what has become of Monsieur Farival and the others?”
+
+
+    “Gone hours ago. When they found that you were sleeping they thought it best not to awake you. Any
+    way, I wouldn’t have let them. What was I here for?”
+
+
+    “Of course not; he knows you are with me,” Robert replied, as he busied himself among sundry pans
+    and covered dishes which had been left standing on the hearth.
+
+
+    “Gone to Vespers, and to visit some friends, I believe. I am to take you back in Tonie’s boat whenever
+    you are ready to go.”
+
+
+    He stirred the smoldering ashes till the broiled fowl began to sizzle afresh. He served her with no
+    mean repast, dripping the coffee anew and sharing it with her. Madame Antoine had cooked little else
+    than the mullets, but while Edna slept Robert had foraged the island. He was childishly gratified
+    to discover her appetite, and to see the relish with which she ate the food which he had procured
+    for her.
+
+
+    They waited a good while under the orange trees, till Madame Antoine came back, panting, waddling,
+    with a thousand apologies to explain her absence. Tonie did not dare to return. He was shy, and would
+    not willingly face any woman except his mother.
+
+
+    It was very pleasant to stay there under the orange trees, while the sun dipped lower and lower, turning
+    the western sky to flaming copper and gold. The shadows lengthened and crept out like stealthy, grotesque
+    monsters across the grass.
+
+
+    Edna and Robert both sat upon the ground—that is, he lay upon the ground beside her, occasionally
+    picking at the hem of her muslin gown.
+
+
+    Madame Antoine seated her fat body, broad and squat, upon a bench beside the door. She had been talking
+    all the afternoon, and had wound herself up to the storytelling pitch.
+
+
+    And what stories she told them! But twice in her life she had left the Chênière Caminada, and then
+    for the briefest span. All her years she had squatted and waddled there upon the island, gathering
+    legends of the Baratarians and the sea. The night came on, with the moon to lighten it. Edna could
+    hear the whispering voices of dead men and the click of muffled gold.
+
+
+    When she and Robert stepped into Tonie’s boat, with the red lateen sail, misty spirit forms were prowling
+    in the shadows and among the reeds, and upon the water were phantom ships, speeding to cover.'
+  excerpts:
+  - '“I know that; I told you I couldn’t explain. Her whole attitude—toward me and everybody and everything—has
+    changed. You know I have a quick temper, but I don’t want to quarrel or be rude to a woman, especially
+    my wife; yet I’m driven to it, and feel like ten thousand devils after I’ve made a fool of myself.
+    She’s making it devilishly uncomfortable for me,” he went on nervously. “She’s got some sort of notion
+    in her head concerning the eternal rights of women; and—you understand—we meet in the morning at the
+    breakfast table.”
+
+
+    “Has she,” asked the Doctor, with a smile, “has she been associating of late with a circle of pseudo-intellectual
+    women—super-spiritual superior beings? My wife has been telling me about them.”
+
+
+    “That’s the trouble,” broke in Mr. Pontellier, “she hasn’t been associating with any one. She has
+    abandoned her Tuesdays at home, has thrown over all her acquaintances, and goes tramping about by
+    herself, moping in the street-cars, getting in after dark. I tell you she’s peculiar. I don’t like
+    it; I feel a little worried over it.”
+
+
+    “Oh, no, indeed! She comes of sound old Presbyterian Kentucky stock. The old gentleman, her father,
+    I have heard, used to atone for his weekday sins with his Sunday devotions. I know for a fact, that
+    his race horses literally ran away with the prettiest bit of Kentucky farming land I ever laid eyes
+    upon. Margaret—you know Margaret—she has all the Presbyterianism undiluted. And the youngest is something
+    of a vixen. By the way, she gets married in a couple of weeks from now.”
+
+
+    “Send your wife up to the wedding,” exclaimed the Doctor, foreseeing a happy solution. “Let her stay
+    among her own people for a while; it will do her good.”
+
+
+    “That’s what I want her to do. She won’t go to the marriage. She says a wedding is one of the most
+    lamentable spectacles on earth. Nice thing for a woman to say to her husband!” exclaimed Mr. Pontellier,
+    fuming anew at the recollection.'
+  - 'Without even waiting for an answer from her husband regarding his opinion or wishes in the matter,
+    Edna hastened her preparations for quitting her home on Esplanade Street and moving into the little
+    house around the block. A feverish anxiety attended her every action in that direction. There was
+    no moment of deliberation, no interval of repose between the thought and its fulfillment. Early upon
+    the morning following those hours passed in Arobin’s society, Edna set about securing her new abode
+    and hurrying her arrangements for occupying it. Within the precincts of her home she felt like one
+    who has entered and lingered within the portals of some forbidden temple in which a thousand muffled
+    voices bade her begone.
+
+
+    Whatever was her own in the house, everything which she had acquired aside from her husband’s bounty,
+    she caused to be transported to the other house, supplying simple and meager deficiencies from her
+    own resources.
+
+
+    Arobin found her with rolled sleeves, working in company with the house-maid when he looked in during
+    the afternoon. She was splendid and robust, and had never appeared handsomer than in the old blue
+    gown, with a red silk handkerchief knotted at random around her head to protect her hair from the
+    dust. She was mounted upon a high stepladder, unhooking a picture from the wall when he entered. He
+    had found the front door open, and had followed his ring by walking in unceremoniously.
+
+
+    He was no doubt prepared for any emergency, ready for any one of the foregoing attitudes, just as
+    he bent himself easily and naturally to the situation which confronted him.
+
+
+    “No,” she answered; “Ellen is afraid to mount the ladder. Joe is working over at the ‘pigeon house’—that’s
+    the name Ellen gives it, because it’s so small and looks like a pigeon house—and some one has to do
+    this.”'
+  - '“He isn’t a friend of Mr. Pontellier’s; he’s a friend of mine. I always knew him—that is, it is only
+    of late that I know him pretty well. But I’d rather talk about you, and know what you have been seeing
+    and doing and feeling out there in Mexico.” Robert threw aside the picture.
+
+
+    “I’ve been seeing the waves and the white beach of Grand Isle; the quiet, grassy street of the Chênière;
+    the old fort at Grande Terre. I’ve been working like a machine, and feeling like a lost soul. There
+    was nothing interesting.”
+
+
+    “I’ve been seeing the waves and the white beach of Grand Isle; the quiet, grassy street of the Chênière
+    Caminada; the old sunny fort at Grande Terre. I’ve been working with a little more comprehension than
+    a machine, and still feeling like a lost soul. There was nothing interesting.”
+
+
+    “Mrs. Pontellier, you are cruel,” he said, with feeling, closing his eyes and resting his head back
+    in his chair. They remained in silence till old Celestine announced dinner.
+
+
+    The dining-room was very small. Edna’s round mahogany would have almost filled it. As it was there
+    was but a step or two from the little table to the kitchen, to the mantel, the small buffet, and the
+    side door that opened out on the narrow brick-paved yard.
+
+
+    A certain degree of ceremony settled upon them with the announcement of dinner. There was no return
+    to personalities. Robert related incidents of his sojourn in Mexico, and Edna talked of events likely
+    to interest him, which had occurred during his absence. The dinner was of ordinary quality, except
+    for the few delicacies which she had sent out to purchase. Old Celestine, with a bandana tignon twisted
+    about her head, hobbled in and out, taking a personal interest in everything; and she lingered occasionally
+    to talk patois with Robert, whom she had known as a boy.'
+- key: london
+  author: Jack London
+  work: The Call of the Wild
+  source: 'Project Gutenberg eBook #215 (public domain in the USA)'
+  leak_terms:
+  - London
+  - Call of the Wild
+  - Buck
+  - Thornton
+  - Klondike
+  pages: '“Dat Buck two devils,” was François’s rejoinder. “All de tam I watch dat Buck I know for sure.
+    Lissen: some dam fine day heem get mad lak hell an’ den heem chew dat Spitz all up an’ spit heem out
+    on de snow. Sure. I know.”
+
+
+    From then on it was war between them. Spitz, as lead-dog and acknowledged master of the team, felt
+    his supremacy threatened by this strange Southland dog. And strange Buck was to him, for of the many
+    Southland dogs he had known, not one had shown up worthily in camp and on trail. They were all too
+    soft, dying under the toil, the frost, and starvation. Buck was the exception. He alone endured and
+    prospered, matching the husky in strength, savagery, and cunning. Then he was a masterful dog, and
+    what made him dangerous was the fact that the club of the man in the red sweater had knocked all blind
+    pluck and rashness out of his desire for mastery. He was preeminently cunning, and could bide his
+    time with a patience that was nothing less than primitive.
+
+
+    It was inevitable that the clash for leadership should come. Buck wanted it. He wanted it because
+    it was his nature, because he had been gripped tight by that nameless, incomprehensible pride of the
+    trail and trace—that pride which holds dogs in the toil to the last gasp, which lures them to die
+    joyfully in the harness, and breaks their hearts if they are cut out of the harness. This was the
+    pride of Dave as wheel-dog, of Sol-leks as he pulled with all his strength; the pride that laid hold
+    of them at break of camp, transforming them from sour and sullen brutes into straining, eager, ambitious
+    creatures; the pride that spurred them on all day and dropped them at pitch of camp at night, letting
+    them fall back into gloomy unrest and uncontent. This was the pride that bore up Spitz and made him
+    thrash the sled-dogs who blundered and shirked in the traces or hid away at harness-up time in the
+    morning. Likewise it was this pride that made him fear Buck as a possible lead-dog. And this was Buck’s
+    pride, too.
+
+
+    He openly threatened the other’s leadership. He came between him and the shirks he should have punished.
+    And he did it deliberately. One night there was a heavy snowfall, and in the morning Pike, the malingerer,
+    did not appear. He was securely hidden in his nest under a foot of snow. François called him and sought
+    him in vain. Spitz was wild with wrath. He raged through the camp, smelling and digging in every likely
+    place, snarling so frightfully that Pike heard and shivered in his hiding-place.
+
+
+    But when he was at last unearthed, and Spitz flew at him to punish him, Buck flew, with equal rage,
+    in between. So unexpected was it, and so shrewdly managed, that Spitz was hurled backward and off
+    his feet. Pike, who had been trembling abjectly, took heart at this open mutiny, and sprang upon his
+    overthrown leader. Buck, to whom fair play was a forgotten code, likewise sprang upon Spitz. But François,
+    chuckling at the incident while unswerving in the administration of justice, brought his lash down
+    upon Buck with all his might. This failed to drive Buck from his prostrate rival, and the butt of
+    the whip was brought into play. Half-stunned by the blow, Buck was knocked backward and the lash laid
+    upon him again and again, while Spitz soundly punished the many times offending Pike.
+
+
+    In the days that followed, as Dawson grew closer and closer, Buck still continued to interfere between
+    Spitz and the culprits; but he did it craftily, when François was not around, With the covert mutiny
+    of Buck, a general insubordination sprang up and increased. Dave and Sol-leks were unaffected, but
+    the rest of the team went from bad to worse. Things no longer went right. There was continual bickering
+    and jangling. Trouble was always afoot, and at the bottom of it was Buck. He kept François busy, for
+    the dog-driver was in constant apprehension of the life-and-death struggle between the two which he
+    knew must take place sooner or later; and on more than one night the sounds of quarrelling and strife
+    among the other dogs turned him out of his sleeping robe, fearful that Buck and Spitz were at it.
+
+
+    But the opportunity did not present itself, and they pulled into Dawson one dreary afternoon with
+    the great fight still to come. Here were many men, and countless dogs, and Buck found them all at
+    work. It seemed the ordained order of things that dogs should work. All day they swung up and down
+    the main street in long teams, and in the night their jingling bells still went by. They hauled cabin
+    logs and firewood, freighted up to the mines, and did all manner of work that horses did in the Santa
+    Clara Valley. Here and there Buck met Southland dogs, but in the main they were the wild wolf husky
+    breed. Every night, regularly, at nine, at twelve, at three, they lifted a nocturnal song, a weird
+    and eerie chant, in which it was Buck’s delight to join.
+
+
+    With the aurora borealis flaming coldly overhead, or the stars leaping in the frost dance, and the
+    land numb and frozen under its pall of snow, this song of the huskies might have been the defiance
+    of life, only it was pitched in minor key, with long-drawn wailings and half-sobs, and was more the
+    pleading of life, the articulate travail of existence. It was an old song, old as the breed itself—one
+    of the first songs of the younger world in a day when songs were sad. It was invested with the woe
+    of unnumbered generations, this plaint by which Buck was so strangely stirred. When he moaned and
+    sobbed, it was with the pain of living that was of old the pain of his wild fathers, and the fear
+    and mystery of the cold and dark that was to them fear and mystery. And that he should be stirred
+    by it marked the completeness with which he harked back through the ages of fire and roof to the raw
+    beginnings of life in the howling ages.
+
+
+    Seven days from the time they pulled into Dawson, they dropped down the steep bank by the Barracks
+    to the Yukon Trail, and pulled for Dyea and Salt Water. Perrault was carrying despatches if anything
+    more urgent than those he had brought in; also, the travel pride had gripped him, and he purposed
+    to make the record trip of the year. Several things favored him in this. The week’s rest had recuperated
+    the dogs and put them in thorough trim. The trail they had broken into the country was packed hard
+    by later journeyers. And further, the police had arranged in two or three places deposits of grub
+    for dog and man, and he was travelling light.
+
+
+    They made Sixty Mile, which is a fifty-mile run, on the first day; and the second day saw them booming
+    up the Yukon well on their way to Pelly. But such splendid running was achieved not without great
+    trouble and vexation on the part of François. The insidious revolt led by Buck had destroyed the solidarity
+    of the team. It no longer was as one dog leaping in the traces. The encouragement Buck gave the rebels
+    led them into all kinds of petty misdemeanors. No more was Spitz a leader greatly to be feared. The
+    old awe departed, and they grew equal to challenging his authority. Pike robbed him of half a fish
+    one night, and gulped it down under the protection of Buck. Another night Dub and Joe fought Spitz
+    and made him forego the punishment they deserved. And even Billee, the good-natured, was less good-natured,
+    and whined not half so placatingly as in former days. Buck never came near Spitz without snarling
+    and bristling menacingly. In fact, his conduct approached that of a bully, and he was given to swaggering
+    up and down before Spitz’s very nose.
+
+
+    The breaking down of discipline likewise affected the dogs in their relations with one another. They
+    quarrelled and bickered more than ever among themselves, till at times the camp was a howling bedlam.
+    Dave and Sol-leks alone were unaltered, though they were made irritable by the unending squabbling.
+    François swore strange barbarous oaths, and stamped the snow in futile rage, and tore his hair. His
+    lash was always singing among the dogs, but it was of small avail. Directly his back was turned they
+    were at it again. He backed up Spitz with his whip, while Buck backed up the remainder of the team.
+    François knew he was behind all the trouble, and Buck knew he knew; but Buck was too clever ever again
+    to be caught red-handed. He worked faithfully in the harness, for the toil had become a delight to
+    him; yet it was a greater delight slyly to precipitate a fight amongst his mates and tangle the traces.'
+  excerpts:
+  - 'Kind-hearted citizens caught the dogs and gathered up the scattered belongings. Also, they gave advice.
+    Half the load and twice the dogs, if they ever expected to reach Dawson, was what was said. Hal and
+    his sister and brother-in-law listened unwillingly, pitched tent, and overhauled the outfit. Canned
+    goods were turned out that made men laugh, for canned goods on the Long Trail is a thing to dream
+    about. “Blankets for a hotel” quoth one of the men who laughed and helped. “Half as many is too much;
+    get rid of them. Throw away that tent, and all those dishes,—who’s going to wash them, anyway? Good
+    Lord, do you think you’re travelling on a Pullman?”
+
+
+    And so it went, the inexorable elimination of the superfluous. Mercedes cried when her clothes-bags
+    were dumped on the ground and article after article was thrown out. She cried in general, and she
+    cried in particular over each discarded thing. She clasped hands about knees, rocking back and forth
+    broken-heartedly. She averred she would not go an inch, not for a dozen Charleses. She appealed to
+    everybody and to everything, finally wiping her eyes and proceeding to cast out even articles of apparel
+    that were imperative necessaries. And in her zeal, when she had finished with her own, she attacked
+    the belongings of her men and went through them like a tornado.
+
+
+    This accomplished, the outfit, though cut in half, was still a formidable bulk. Charles and Hal went
+    out in the evening and bought six Outside dogs. These, added to the six of the original team, and
+    Teek and Koona, the huskies obtained at the Rink Rapids on the record trip, brought the team up to
+    fourteen. But the Outside dogs, though practically broken in since their landing, did not amount to
+    much. Three were short-haired pointers, one was a Newfoundland, and the other two were mongrels of
+    indeterminate breed. They did not seem to know anything, these newcomers. Buck and his comrades looked
+    upon them with disgust, and though he speedily taught them their places and what not to do, he could
+    not teach them what to do. They did not take kindly to trace and trail. With the exception of the
+    two mongrels, they were bewildered and spirit-broken by the strange savage environment in which they
+    found themselves and by the ill treatment they had received. The two mongrels were without spirit
+    at all; bones were the only things breakable about them.'
+  - 'He was older than the days he had seen and the breaths he had drawn. He linked the past with the
+    present, and the eternity behind him throbbed through him in a mighty rhythm to which he swayed as
+    the tides and seasons swayed. He sat by John Thornton’s fire, a broad-breasted dog, white-fanged and
+    long-furred; but behind him were the shades of all manner of dogs, half-wolves and wild wolves, urgent
+    and prompting, tasting the savor of the meat he ate, thirsting for the water he drank, scenting the
+    wind with him, listening with him and telling him the sounds made by the wild life in the forest,
+    dictating his moods, directing his actions, lying down to sleep with him when he lay down, and dreaming
+    with him and beyond him and becoming themselves the stuff of his dreams.
+
+
+    So peremptorily did these shades beckon him, that each day mankind and the claims of mankind slipped
+    farther from him. Deep in the forest a call was sounding, and as often as he heard this call, mysteriously
+    thrilling and luring, he felt compelled to turn his back upon the fire and the beaten earth around
+    it, and to plunge into the forest, and on and on, he knew not where or why; nor did he wonder where
+    or why, the call sounding imperiously, deep in the forest. But as often as he gained the soft unbroken
+    earth and the green shade, the love for John Thornton drew him back to the fire again.
+
+
+    Thornton alone held him. The rest of mankind was as nothing. Chance travellers might praise or pet
+    him; but he was cold under it all, and from a too demonstrative man he would get up and walk away.
+    When Thornton’s partners, Hans and Pete, arrived on the long-expected raft, Buck refused to notice
+    them till he learned they were close to Thornton; after that he tolerated them in a passive sort of
+    way, accepting favors from them as though he favored them by accepting. They were of the same large
+    type as Thornton, living close to the earth, thinking simply and seeing clearly; and ere they swung
+    the raft into the big eddy by the saw-mill at Dawson, they understood Buck and his ways, and did not
+    insist upon an intimacy such as obtained with Skeet and Nig.'
+  - 'Spring came on once more, and at the end of all their wandering they found, not the Lost Cabin, but
+    a shallow placer in a broad valley where the gold showed like yellow butter across the bottom of the
+    washing-pan. They sought no farther. Each day they worked earned them thousands of dollars in clean
+    dust and nuggets, and they worked every day. The gold was sacked in moose-hide bags, fifty pounds
+    to the bag, and piled like so much firewood outside the spruce-bough lodge. Like giants they toiled,
+    days flashing on the heels of days like dreams as they heaped the treasure up.
+
+
+    There was nothing for the dogs to do, save the hauling in of meat now and again that Thornton killed,
+    and Buck spent long hours musing by the fire. The vision of the short-legged hairy man came to him
+    more frequently, now that there was little work to be done; and often, blinking by the fire, Buck
+    wandered with him in that other world which he remembered.
+
+
+    The salient thing of this other world seemed fear. When he watched the hairy man sleeping by the fire,
+    head between his knees and hands clasped above, Buck saw that he slept restlessly, with many starts
+    and awakenings, at which times he would peer fearfully into the darkness and fling more wood upon
+    the fire. Did they walk by the beach of a sea, where the hairy man gathered shellfish and ate them
+    as he gathered, it was with eyes that roved everywhere for hidden danger and with legs prepared to
+    run like the wind at its first appearance. Through the forest they crept noiselessly, Buck at the
+    hairy man’s heels; and they were alert and vigilant, the pair of them, ears twitching and moving and
+    nostrils quivering, for the man heard and smelled as keenly as Buck. The hairy man could spring up
+    into the trees and travel ahead as fast as on the ground, swinging by the arms from limb to limb,
+    sometimes a dozen feet apart, letting go and catching, never falling, never missing his grip. In fact,
+    he seemed as much at home among the trees as on the ground; and Buck had memories of nights of vigil
+    spent beneath trees wherein the hairy man roosted, holding on tightly as he slept.'
+- key: wharton
+  author: Edith Wharton
+  work: The House of Mirth
+  source: 'Project Gutenberg eBook #284 (public domain in the USA)'
+  leak_terms:
+  - Wharton
+  - House of Mirth
+  - Lily
+  - Bart
+  - Selden
+  pages: 'He reddened slowly, shifting from one foot to the other, fingered the plump black pearl in his
+    tie, and gave a nervous twist to his moustache; then, running his eye over her, he drew back, and
+    said, with a side-glance at Selden: “Upon my soul, I never saw a more ripping get-up. Is that the
+    last creation of the dress-maker you go to see at the Benedick? If so, I wonder all the other women
+    don’t go to her too!”
+
+
+    The words were projected sharply against Lily’s silence, and she saw in a flash that her own act had
+    given them their emphasis. In ordinary talk they might have passed unheeded; but following on her
+    prolonged pause they acquired a special meaning. She felt, without looking, that Selden had immediately
+    seized it, and would inevitably connect the allusion with her visit to himself. The consciousness
+    increased her irritation against Rosedale, but also her feeling that now, if ever, was the moment
+    to propitiate him, hateful as it was to do so in Selden’s presence.
+
+
+    “How do you know the other women don’t go to my dress-maker?” she returned. “You see I’m not afraid
+    to give her address to my friends!”
+
+
+    Her glance and accent so plainly included Rosedale in this privileged circle that his small eyes puckered
+    with gratification, and a knowing smile drew up his moustache.
+
+
+    “Ah, that’s nice of you; and it would be nicer still if you would carry me off to a quiet corner,
+    and get me a glass of lemonade or some innocent drink before we all have to rush for the train.”
+
+
+    She turned away as she spoke, letting him strut at her side through the gathering groups on the terrace,
+    while every nerve in her throbbed with the consciousness of what Selden must have thought of the scene.
+
+
+    But under her angry sense of the perverseness of things, and the light surface of her talk with Rosedale,
+    a third idea persisted: she did not mean to leave without an attempt to discover the truth about Percy
+    Gryce. Chance, or perhaps his own resolve, had kept them apart since his hasty withdrawal from Bellomont;
+    but Miss Bart was an expert in making the most of the unexpected, and the distasteful incidents of
+    the last few minutes—the revelation to Selden of precisely that part of her life which she most wished
+    him to ignore—increased her longing for shelter, for escape from such humiliating contingencies. Any
+    definite situation would be more tolerable than this buffeting of chances, which kept her in an attitude
+    of uneasy alertness toward every possibility of life.
+
+
+    Indoors there was a general sense of dispersal in the air, as of an audience gathering itself up for
+    departure after the principal actors had left the stage; but among the remaining groups, Lily could
+    discover neither Gryce nor the youngest Miss Van Osburgh. That both should be missing struck her with
+    foreboding; and she charmed Mr. Rosedale by proposing that they should make their way to the conservatories
+    at the farther end of the house. There were just enough people left in the long suite of rooms to
+    make their progress conspicuous, and Lily was aware of being followed by looks of amusement and interrogation,
+    which glanced off as harmlessly from her indifference as from her companion’s self-satisfaction. She
+    cared very little at that moment about being seen with Rosedale: all her thoughts were centred on
+    the object of her search. The latter, however, was not discoverable in the conservatories, and Lily,
+    oppressed by a sudden conviction of failure, was casting about for a way to rid herself of her now
+    superfluous companion, when they came upon Mrs. Van Osburgh, flushed and exhausted, but beaming with
+    the consciousness of duty performed.
+
+
+    She glanced at them a moment with the benign but vacant eye of the tired hostess, to whom her guests
+    have become mere whirling spots in a kaleidoscope of fatigue; then her attention became suddenly fixed,
+    and she seized on Miss Bart with a confidential gesture. “My dear Lily, I haven’t had time for a word
+    with you, and now I suppose you are just off. Have you seen Evie? She’s been looking everywhere for
+    you: she wanted to tell you her little secret; but I daresay you have guessed it already. The engagement
+    is not to be announced till next week—but you are such a friend of Mr. Gryce’s that they both wished
+    you to be the first to know of their happiness.”
+
+
+    In Mrs. Peniston’s youth, fashion had returned to town in October; therefore on the tenth day of the
+    month the blinds of her Fifth Avenue residence were drawn up, and the eyes of the Dying Gladiator
+    in bronze who occupied the drawing-room window resumed their survey of that deserted thoroughfare.
+
+
+    The first two weeks after her return represented to Mrs. Peniston the domestic equivalent of a religious
+    retreat. She “went through” the linen and blankets in the precise spirit of the penitent exploring
+    the inner folds of conscience; she sought for moths as the stricken soul seeks for lurking infirmities.
+    The topmost shelf of every closet was made to yield up its secret, cellar and coal-bin were probed
+    to their darkest depths and, as a final stage in the lustral rites, the entire house was swathed in
+    penitential white and deluged with expiatory soapsuds.
+
+
+    It was on this phase of the proceedings that Miss Bart entered on the afternoon of her return from
+    the Van Osburgh wedding. The journey back to town had not been calculated to soothe her nerves. Though
+    Evie Van Osburgh’s engagement was still officially a secret, it was one of which the innumerable intimate
+    friends of the family were already possessed; and the trainful of returning guests buzzed with allusions
+    and anticipations. Lily was acutely aware of her own part in this drama of innuendo: she knew the
+    exact quality of the amusement the situation evoked. The crude forms in which her friends took their
+    pleasure included a loud enjoyment of such complications: the zest of surprising destiny in the act
+    of playing a practical joke. Lily knew well enough how to bear herself in difficult situations. She
+    had, to a shade, the exact manner between victory and defeat: every insinuation was shed without an
+    effort by the bright indifference of her manner. But she was beginning to feel the strain of the attitude;
+    the reaction was more rapid, and she lapsed to a deeper self-disgust.
+
+
+    As was always the case with her, this moral repulsion found a physical outlet in a quickened distaste
+    for her surroundings. She revolted from the complacent ugliness of Mrs. Peniston’s black walnut, from
+    the slippery gloss of the vestibule tiles, and the mingled odour of sapolio and furniture-polish that
+    met her at the door.
+
+
+    The stairs were still carpetless, and on the way up to her room she was arrested on the landing by
+    an encroaching tide of soapsuds. Gathering up her skirts, she drew aside with an impatient gesture;
+    and as she did so she had the odd sensation of having already found herself in the same situation
+    but in different surroundings. It seemed to her that she was again descending the staircase from Selden’s
+    rooms; and looking down to remonstrate with the dispenser of the soapy flood, she found herself met
+    by a lifted stare which had once before confronted her under similar circumstances. It was the char-woman
+    of the Benedick who, resting on crimson elbows, examined her with the same unflinching curiosity,
+    the same apparent reluctance to let her pass. On this occasion, however, Miss Bart was on her own
+    ground.
+
+
+    The woman at first seemed not to hear; then, without a word of excuse, she pushed back her pail and
+    dragged a wet floor-cloth across the landing, keeping her eyes fixed on Lily while the latter swept
+    by. It was insufferable that Mrs. Peniston should have such creatures about the house; and Lily entered
+    her room resolved that the woman should be dismissed that evening.
+
+
+    Mrs. Peniston, however, was at the moment inaccessible to remonstrance: since early morning she had
+    been shut up with her maid, going over her furs, a process which formed the culminating episode in
+    the drama of household renovation. In the evening also Lily found herself alone, for her aunt, who
+    rarely dined out, had responded to the summons of a Van Alstyne cousin who was passing through town.
+    The house, in its state of unnatural immaculateness and order, was as dreary as a tomb, and as Lily,
+    turning from her brief repast between shrouded sideboards, wandered into the newly-uncovered glare
+    of the drawing-room she felt as though she were buried alive in the stifling limits of Mrs. Peniston’s
+    existence.
+
+
+    She usually contrived to avoid being at home during the season of domestic renewal. On the present
+    occasion, however, a variety of reasons had combined to bring her to town; and foremost among them
+    was the fact that she had fewer invitations than usual for the autumn. She had so long been accustomed
+    to pass from one country-house to another, till the close of the holidays brought her friends to town,
+    that the unfilled gaps of time confronting her produced a sharp sense of waning popularity. It was
+    as she had said to Selden—people were tired of her. They would welcome her in a new character, but
+    as Miss Bart they knew her by heart. She knew herself by heart too, and was sick of the old story.
+    There were moments when she longed blindly for anything different, anything strange, remote and untried;
+    but the utmost reach of her imagination did not go beyond picturing her usual life in a new setting.
+    She could not figure herself as anywhere but in a drawing-room, diffusing elegance as a flower sheds
+    perfume.'
+  excerpts:
+  - '“If you mean me, Mr. Rosedale, I am very grateful—very much flattered; but I don’t know what I have
+    ever done to make you think—”
+
+
+    “Oh, if you mean you’re not dead in love with me, I’ve got sense enough left to see that. And I ain’t
+    talking to you as if you were—I presume I know the kind of talk that’s expected under those circumstances.
+    I’m confoundedly gone on you—that’s about the size of it—and I’m just giving you a plain business
+    statement of the consequences. You’re not very fond of me—YET—but you’re fond of luxury, and style,
+    and amusement, and of not having to worry about cash. You like to have a good time, and not have to
+    settle for it; and what I propose to do is to provide for the good time and do the settling.”
+
+
+    He paused, and she returned with a chilling smile: “You are mistaken in one point, Mr. Rosedale: whatever
+    I enjoy I am prepared to settle for.”
+
+
+    She spoke with the intention of making him see that, if his words implied a tentative allusion to
+    her private affairs, she was prepared to meet and repudiate it. But if he recognized her meaning it
+    failed to abash him, and he went on in the same tone: “I didn’t mean to give offence; excuse me if
+    I’ve spoken too plainly. But why ain’t you straight with me—why do you put up that kind of bluff?
+    You know there’ve been times when you were bothered—damned bothered—and as a girl gets older, and
+    things keep moving along, why, before she knows it, the things she wants are liable to move past her
+    and not come back. I don’t say it’s anywhere near that with you yet; but you’ve had a taste of bothers
+    that a girl like yourself ought never to have known about, and what I’m offering you is the chance
+    to turn your back on them once for all.”'
+  - 'And as Lily stared at the breathless suddenness of the suggestion, she continued with her easy laugh:
+    “You don’t know them and they don’t know you; but that don’t make a rap of difference. They’ve taken
+    the Van Alstyne place at Roslyn, and I’ve got CARTE BLANCHE to bring my friends down there—the more
+    the merrier. They do things awfully well, and there’s to be rather a jolly party there this week——”
+    she broke off, checked by an undefinable change in Miss Bart’s expression. “Oh, I don’t mean YOUR
+    particular set, you know: rather a different crowd, but very good fun. The fact is, the Gormers have
+    struck out on a line of their own: what they want is to have a good time, and to have it in their
+    own way. They gave the other thing a few months’ trial, under my distinguished auspices, and they
+    were really doing extremely well—getting on a good deal faster than the Brys, just because they didn’t
+    care as much—but suddenly they decided that the whole business bored them, and that what they wanted
+    was a crowd they could really feel at home with. Rather original of them, don’t you think so? Mattie
+    Gormer HAS got aspirations still; women always have; but she’s awfully easy-going, and Sam won’t be
+    bothered, and they both like to be the most important people in sight, so they’ve started a sort of
+    continuous performance of their own, a kind of social Coney Island, where everybody is welcome who
+    can make noise enough and doesn’t put on airs. I think it’s awfully good fun myself—some of the artistic
+    set, you know, any pretty actress that’s going, and so on. This week, for instance, they have Audrey
+    Anstell, who made such a hit last spring in ‘The Winning of Winny’; and Paul Morpeth—he’s painting
+    Mattie Gormer—and the Dick Bellingers, and Kate Corby—well, every one you can think of who’s jolly
+    and makes a row. Now don’t stand there with your nose in the air, my dear—it will be a good deal better
+    than a broiling Sunday in town, and you’ll find clever people as well as noisy ones—Morpeth, who admires
+    Mattie enormously, always brings one or two of his set.”'
+  - 'Lily looked down ruefully at her handiwork. The forewoman was right: the sewing on of the spangles
+    was inexcusably bad. What made her so much more clumsy than usual? Was it a growing distaste for her
+    task, or actual physical disability? She felt tired and confused: it was an effort to put her thoughts
+    together. She rose and handed the hat to Miss Kilroy, who took it with a suppressed smile.
+
+
+    Miss Haines offered no comment. From the first she had augured ill of Mme. Regina’s consenting to
+    include a fashionable apprentice among her workers. In that temple of art no raw beginners were wanted,
+    and Miss Haines would have been more than human had she not taken a certain pleasure in seeing her
+    forebodings confirmed.
+
+
+    “You’d better go back to binding edges,” she said drily. Lily slipped out last among the band of liberated
+    work-women. She did not care to be mingled in their noisy dispersal: once in the street, she always
+    felt an irresistible return to her old standpoint, an instinctive shrinking from all that was unpolished
+    and promiscuous. In the days—how distant they now seemed!—when she had visited the Girls’ Club with
+    Gerty Farish, she had felt an enlightened interest in the working-classes; but that was because she
+    looked down on them from above, from the happy altitude of her grace and her beneficence. Now that
+    she was on a level with them, the point of view was less interesting.
+
+
+    She felt a touch on her arm, and met the penitent eye of Miss Kilroy. “Miss Bart, I guess you can
+    sew those spangles on as well as I can when you’re feeling right. Miss Haines didn’t act fair to you.”
+
+
+    “Well, it’s mean work for anybody with a headache.” Miss Kilroy paused irresolutely. “You ought to
+    go right home and lay down. Ever try orangeine?”'

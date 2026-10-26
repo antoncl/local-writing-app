@@ -166,7 +166,10 @@ def test_authors_fixture():
 
 def test_builder_prompt_front_matter():
     front, body = core.split_front_matter(core.BUILDER_PROMPT.read_text(encoding="utf-8"))
-    assert front["title"] == "Narration conventions"
+    assert front["title"] == core.BUILDER_TITLE
+    # The harness measures the shipped built-in, offered on (and creating) the Style note sub-type.
+    assert core.BUILDER_PROMPT.parent.name == "prompts" and core.BUILDER_PROMPT.parent.parent.name == "builtin_library"
+    assert front["offer_on"] == [core.NOTE_TYPE]
     inputs = {i["name"]: i for i in front["inputs"]}
     assert "entry" in inputs and inputs["inherited"]["target"]["multiple"] is True
     assert front["context_strategy"]["output"]["handler"] == "extract_to_node"

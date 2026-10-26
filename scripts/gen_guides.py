@@ -44,6 +44,7 @@ GUIDES = [
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
     {"id": "ai-context", "title": "What the AI sees", "source": "docs/ai-context.md"},
+    {"id": "prose-steering", "title": "How your prose is steered", "source": "docs/prose-steering.md"},
     {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},
     {"id": "reference", "title": "Prompt reference", "source": "docs/prompts/reference.md", "kind": "reference"},
 ]

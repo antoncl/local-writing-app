@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 380" role="img" aria-label="Four stacked bands, broadest at the bottom. Prose craft: the app's defaults for any book. Style notes: author, series, then book, nearest wins. The viewpoint character's voice: what the narration notices and how it thinks, while they are the viewpoint. The brief: what happens in this scene. An arrow up the side reads narrower wins. On the right, one box lists what every prose action sends: Prose craft, the style notes set to Always include, the viewpoint character's entry, the narration settings, and the brief."><style>.l{font-family:var(--sans,"Segoe UI",system-ui,sans-serif)}.m{font-family:var(--mono,Consolas,ui-monospace,monospace)}</style>
+<rect x="-30" y="-30" width="920" height="440" fill="var(--diagram-bg,#ffffff)"/>
+<text x="40" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">Four levels — the narrowest wins</text>
+<text x="40" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">a narrower level overrides a broader one where they disagree</text>
+<line x1="16" y1="330" x2="16" y2="58" stroke="var(--accent,#2f6f5e)" stroke-width="2"/>
+<path d="M 9 70 L 16 54 L 23 70 Z" fill="var(--accent,#2f6f5e)"/>
+<text x="10" y="200" class="m" font-size="10.5" fill="var(--accent-strong,#234e43)" transform="rotate(-90 10 200)" text-anchor="middle">narrower wins</text>
+<rect x="40" y="48" width="430" height="62" rx="6" fill="var(--accent-soft,#edf6f2)" stroke="var(--accent,#2f6f5e)"/>
+<text x="56" y="72" class="l" font-size="12" fill="var(--accent-strong,#234e43)" font-weight="600">The brief</text>
+<text x="56" y="92" class="m" font-size="10.5" fill="var(--text-3,#74817b)">what happens in this scene, or the passage being edited</text>
+<rect x="56" y="120" width="398" height="62" rx="6" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="72" y="144" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">The viewpoint character's voice</text>
+<text x="72" y="164" class="m" font-size="10.5" fill="var(--text-3,#74817b)">how things are said, never how they're set on the page</text>
+<rect x="72" y="192" width="366" height="62" rx="6" fill="var(--surface,#ffffff)" stroke="var(--border-strong,#b4c2bc)"/>
+<text x="88" y="216" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">Style notes</text>
+<text x="88" y="236" class="m" font-size="10.5" fill="var(--text-3,#74817b)">book › series › author — the nearest wins</text>
+<rect x="88" y="264" width="334" height="62" rx="6" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="104" y="288" class="l" font-size="12" fill="var(--text,#242424)" font-weight="600">Prose craft</text>
+<text x="104" y="308" class="m" font-size="10.5" fill="var(--text-3,#74817b)">the app's defaults, for any book</text>
+<text x="530" y="14" class="l" font-size="13.5" fill="var(--accent-strong,#234e43)" font-weight="600">What every prose action sends</text>
+<text x="530" y="32" class="m" font-size="10.5" fill="var(--text-3,#74817b)">Draft scene, Continue, the editing actions…</text>
+<rect x="530" y="48" width="310" height="278" rx="8" fill="var(--inset,#f1f5f3)" stroke="var(--border,#cbd6d2)"/>
+<text x="548" y="80" class="l" font-size="11.5" fill="var(--text,#242424)">Prose craft</text>
+<text x="548" y="98" class="m" font-size="10.5" fill="var(--text-3,#74817b)">built in</text>
+<text x="548" y="132" class="l" font-size="11.5" fill="var(--text,#242424)">Your style notes</text>
+<text x="548" y="150" class="m" font-size="10.5" fill="var(--text-3,#74817b)">only those set to Always include</text>
+<text x="548" y="184" class="l" font-size="11.5" fill="var(--text,#242424)">The viewpoint character's entry</text>
+<text x="548" y="202" class="m" font-size="10.5" fill="var(--text-3,#74817b)">their voice, if it describes one</text>
+<text x="548" y="236" class="l" font-size="11.5" fill="var(--text,#242424)">The narration settings</text>
+<text x="548" y="254" class="m" font-size="10.5" fill="var(--text-3,#74817b)">point of view and tense</text>
+<text x="548" y="288" class="l" font-size="11.5" fill="var(--text,#242424)">The brief</text>
+<text x="548" y="306" class="m" font-size="10.5" fill="var(--text-3,#74817b)">the scene's summary, or your selection</text>
+<text x="40" y="364" class="m" font-size="10.5" fill="var(--text-3,#74817b)">The rest of your lore goes out as world facts, never as text for the page.</text>
+</svg>

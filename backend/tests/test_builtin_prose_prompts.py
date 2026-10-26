@@ -363,15 +363,6 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("named only once the scene gives the name", text)
         self.assertIn("Characters rarely say outright what they want or feel either", text)
 
-    def test_prose_craft_bans_narrator_verdicts_and_reported_talk(self) -> None:
-        # #2621: the writer's blind-pairs cuts were narrator verdicts ("it cost her
-        # nothing") and talk reported instead of heard; a skip stays the author's call.
-        self._set(self.scene_ids[0], summary="Honor leaves the station.")
-        text = self._preview(self.scene_ids[0])
-        self.assertIn("The narration passes no verdict on what it shows", text)
-        self.assertIn('if a sentence would fit after "the viewpoint character thought", it may stay', text)
-        self.assertIn("don't report a conversation instead of letting it be heard, unless the brief asks for it", text)
-
     def test_finalize_roleplay_keeps_interiority_in_an_omniscient_book(self) -> None:
         # #2620 review: the resolved narration gives an omniscient book no viewpoint
         # character, but its narrator knows every mind — keep their interiority there.

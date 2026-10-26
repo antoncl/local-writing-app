@@ -329,15 +329,3 @@ viewpoint rule spells out the one Draft scene already had. Two of Draft scene's 
 in with them, approved after review (#2620): a stranger is named only once the scene gives the
 name (#2604), and characters rarely say outright what they want or feel. Stock-phrase bans stay
 out (decision 2).
-
-## Amendment 2 — two rules sharpened from the S1 blind pairs
-
-- **Status:** **Accepted** — 2026-10-26 (Anton), approved with the wording. Issue: #2621.
-- **What prompted it.** S1 was preferred in 13 of 20 blind pairs, below the 15 bar. The sentences
-  the writer cut on the S1 side were narrator verdicts on a moment ("it cost her nothing", "taken
-  one way, a disaster") and conversation reported instead of heard.
-- **Decision.** The narrator rule says the narration passes no verdict (what a moment meant, cost
-  or how to take it), names judging beside explaining, and gives the writer's own test: a sentence
-  that would fit after "the viewpoint character thought" may stay (no pronoun, since the snippet serves every viewpoint); the narrator's opinion is cut. The no-skipped-time
-  rule adds that a conversation is heard, not reported, **unless the brief asks for it**: a skip is
-  the author's decision, never the drafter's.

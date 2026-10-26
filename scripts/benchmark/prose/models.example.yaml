@@ -41,19 +41,21 @@ models:
 # shape of a `models:` entry without `primary`. setup_backend.py gives them an assistant in
 # every fixture project (skip with --no-judges). The judge must be a different family from
 # the primary drafter, and is never used on its own model's drafts: judge.py sends a draft
-# written by the primary judge's model to `second` instead.
+# written by the primary judge's model to `second` instead. Give a reasoning judge room: it
+# spends hundreds of tokens before a one-line answer, and the builder test's attribution (a
+# draft plus four excerpts) was cut off at 1024.
 # judges:
 #   primary:
 #     name: judge-primary
 #     provider: openrouter
 #     model: google/gemini-3.6-flash
-#     max_tokens: 1024
+#     max_tokens: 4096
 #     temperature: 0
 #   second:
 #     name: judge-second
 #     provider: openrouter
 #     model: deepseek/deepseek-v4-flash
-#     max_tokens: 1024
+#     max_tokens: 4096
 #     temperature: 0
 
 # The seeder (calibration_seed.py). Optional; the shape of a `models:` entry without

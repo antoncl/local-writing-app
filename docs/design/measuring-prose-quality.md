@@ -43,8 +43,9 @@ at a time flips on chance alone, and "it got worse" or "it got better" means not
 **For the built-ins:**
 - **Styles stay apart.** For each model, the judge identifies which of two style notes produced a
   draft in at least 90% of trials, with the two notes shown in random order (§4.2).
-- **The builder captures someone else's style.** For each model, at least 9 of 12 drafts written
-  from builder-inferred notes are attributed to the right author among four (§4.3). Chance is 3.
+- **The builder captures someone else's style.** For each model, at least 9 of 12 held-out
+  excerpts (three per author, never shown to the builder) are matched to the right author's
+  inferred note among four (§4.3). Chance is 3.
 - **The defaults avoid the shared failures.** With no style note, no failure on the common list
   (§5) is more frequent than the baseline, beyond the noise band.
 - **No style regresses.** A change that improves one style note's drafts beyond the band and
@@ -97,8 +98,9 @@ different things:
   fifth case, no style note at all, measures the defaults.
 - **The style builder's text**, as ADR-0101 S2 commits it.
 - **Public-domain pages** from four authors of roughly the same era, so period diction doesn't
-  give the answer away: Stephen Crane, Kate Chopin, Jack London, Edith Wharton. They are used
-  only as input to the builder.
+  give the answer away: Stephen Crane, Kate Chopin, Jack London, Edith Wharton. Per author, about
+  1,500 words are the builder's input, and three later passages the builder never sees are what
+  the judge matches to the inferred notes (§4.3).
 
 **Every run makes three drafts per brief, per style case, per model.** One draft is mostly noise.
 
@@ -117,8 +119,8 @@ They count what can be counted:
 - named-emotion words ("felt", "realized", "couldn't help")
 - hits from the style note's never-list and, once it exists, the common list
 - word count against the target
-- an author's name or title appearing in a builder-inferred note, which fails the builder test
-  outright (§4.3)
+- an author's name, a title or a character's name appearing in a builder-inferred note, which
+  fails the builder test outright (§4.3)
 - the longest run of words a draft shares with a voice sample, since a model may lift the
   sample instead of writing in its voice
 
@@ -168,9 +170,21 @@ The harness drives the builder as the app does:
 This measures what the builder infers from pages. It does not measure the full conversation with
 a writer.
 
-The note it commits must not name the author or a work (§4.1). From each of the four inferred notes,
-the harness drafts one brief three times. For each draft, the judge is shown the draft and one
-unnamed excerpt from each of the four authors, and says which author the draft is closest to.
+The note it commits must not name the author, a work or its characters (§4.1); a note that does
+fails outright.
+
+**Matching notes to authors.** For each author there are three held-out excerpts, later passages of
+the same book the builder never sees. For each excerpt, the judge is shown the excerpt and the four
+inferred notes, unlabelled and in an order fixed per trial, and says which note describes the
+writing. That is 12 trials per model, against a known answer, so it needs no calibration. It
+measures what the builder is for: whether its note captures the author's style.
+
+It does **not** draft from the notes. An earlier design did: each note drafted one brief, and the
+judge said which author's excerpt the draft was closest to. It could not tell the builder's work from
+the brief's. Drafts of the same brief written with **no style note at all** were attributed the
+same way as drafts written from the notes (#2624), because the judge matched the scene's subject to
+the excerpts that looked alike. Whether a note steers drafting is the separation test's question
+(§4.2), on the built-in notes.
 
 ### 4.4 Blind pairs: the quality judge
 

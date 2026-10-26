@@ -194,6 +194,32 @@ calls a backend or a model.
    would overstate p.
 5. Paste `result.md` into the PR.
 
+## Builder test (H3)
+
+Whether the style builder (`fixture/style-builder.md`, #2623) infers a note that captures an
+author's style. For each builder model and each of four authors (`fixture/authors.yaml`:
+public-domain Project Gutenberg pages, plus three later held-out excerpts of each) the builder is
+given ~1500 words and asked to propose the note; the fixed reply "No preference; propose the note
+from the pages." answers any contrast question (at most 3). The judge is then shown one excerpt
+and that model's four notes, unlabelled, in an order fixed by a hash of the trial, and says which
+note describes the writing.
+
+- **Bar:** per model, 9 of the 12 excerpts matched to the right note (chance is 3). A note that
+  names the author or the work (`leak_terms`, whole words, case-insensitive) fails that author
+  outright: its three trials never count. A model with a missing note, or a trial not answered,
+  is out of reach and counts against the bar.
+- **Run:** with a dev backend up, keys set by `setup_backend.py`, and judges in `models.yaml`:
+  `builder.py run --out tmp/builder-run` (`--models` names the builder models, default every
+  `models:` entry; `--authors KEY ...` for a smoke run, which matches among those authors only and
+  is reported as partial). A rerun resumes: a built note and an answered match are kept; delete
+  `notes/<model>/<key>.json` to rebuild a note. `builder.py report tmp/builder-run` rewrites
+  `result.md`, ready for a PR body.
+- **Cost:** about 8 builder conversations and 24 judge calls for two models, roughly $2.
+- The builder and the judge run in `builder-<key>` (no style note, the prompt installed through
+  the app's prompt routes), under `tmp/benchmark-fixtures/prose/`.
+- **Why it doesn't draft from the notes:** drafts written with no note at all were attributed as
+  well as drafts from the notes, so drafting measured the brief, not the builder (design doc §4.3).
+
 ## Files
 
 | File | Role |
@@ -212,5 +238,6 @@ calls a backend or a model.
 | `calibration_page.html` | The reading page (offline, no dependencies). |
 | `pairs.py` | Blind pairs: `make` draws the page and key, `tally` reports the readers' picks. |
 | `pairs_page.html` | The pairs page template (offline, no dependencies). |
+| `builder.py` | The builder test: `run` and `report` (`builder_core.py` holds its pure rules). |
 | `parity.py` | The mirror-versus-hand-run guard. |
 | `lwa_client.py` | The HTTP client and backend discovery. |

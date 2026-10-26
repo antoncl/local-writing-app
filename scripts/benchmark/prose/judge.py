@@ -123,6 +123,13 @@ def parse_verdict(text: str, choices: tuple[str, ...] = ("yes", "no")) -> dict[s
             if answer == choice.lower():
                 return {"answer": choice, "quote": str(obj.get("quote") or "")}
         break
+    # A quote with an unescaped quotation mark breaks the JSON but not the answer, which
+    # comes first: read it alone, and keep no quote rather than a mangled one.
+    loose = re.search(r'"answer"\s*:\s*"([^"]+)"', text)
+    if loose:
+        for choice in choices:
+            if loose.group(1).strip().lower() == choice.lower():
+                return {"answer": choice, "quote": ""}
     return {"answer": "unparsed", "raw": text[:500]}
 
 

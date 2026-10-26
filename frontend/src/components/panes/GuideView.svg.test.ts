@@ -19,6 +19,7 @@ const DIAGRAM_GUIDES: Array<[id: string, count: number]> = [
   ["ai-context", 4],
   ["writing-prompts", 3],
   ["reference", 2],
+  ["prose-steering", 1],
 ];
 
 describe.each(DIAGRAM_GUIDES)("%s guide diagrams", (id, count) => {

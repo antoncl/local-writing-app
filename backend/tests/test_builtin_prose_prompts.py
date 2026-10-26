@@ -402,6 +402,19 @@ class DraftScenePromptTests(unittest.TestCase):
         self.assertIn("A narrator with a persona of its own gets only a narrating voice.", text)
         self.assertNotIn("A voice section's shape", text)  # the template comment doesn't render
 
+    def test_revise_entry_offers_no_voice_to_a_location(self) -> None:
+        # #2626 review: a location or an item has no voice; the rule stays off it.
+        from app.models import CreateLoreEntryRequest
+
+        harbour = self.service.create_lore_entry(CreateLoreEntryRequest(title="The harbour", entry_type="lore:location"))
+        text = self._render("Revise entry", self.scene_ids[0], {"entry": harbour.id})
+        self.assertNotIn("write it in three parts", text)
+        # Create mode asks the type being created (the picker is blank, as the app sends it).
+        made = self._render("Revise entry", self.scene_ids[0], {"entry": "[]", "entry_type": "lore:character"})
+        self.assertIn("write it in three parts", made)
+        made = self._render("Revise entry", self.scene_ids[0], {"entry": "[]", "entry_type": "lore:location"})
+        self.assertNotIn("write it in three parts", made)
+
     def test_draft_scene_lists_the_scenes_anchored_changes_as_its_brief(self) -> None:
         from mutation_helpers import save_scenes_with_mutations
 

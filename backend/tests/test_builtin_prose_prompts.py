@@ -369,7 +369,7 @@ class DraftScenePromptTests(unittest.TestCase):
         self._set(self.scene_ids[0], summary="Honor leaves the station.")
         text = self._preview(self.scene_ids[0])
         self.assertIn("The narration passes no verdict on what it shows", text)
-        self.assertIn('if a sentence would fit after "she thought", it may stay', text)
+        self.assertIn('if a sentence would fit after "the viewpoint character thought", it may stay', text)
         self.assertIn("don't report a conversation instead of letting it be heard, unless the brief asks for it", text)
 
     def test_finalize_roleplay_keeps_interiority_in_an_omniscient_book(self) -> None:

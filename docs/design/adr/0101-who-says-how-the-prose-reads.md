@@ -338,6 +338,6 @@ out (decision 2).
   one way, a disaster") and conversation reported instead of heard.
 - **Decision.** The narrator rule says the narration passes no verdict (what a moment meant, cost
   or how to take it), names judging beside explaining, and gives the writer's own test: a sentence
-  that would fit after "she thought" may stay; the narrator's opinion is cut. The no-skipped-time
+  that would fit after "the viewpoint character thought" may stay (no pronoun, since the snippet serves every viewpoint); the narrator's opinion is cut. The no-skipped-time
   rule adds that a conversation is heard, not reported, **unless the brief asks for it**: a skip is
   the author's decision, never the drafter's.

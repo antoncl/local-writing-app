@@ -57,9 +57,18 @@ def runs(tmp_path):
     return _write_run(tmp_path / "runalpha", "base"), _write_run(tmp_path / "runomega", "fresh")
 
 
-def _make(runs, out: Path, seed: int = 2617) -> dict:
-    pairs.make(runs[0], runs[1], out, 60, seed, None)
+def _make(runs, out: Path, seed: int = 2617, cases: tuple[str, ...] | None = None) -> dict:
+    pairs.make(runs[0], runs[1], out, 60, seed, None, cases=cases or pairs.CASES)
     return json.loads((out / "key.json").read_text(encoding="utf-8"))
+
+
+def test_cases_narrow_the_draw(runs, tmp_path):
+    # #2621: 12 pairs (three styles x four briefs) instead of 20, for a shorter reading.
+    key = _make(runs, tmp_path / "out", cases=("frank", "none", "lush"))
+    assert len(key["pairs"]) == 12
+    assert {p["case"] for p in key["pairs"].values()} == {"frank", "none", "lush"}
+    html = (tmp_path / "out" / "send" / "pairs.html").read_text(encoding="utf-8")
+    assert "the one that needs less of your work to become yours" in html
 
 
 # --- sentences and excerpts ------------------------------------------------------

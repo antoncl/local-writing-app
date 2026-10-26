@@ -135,15 +135,17 @@ def draw(
     baseline: dict[tuple[str, str], list[dict[str, Any]]],
     new: dict[tuple[str, str], list[dict[str, Any]]],
     seed: int,
+    cases: tuple[str, ...] = CASES,
 ) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
-    """`(pairs, skipped)`: one `{case, brief, baseline, new, new_side}` per cell present on both sides
-    (in shuffled order), and the cells missing on one side."""
+    """`(pairs, skipped)`: one `{case, brief, baseline, new, new_side}` per cell of `cases` present on
+    both sides (in shuffled order), and the cells missing on one side. Fewer cases mean fewer pairs to
+    read, and a higher bar: a sign test on 12 pairs needs 10 to rule out chance."""
     rng = random.Random(seed)
     keys = sorted({*baseline, *new}, key=lambda k: (CASES.index(k[0]) if k[0] in CASES else len(CASES), k))
     pairs: list[dict[str, Any]] = []
     skipped: list[tuple[str, str]] = []
     for key in keys:
-        if key[0] not in CASES:
+        if key[0] not in cases:
             continue
         if not baseline.get(key) or not new.get(key):
             skipped.append(key)
@@ -192,9 +194,12 @@ def build_pairs(drawn: list[dict[str, Any]], words: int, book: dict[str, Any]) -
     return out
 
 
-def make(baseline_run: Path, new_run: Path, out: Path, words: int, seed: int, model: str | None) -> None:
+def make(
+    baseline_run: Path, new_run: Path, out: Path, words: int, seed: int, model: str | None,
+    cases: tuple[str, ...] = CASES,
+) -> None:
     name = choose_model(baseline_run, new_run, model)
-    drawn, skipped = draw(cells(baseline_run, name), cells(new_run, name), seed)
+    drawn, skipped = draw(cells(baseline_run, name), cells(new_run, name), seed, cases)
     for case, brief in skipped:
         print(f"skipped {case}/{brief}: no ok draft on one side")
     if not drawn:
@@ -356,13 +361,15 @@ def main() -> None:
     mk.add_argument("--words", type=int, default=DEFAULT_WORDS)
     mk.add_argument("--seed", type=int, default=DEFAULT_SEED)
     mk.add_argument("--model", help="the model name to draw from (default: both runs' primary)")
+    mk.add_argument("--cases", nargs="+", choices=CASES, default=list(CASES),
+                    help="style cases to draw from (default: all; fewer cases, fewer pairs)")
     tl = sub.add_parser("tally", help="report the readers' picks against the key")
     tl.add_argument("key", type=Path)
     tl.add_argument("picks", type=Path, nargs="+")
     tl.add_argument("--out", type=Path, help="where to write the Markdown (default DIR/result.md)")
     args = parser.parse_args()
     if args.command == "make":
-        make(args.baseline_run, args.new_run, args.out, args.words, args.seed, args.model)
+        make(args.baseline_run, args.new_run, args.out, args.words, args.seed, args.model, tuple(args.cases))
         return
     result = tally(args.key, args.picks)
     out = args.out or args.key.parent / "result.md"

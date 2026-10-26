@@ -177,9 +177,13 @@ calls a backend or a model.
    first ~400 words, ending at a sentence, of one baseline and one new Draft scene draft of
    the primary model. A cell missing on either side is skipped and printed. It writes
    `DIR/send/pairs.html` (shuffled, A/B unlabelled, nothing of the key in it) and
-   `DIR/key.json`, which also holds the excerpts exactly as shown.
-2. Send or open `DIR/send/` only; **`key.json` never leaves `DIR`**. It works offline: pick Keep A or Keep B
-   per pair (keys `a`/`b`, `]`/`[`, Space for the next unpicked), click a sentence to mark it
+   `DIR/key.json`, which also holds the excerpts exactly as shown. `--cases frank none lush`
+   draws only those styles: 12 pairs instead of 20, a shorter reading, but a higher bar to
+   rule out chance (10 of 12 rather than 15 of 20).
+2. Send or open `DIR/send/` only; **`key.json` never leaves `DIR`**. It works offline. Every pair
+   asks the same question: which would you rather keep as the start of your own draft. Pick
+   Keep A or Keep B (there is no "no preference": every pick is a real choice; keys `a`/`b`,
+   `]`/`[`, Space for the next unpicked), click a sentence to mark it
    as one you would cut. Progress resumes from the browser's own storage.
 3. **Download picks** saves `picks-<page id>-<reader>.json` (**Copy picks** if downloads are blocked).
 4. `pairs.py tally DIR/key.json picks.json [picks2.json ...]` (one file per reader: two from

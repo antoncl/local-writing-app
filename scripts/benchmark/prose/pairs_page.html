@@ -37,6 +37,7 @@
   main { flex: 1; min-width: 0; padding: 18px 24px 60px; }
   .context { color: var(--muted); max-width: 70ch; margin-bottom: 18px; }
   .context summary { cursor: pointer; }
+  .context .question { color: var(--text); font-weight: 600; margin: 0 0 8px; }
   .context p { white-space: pre-line; margin: 8px 0 0; }
   .sides { display: flex; gap: 36px; align-items: flex-start; }
   .side { flex: 1 1 0; min-width: 0; }
@@ -78,6 +79,8 @@
   <main>
     <div id="pair" hidden>
       <div class="context">
+        <!-- One fixed question for every pair, so each pick answers the same thing. -->
+        <p class="question">Which would you rather keep as the start of your own draft — the one that needs less of your work to become yours?</p>
         <div id="pov"></div>
         <details><summary>Brief</summary><p id="summary"></p></details>
       </div>
@@ -94,7 +97,7 @@
 <div id="help"><div>
   <h2>Keyboard</h2>
   <dl>
-    <dt>a / b</dt><dd>keep A / keep B (again to clear)</dd>
+    <dt>a / b</dt><dd>keep A / keep B (click the chosen button to clear)</dd>
     <dt>]  [</dt><dd>next / previous pair</dd>
     <dt>Space</dt><dd>next unpicked pair</dd>
     <dt>click text</dt><dd>mark a sentence you would cut</dd>

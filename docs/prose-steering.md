@@ -69,7 +69,8 @@ It leaves out what lives elsewhere:
 - any one character's voice, which belongs in their entry
 - sample passages, since a sample has a voice and would pull every viewpoint
   toward it
-- naming conventions, which are about the world, not the prose
+- naming conventions, which are about the world, not the prose: keep them in a
+  note of their own (see [Lore](#guide:lore), *Notes the AI always sees*)
 
 **Notes stack by layer.** If your books sit inside a series or an author folder
 (see [Getting started](#guide:getting-started)), each layer can have its own style

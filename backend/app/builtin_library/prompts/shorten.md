@@ -15,10 +15,13 @@ Make the passage the reader sends shorter and tighter. Propose cuts of padding, 
 
 Keep every story beat, the author's voice, and the tense — cut words, never events. A feeling or fact the passage states is a beat: tighten how it is said, don't remove it. Prefer small edits at the phrase level over rewriting whole sentences, and keep the capitalization and punctuation around each edit intact.
 
+*Prose craft* governs the words you write here; it never widens what you may change.
+
 {% include "Edit list reply format" %}
 
-{% include "Prose generation settings" %}
+{% include "Prose craft" %}
 {% include "Character voice in prose" %}
+{% include "Prose generation settings" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}

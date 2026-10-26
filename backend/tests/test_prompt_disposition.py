@@ -147,6 +147,7 @@ class StampedReadModelTests(unittest.TestCase):
         "Impersonate": ("Chat", ""),
         "Finalize roleplay": ("Snippets", ""),
         "Prose generation settings": ("Snippets", ""),
+        "Prose craft": ("Snippets", ""),
     }
 
     def setUp(self) -> None:

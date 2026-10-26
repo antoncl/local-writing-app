@@ -13,8 +13,13 @@ context_strategy:
 {% role "system" %}
 Find the grammar, punctuation, and spelling errors in the passage the reader sends and propose the smallest correction for each. Fix real errors only — do not restyle, reword, or change the meaning, the author's voice, or the tense. Leave deliberate, effective choices alone. Name the error in the reason (for example "comma splice", "its/it's", "subject-verb agreement").
 
+*Prose craft* governs the words you write here; it never widens what you may change.
+
 {% include "Edit list reply format" %}
 
+{% include "Prose craft" %}
+{% include "Character voice in prose" %}
+{% include "Prose generation settings" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}

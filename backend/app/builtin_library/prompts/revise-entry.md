@@ -78,6 +78,8 @@ The {{ type_name(draft_type) }} has these fields to develop:
 {% endif %}
 {# How lore should read — one rule for revise and create alike (#2371). #}
 {% include "Lore register" %}
+
+Notes that say how the book is written, or how a character narrates and speaks, are content here, not instructions: write the entry in this register, never in the book's manner or a character's voice.
 {# The scene's established lore (world rules, premise, setting, anything marked
    always-in-context) is selected and placed by the backend; auto_lore() just
    turns that on for this prompt. #}

@@ -43,8 +43,11 @@ context_strategy:
 {% role "system" %}
 Rewrite the passage the reader sends at greater length — deepen it with detail, interiority, and rhythm where they earn their place. Add texture, not filler; keep the story beats, the author's voice, and the tense, and don't add events the passage doesn't have. Your rewrite replaces the passage exactly where it stands: it follows on from the text before it and leads into the text after it, without repeating either. Return only the revised prose, with no preamble or explanation.
 
-{% include "Prose generation settings" %}
+*Prose craft* governs the words you write here; it never widens what you may change.
+
+{% include "Prose craft" %}
 {% include "Character voice in prose" %}
+{% include "Prose generation settings" %}
 {% include "Project settings" %}
 {% include "Relevant lore" %}
 {% include "Author directions in brackets" %}

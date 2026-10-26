@@ -22,6 +22,11 @@ context_strategy:
   Continue (#2457): pick the prose up at the cursor and keep writing — a
   passage, not the rest of the scene. The output is inserted at the cursor.
 
+  The craft rules are the "Prose craft" snippet's (#2619, ADR-0101), the same
+  ones Draft scene is held to. The snippets also name and place the viewpoint
+  character; this prompt places it as well, so a project that shadows
+  "Character voice in prose" with its own text still sends it (deduped by id).
+
   The order is for caching (ADR-0084): what rarely changes comes first; the
   text around the cursor and the direction — which change on every run — come
   last.
@@ -31,26 +36,23 @@ context_strategy:
 {% if not before.strip() %}
 {{ stop("Continue picks up from the prose before the cursor — put the cursor after some text. To draft an empty scene from its summary, start Draft scene from the scene's conversations.") }}
 {% endif %}
-{% set narration = resolved_narration(scene) if scene else none %}
 {% role "system" %}
 You continue a novel's prose from exactly where the author's cursor is. Pick up mid-flow: if the text breaks off mid-sentence, finish that sentence; otherwise start the next one. Match the voice, tense, and rhythm of what is already written.
 
-- Write a passage, not the rest of the scene. Stop at a natural pause near the target length; do not wrap the scene up, and do not end on a reflective or summarizing paragraph.
+- Write a passage, not the rest of the scene. Stop at a natural pause near the target length; do not wrap the scene up.
 - Do not repeat or paraphrase the text before the cursor.
 - When there is text after the cursor, what you write must lead into it without contradicting it.
 - Do not invent major events, and do not bring in named characters the context does not give you.
 - Return only the new prose: no title, no headings, no Markdown, no preamble or comment.
 
-{% include "Prose generation settings" %}
+{% include "Prose craft" %}
 {% include "Character voice in prose" %}
-{% if narration and narration.character %}
-The point-of-view character is **{{ narration.character.title }}**.
-
-{% endif %}
+{% include "Prose generation settings" %}
 {% include "Project settings" %}
 {% include "Author directions in brackets" %}
 {% endrole %}
 {% role "user" %}
+{% set narration = resolved_narration(scene) if scene else none %}
 {% if narration and narration.character %}{% do use(narration.character) %}{% endif %}
 {% include "Relevant lore" %}
 {{ auto_lore() }}

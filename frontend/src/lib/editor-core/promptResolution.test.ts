@@ -196,6 +196,8 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
     entry_types: {
       "lore:base": {},
       "lore:character": { parent: "lore:base" },
+      "lore:note": { parent: "lore:base" },
+      "lore:style_note": { parent: "lore:note" },
       "plot:base": {},
       "plot:card": { parent: "plot:base" },
       "plot:plotline": { parent: "plot:base" },
@@ -286,6 +288,31 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       });
       const c = isaCtx({ promptEntries: [appendP, impersonateP] });
       expect(promptEntriesOfferedOn(c, "lore:character").map((e) => e.id)).toEqual(["p-imp"]);
+    });
+  });
+
+  // ADR-0101 Amendment 2: the Lore pane's "Draft <Type>" row takes the nearest
+  // create-capable prompt ([0]). The style builder sits on the Style note sub-type,
+  // so it wins there while a plain note keeps Revise entry. Had it been offered on
+  // lore:note, it would have taken "Draft Note" too.
+  describe("createCapablePromptsFor — Style note vs Note", () => {
+    const commit: PromptContextStrategy = { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } };
+    const revise = offered("p-revise", "prompt:general", ["lore:base"], commit);
+    const builder = offered("p-builder", "prompt:general", ["lore:style_note"], commit);
+    const c = isaCtx({ promptEntries: [revise, builder] });
+
+    it("drafts a Style note with the builder, nearest first", () => {
+      expect(createCapablePromptsFor(c, "lore:style_note").map((e) => e.id)).toEqual(["p-builder", "p-revise"]);
+    });
+
+    it("keeps Revise entry for a plain Note, and never offers it the builder", () => {
+      expect(createCapablePromptsFor(c, "lore:note").map((e) => e.id)).toEqual(["p-revise"]);
+    });
+
+    it("would hand Draft Note to the builder if it were offered on lore:note", () => {
+      const onNote = offered("p-builder", "prompt:general", ["lore:note"], commit);
+      const wrong = isaCtx({ promptEntries: [revise, onNote] });
+      expect(createCapablePromptsFor(wrong, "lore:note")[0].id).toBe("p-builder");
     });
   });
 });

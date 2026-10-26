@@ -115,6 +115,8 @@ class DraftScenePromptTests(unittest.TestCase):
         # The frequency rule (#2580) is kept after the two parts.
         self.assertLess(text.index("**The speaking voice**"), text.index("they are not a quota"))
 
+    # The user guide docs/prose-steering.md names these ten as the prose actions:
+    # change it with them.
     PROSE_BUILTINS = {
         "continue.md", "describe.md", "draft-scene.md", "expand.md", "finalize-roleplay.md",
         "line-edit.md", "rephrase.md", "shorten.md", "show-dont-tell.md", "tighten-grammar.md",

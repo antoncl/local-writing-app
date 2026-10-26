@@ -7,8 +7,9 @@
 
 The prose actions are Draft scene, Continue, Expand, Describe, Rephrase, Shorten,
 Line edit, *Show, don't tell*, Tighten grammar and Finalize roleplay. Every one of
-them sends the model the same guidance, in the same order, so a passage from
-Continue is held to the same standard as a scene from Draft scene.
+them sends the model *Prose craft*, your style notes, the viewpoint character's
+voice and the narration settings, so a passage from Continue is held to the same
+standard as a scene from Draft scene.
 
 ## What a prose action sends
 
@@ -25,8 +26,9 @@ Continue is held to the same standard as a scene from Draft scene.
   that voice shapes the narration as well as their lines.
 - **The narration settings.** The point of view and tense, from the scene, or
   inherited from its chapter, act or project.
-- **The brief.** For Draft scene and Continue, the scene's summary; for the editing
-  actions, the passage you selected and what's around it.
+- **The brief.** For Draft scene and Continue, the scene's summary. For Expand,
+  Describe and Rephrase, the passage you selected and the text around it. The
+  other editing actions see only what you selected.
 
 Everything else in your lore is world material: what happened, who is who. The
 model uses it as facts for the scene, never as text for the page. It tells a style
@@ -97,6 +99,12 @@ The built-in prompt **Build a style note** writes one with you.
 A new project starts with no style note. Until you add one, the prose follows
 *Prose craft*, your narration settings, your characters' voices and the brief.
 
+**A style note you made earlier as a plain Note keeps working:** the prose
+actions read it the same way, as long as it is set to *Always include*. The
+builder is offered only on Style notes, so to rework an older note with it, draft
+a new Style note, paste the old note's text into your first message along with
+any pages, and delete the old note once the new one is committed.
+
 ## Voices
 
 A character's voice lives in their own entry, in two parts, because they apply at
@@ -122,7 +130,8 @@ voice.
 
 Start Draft scene on a scene and open the **Context** door on its composer (see
 [What the AI sees](#guide:ai-context), *Reading the Context door*). The editing
-actions send the same guidance, so what you see there holds for them too:
+actions carry the same craft rules, style notes, voice and narration settings, so
+those parts of what you see there hold for them too:
 
 - **System** shows *Prose craft*, the voice instructions and the narration
   settings, as the model reads them.

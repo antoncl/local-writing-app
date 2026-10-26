@@ -49,6 +49,9 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         # ADR-0091 §4: the Propose default, offered on the same lore:base
         # anchor as Revise entry.
         "Follow a change": ["lore:base"],
+        # ADR-0101 Amendment 2: the style builder, on the Style note sub-type only,
+        # so "Draft Note" stays Revise entry.
+        "Build a style note": ["lore:style_note"],
     }
 
     def setUp(self) -> None:

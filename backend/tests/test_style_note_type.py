@@ -48,7 +48,9 @@ class StyleNoteTypeTests(unittest.TestCase):
             with self.subTest(input=name):
                 self.assertEqual(inputs[name]["target"]["sources"][0]["expr"], {"descendants_of": "lore:note"})
 
-    def test_no_other_built_in_reads_the_type(self) -> None:
+    def test_no_other_built_in_names_the_type(self) -> None:
+        # A tripwire, not a proof: it catches a prompt that selects or branches on
+        # lore:style_note by name, which would make the type more than an offer site.
         for path in sorted(PROMPTS.glob("*.md")):
             if path == BUILDER:
                 continue

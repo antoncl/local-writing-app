@@ -230,7 +230,7 @@ note describes the writing.
 | `models.example.yaml` | The model list. |
 | `setup_backend.py` | Keys, AI policy, assistants. |
 | `run.py` | Draft scene and Continue, per case, model, brief and draft. |
-| `checks.py` | Pure script checks (`phrases.yaml` holds the common phrase list, empty until annotated). |
+| `checks.py` | Pure script checks (`phrases.yaml` holds the stock phrases counted per 1,000 words, from #2629). |
 | `report.py` | Per-cell means, the noise band, the comparison. |
 | `judge.py` | The model judge: six rule checks and the separation test. |
 | `calibration.py` | The writer's worksheet and the tally that says which rules the judge owns. |

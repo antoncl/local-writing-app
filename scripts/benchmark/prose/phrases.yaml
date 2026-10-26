@@ -1,6 +1,19 @@
 # Stock phrases the script checks count as hits (checks.py `phrase_hits`).
 #
-# Shipped EMPTY on purpose: the common list comes from the writer annotating the
-# baseline drafts (docs/design/measuring-prose-quality.md §5), not from guessing.
-# Each entry is a plain phrase matched case-insensitively against the whole draft.
-common: []
+# Measurement only: no prompt reads this list. Each entry is a plain phrase matched
+# case-insensitively against the whole draft. Entries come from reading drafts, not
+# guessing (docs/design/measuring-prose-quality.md §5).
+#
+# #2629 counted the recurring phrases in the 980 drafts of the A/A, S1, S1b, S3,
+# voice-only and builder-drafts runs. No phrase was both over-used and shared by both
+# models, so Prose craft bans none (ADR-0101 Out of scope). These two are the
+# clearest one-model habits, kept so a prompt change shows whether it moves them:
+# - "the weight of": GPT-4.1 mini, in 173 of its ~497 drafts, mostly abstract
+#   ("the weight of silence", "of the unspoken"); Sonnet 25.
+# - "a sound like": Sonnet, in 50 of its ~483 drafts ("a sound like a kiss" 10
+#   times); GPT-4.1 mini 3.
+# After changing this list, rebuild the A/A band (report.py --band): a band made with
+# a different list holds phrase_hits at 0, so every move reads "unmeasured".
+common:
+- the weight of
+- a sound like

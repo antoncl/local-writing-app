@@ -1,61 +1,60 @@
 ---
-id: prompt_84542323bd
-title: Narration conventions
+id: prompt_55bb47cb0e
+title: Build a style note
 entry_type: prompt:general
+metadata:
+  summary: "Infers a style note from pages you paste: how the book's prose is set on the page and how it reads."
+offer_on:
+- lore:style_note
 inputs:
 - name: entry
   type: context_pick
-  label: Entry
-  options: []
+  label: Style note to revise
   required: false
-  hidden: false
   target:
     sources:
+    # descendants_of, not type: a style note made before the Style note
+    # sub-type is a plain lore:note, and it can still be revised or built on
+    # (ADR-0101 Amendment 2).
     - kind: lore
       expr:
-        type: lore:note
+        descendants_of: lore:note
+    multiple: false
     presets: []
 - name: inherited
   type: context_pick
   label: Style notes this builds on
-  options: []
   required: false
-  hidden: false
   target:
     sources:
     - kind: lore
       expr:
-        type: lore:note
+        descendants_of: lore:note
     multiple: true
     presets: []
 - name: entry_type
   type: text
   label: Entry type
-  options: []
   required: false
-  hidden: false
-offer_on:
-- lore:note
+  hidden: true
 context_strategy:
   output:
     handler: extract_to_node
-    destination: ''
     commit:
       review: visual_diff
 ---
 {#
-  The style builder (ADR-0101 S2, #2623): a rewrite of the "Narration conventions" project
-  prompt. It infers a style note from pasted pages (Mechanics, Manner and a never-list), tests
-  the author's taste by contrast, and builds on inherited style notes by proposing only this
-  layer's departures. It ends by telling the author to set the note to Always include: only
-  the author can set a context policy (ADR-0057, ADR-0059 §F).
+  The style builder (ADR-0101 decisions 4-5, S2 #2623; shipped by Amendment 2, #2627).
+  It infers a style note from pasted pages (Mechanics, Manner and a never-list), tests the
+  author's taste by contrast, and builds on inherited style notes by proposing only this
+  layer's departures. It ends by telling the author to set the note to Always include:
+  only the author can set a context policy (ADR-0057, ADR-0059 §F).
 
-  Not a built-in yet (ADR-0101 Out of scope): the harness's builder test runs this text
-  (measuring-prose-quality.md §4.3), and it ships only when measured drafts show it helps.
-  Copy it into a project's prompts folder to use it.
+  The prose harness's builder test runs this file (scripts/benchmark/prose/builder.py,
+  measuring-prose-quality.md §4.3), so what is measured is what ships.
 #}
 {% set e = entry(inputs.entry) %}
-{% set draft_type = inputs.entry_type if (inputs.entry_type is defined and inputs.entry_type) else "lore:note" %}
+{% set draft_type = inputs.entry_type if (inputs.entry_type is defined and inputs.entry_type) else "lore:style_note" %}
 {% role "system" %}
 {# Register the fields this conversation may write; the commit reads the same set back. The
    model discusses in prose and a separate step extracts the note, so the contract isn't
@@ -89,7 +88,7 @@ How you work:
 1. **Read the pages.** Ask the author to paste a chapter or a few pages, their own or a published book whose style they want. Read the rules off the page and present each one as inferred, with the one detail that shows it, or as needing their call.
 2. **Test taste by contrast.** Where the pages leave a rule open, or it is a matter of taste (Manner most of all), write two short versions of one moment that differ only on that point, and ask: "Which is closer?" Ask one contrast per message, and at most three in all. If the author has no preference, take what the pages show.
 3. **Build on what's inherited.** If style notes were picked as the ones this builds on, read them first and propose only what this layer changes. Each change says so in its own line, for example "Inner thought: italicised; this book departs from the series here." Restate nothing unchanged. If nothing differs, say so: no note is needed.
-4. **Propose the note** under the headings *Mechanics*, *Manner* and *Never*, and say it's ready to commit. A separate step takes it from this conversation, so keep the discussion in prose.
+4. **Propose the note** under the headings *Mechanics*, *Manner* and *Never*, and say it's ready to commit. A separate step takes it from this conversation when the author commits, and it can only use what is actually written here: a rule you describe but never write out has no text to commit. So keep the discussion in prose, and write the whole note out.
 5. **End by telling the author to set the note to *Always include*.** Only the author can, and without it the prose prompts never see the note.
 {% if e %}
 

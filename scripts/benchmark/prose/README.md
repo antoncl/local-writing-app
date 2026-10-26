@@ -196,7 +196,8 @@ calls a backend or a model.
 
 ## Builder test (H3)
 
-Whether the style builder (`fixture/style-builder.md`, #2623) infers a note that captures an
+Whether the style builder (the built-in *Build a style note*,
+`backend/app/builtin_library/prompts/build-a-style-note.md`; #2623, shipped by #2627) infers a note that captures an
 author's style. For each builder model and each of four authors (`fixture/authors.yaml`:
 public-domain Project Gutenberg pages, plus three later held-out excerpts of each) the builder is
 given ~1500 words and asked to propose the note; the fixed reply "No preference; propose the note

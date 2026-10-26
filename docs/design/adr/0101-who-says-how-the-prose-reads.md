@@ -329,3 +329,143 @@ viewpoint rule spells out the one Draft scene already had. Two of Draft scene's 
 in with them, approved after review (#2620): a stranger is named only once the scene gives the
 name (#2604), and characters rarely say outright what they want or feel. Stock-phrase bans stay
 out (decision 2).
+
+## Amendment 2 — The style builder ships as a built-in, on a *Style note* sub-type
+
+- **Status:** **Accepted** — 2026-10-26 (Anton), approved as drafted. Issue: #2627. Code facts
+  verified against `5a8b8178`.
+- **Settles** the first *Out of scope* item ("Whether the style builder ships as a built-in").
+- **Narrows** one anti-goal (decision 2 below).
+- **Unchanged:** decisions 4 and 5, the other anti-goals and the journey stand as written.
+
+### What prompted it
+
+*Out of scope* held the builder back "until measured drafts show the rewritten prompt makes a
+better note". #2627 measured that:
+- **The drafts:** Draft scene of one neutral scene, written under each of the four notes the
+  builder inferred in the H3 test, and with no note.
+- **The judging:** each pair asked in both orders, by two judges from different model families
+  (Gemini 3.7 Flash, GPT-5.5).
+
+The results:
+- **Every note changes the drafts written under it,** for both drafting models (Sonnet 5.5 and
+  GPT-4.1 mini).
+  - 8 or 9 of 9 pairs per note, against a "works" bar of 7 set before the run.
+  - The two judges agree on every Sonnet pair, down to the one pair both missed.
+- **How distinctive the result is depends on the drafting model, not on the note.**
+  - Sonnet's drafts can be matched to the note they were written under, 12 of 12.
+  - GPT-4.1 mini's change under any note, but only 5 of 12 can be matched, whether it drafts under
+    its own notes or Sonnet's.
+
+The full result is on #2627.
+
+### Decision
+
+1. **The builder becomes a built-in conversation prompt, *Build a style note*.**
+   - **Text:** the text the H3 test measured
+     (`scripts/benchmark/prose/fixture/style-builder.md`), moved to
+     `backend/app/builtin_library/prompts/`. The harness's builder test then runs the shipped file,
+     so what is measured is what ships.
+   - **Inputs:** as measured. An optional note to revise, and the optional pick of style notes it
+     builds on (decision 5). The `entry_type` input becomes hidden, as in Revise entry.
+   - **Its title differs from the *Narration conventions* project prompt** that existing projects
+     (Anton's among them) already carry, so the Prompts pane never shows two prompts under one name.
+     A project that keeps its own prompt keeps it; nothing migrates it.
+
+2. **A built-in lore sub-type, *Style note* (`lore:style_note`, parent `lore:note`, no fields of
+   its own), is what the builder is offered on and creates.**
+   - **Why a sub-type is needed:**
+     - The Lore pane's "Brainstorm new…" rows each take the nearest create-capable prompt by type
+       ancestry (`createCapablePromptsFor(...)[0]`, `frontend/src/components/panes/Lore.svelte`).
+     - A builder offered on `lore:note` would be nearer to a note than Revise entry (offered on
+       `lore:base`). So "Draft Note" would become the style builder for every note, world notes
+       included.
+   - **What the sub-type changes:**
+     - "Draft Style note" opens the builder.
+     - "Draft Note" stays Revise entry.
+     - A world note's ＋New menu doesn't list the builder.
+     - A style note's ＋New menu lists both the builder and Revise entry, which is offered on
+       `lore:base`. That is no menu change.
+   - **The anti-goal "Not a new … entry type … for style or voice" is narrowed, not dropped.**
+     - The reason behind it stands: built-ins must stay reproducible by a user. A writer can
+       declare the same sub-type, a `lore:note` child with a parent, in their own
+       `metadata.schema.yaml`, as the built-in types are declared (`lore:note` in
+       `backend/app/services/project/default_entry_types.py`).
+     - ***Rejected*'s "a dedicated style kind the prompts can find by type" also stands.** No prose
+       prompt selects or treats a note by its type. A style note reaches the prose prompts because
+       the writer set it to *Always include*, and it is followed because of what it says (decision
+       7), exactly as a plain note with the same text would be.
+     - **The type decides two things only:** where the builder is offered, and which lore entries
+       the writer sees as style notes.
+   - **No migration.**
+     - Adding a type definition changes the shape of no existing file.
+     - Existing style notes, such as the *Narration Conventions* note in Anton's projects, stay
+       `lore:note` and keep working, since nothing in the prose path reads the type.
+     - **The builder's "style notes this builds on" pick must offer both types,** so a note made
+       before the sub-type can still be built on. Its source names `lore:note` today; the slice
+       checks whether that already matches the sub-type and widens it if not.
+   - **Rejected: listing every create-capable prompt in the "Brainstorm new…" menu.** It would put
+     the builder in front of every note, world notes included, and add a labelling rule to a
+     menu, to avoid one type.
+
+3. **The note is created in the open project.**
+   - **How the commit works:** a create-mode commit has no layer choice. It creates the entry in the
+     open project (`create_lore_entry`, `backend/app/services/project/lore.py`; the create request
+     carries only a title and an entry type).
+   - **That already matches decision 5:** the writer runs the builder in the layer that should hold
+     the note, the outermost project for the author's style and the book for its departures
+     (journey steps 1 and 2).
+   - **No layer picker is added.**
+     - Choosing a layer at create time would be new UI for every create flow, to serve one prompt.
+     - The guide (decision 6) tells the writer which project to open.
+
+4. **The writer sets *Always include*; nothing else does.**
+   - **The AI doesn't:** `context_policy` stays `ai_proposable: False`, and the builder's last
+     message tells the writer to set it. The anti-goal "Not the AI setting a context policy" stands.
+   - **The type doesn't either.** A type can't give a field its own default today: per-type field
+     overrides cover a label, a description and hiding (`backend/app/services/project/schema.py`).
+     This amendment adds none.
+   - **Rejected: having the commit set it.** It would be smoother, but it changes what every later
+     prompt receives without the writer choosing that, which is why the policy is the author's alone
+     (Context).
+
+5. **No project is seeded with a style note.**
+   - **Today:** a new project gets its folders and an *Untitled Scene* (`_scaffold_new_project`,
+     `backend/app/services/project/lifecycle.py`). The built-in Library ships prompts and plot
+     templates, and no lore.
+   - **With no note,** the prose follows *Prose craft*, the narration fields, the viewpoint
+     character's entry and the brief.
+   - **Rejected: a default note.** It would be "the author's taste in a built-in" (anti-goals).
+
+6. **A user guide explains what steers the prose, and shows it.**
+   - **Where:** a new in-app guide, *How your prose is steered*, placed after *What the AI sees* in
+     the guide viewer (`GUIDES` in `scripts/gen_guides.py`, and the table in `docs/README.md`).
+   - **What it covers:**
+     - **The four levels and which wins** (decision 1).
+     - **What a prose prompt carries,** and from where:
+       - *Prose craft*
+       - the style notes set to *Always include*
+       - the viewpoint character's entry
+       - the scene's narration fields
+       - the brief
+     - **What goes in a style note and what stays out** (decision 4).
+     - **The two parts of a voice and its sample** (decision 6).
+     - **Building notes layer by layer with the builder,** and setting *Always include*.
+     - **Checking a real send in the Context door,** so the writer sees their note and their
+       character's voice in what went out.
+   - **One diagram** shows the four levels and what each prose prompt receives. It is an SVG beside
+     the guide, as for the other guides.
+   - **The guide states no rule of its own.** It describes this ADR's decisions in the reader's
+     terms, and it changes when they do.
+
+### Not changed
+
+- **The builder's text** is unchanged from what was measured, apart from the hidden input and the
+  type it creates.
+- **The rules a style note holds** (decision 4) are unchanged.
+- **The context policy** stays the author's (Context; ADR-0057, ADR-0059 §F).
+- **No new kind, field, policy or template global** is added.
+- **Stock-phrase bans** stay out (#2629).
+- **Where naming conventions go** stays out (#2628).
+- **How strongly a weaker model follows a note** is a property of that model, not of the builder.
+  This amendment changes nothing to chase it.

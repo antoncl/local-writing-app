@@ -15,7 +15,10 @@ import yaml
 
 FIXTURE = Path(__file__).resolve().parent / "fixture"
 AUTHORS_YAML = FIXTURE / "authors.yaml"
-BUILDER_PROMPT = FIXTURE / "style-builder.md"
+# The shipped built-in (ADR-0101 Amendment 2): the test measures what ships, never a copy.
+BUILDER_PROMPT = Path(__file__).resolve().parents[3] / "backend" / "app" / "builtin_library" / "prompts" / "build-a-style-note.md"
+BUILDER_TITLE = "Build a style note"
+NOTE_TYPE = "lore:style_note"
 
 FIRST_MESSAGE = "Infer this writing's style from these pages and propose the note."
 FOLLOW_UP = "No preference; propose the note from the pages."

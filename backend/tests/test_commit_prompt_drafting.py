@@ -26,6 +26,7 @@ COMMIT_PROMPTS = (
     "revise-plot-card.md",
     "follow-a-change.md",
     "draft-scene.md",
+    "build-a-style-note.md",
 )
 ROSTER_PROMPTS = ("revise-plotline.md", "revise-character-arc.md")
 

@@ -670,12 +670,12 @@ def test_inline_svgs_splices_a_ref_into_a_marked_safe_block(tmp_path):
 
 
 # Every diagram file the guides ship: Ollama context (3) + What the AI sees (4,
-# #2148) + the prompt diagrams (3, #2548). A new diagram raises this on purpose,
-# beside GuideView.svg.test.ts.
-_BUNDLED_DIAGRAMS = 10
+# #2148) + the prompt diagrams (3, #2548) + How your prose is steered (1, #2627).
+# A new diagram raises this on purpose, beside GuideView.svg.test.ts.
+_BUNDLED_DIAGRAMS = 11
 # Inlined copies in the bundle: two prompt diagrams appear in both the Writing
 # prompts guide and the Prompt reference, so each is inlined twice.
-_INLINED_DIAGRAMS = 12
+_INLINED_DIAGRAMS = 13
 
 
 def test_the_diagram_guides_bundle_their_diagrams_inline():

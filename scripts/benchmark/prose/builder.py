@@ -4,20 +4,19 @@
   builder.py report BUILD_OUT
 
 For each builder model (`--models`, default every model in models.yaml) and each of four authors
-(`fixture/authors.yaml`, public-domain pages) the style builder (`fixture/style-builder.md`,
-installed in a project of its own) is handed the pages and asked to infer the style note. The
+(`fixture/authors.yaml`, public-domain pages) the built-in style builder (*Build a style note*,
+`backend/app/builtin_library/prompts/build-a-style-note.md`, in a project of its own) is handed the pages and asked to infer the style note. The
 judge is then shown each of the author's three held-out excerpts with that model's four notes,
 unlabelled, and says which note describes the writing. Bar, per model: 9 of 12 excerpts matched
 to the right note; a note that names the author or the work fails outright. No drafting (§4.3).
 
 Everything goes through the dev backend's routes, in the sequence run.py mirrors for Draft scene:
-  POST /api/prompts, PUT /api/prompts/{id}   routers/lore.py; lib/api/prompts.ts (createPromptEntry,
-                                             savePromptEntry). The app mints the prompt's id, so the
-                                             front matter's `id` is not sent; the id used is recorded
-                                             in the workspace's fixture.json under `prompt`.
+  GET  /api/prompts                         the built-in is read from the project's prompt listing,
+                                             as the frontend lists it; its id is recorded in the
+                                             workspace's fixture.json under `prompt`.
   POST /api/chats ... POST /api/ai/chat/stream  as run.drive_draft_scene, with no entry picked
   POST /api/ai/entry-draft/extract           routers/ai.py::extract_entry_draft, the create-mode
-                                             extraction chatCommit.svelte.ts runs for a NEW lore:note
+                                             extraction chatCommit.svelte.ts runs for a NEW lore:style_note
                                              (`draftExtractHost`); read-only, the note is never written
 
 Resumable: a built note and an answered match already on disk are kept.
@@ -37,10 +36,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from builder_core import (  # noqa: E402
     BUILDER_PROMPT,
+    BUILDER_TITLE,
     EXCERPTS_PER_AUTHOR,
     FOLLOW_UP,
     LABELS,
     MAX_FOLLOW_UPS,
+    NOTE_TYPE,
     SYSTEM_MATCH,
     first_user_turn,
     leaks,
@@ -49,12 +50,11 @@ from builder_core import (  # noqa: E402
     match_order,
     needs_follow_up,
     render_result,
-    split_front_matter,
     tally,
 )
 from fixture_gen import builder_root, ensure_project, load_book, write_json  # noqa: E402
 from judge import CALL_TIMEOUT_S, ask, is_done, pick_judge  # noqa: E402
-from lwa_client import ApiError, Client, discover_backend  # noqa: E402
+from lwa_client import Client, discover_backend  # noqa: E402
 from run import (  # noqa: E402
     StepFailed,
     assistant_message,
@@ -73,30 +73,17 @@ CHAT_KIND = "draft_scene"
 BUILDER_MAX_TOKENS = 8192
 
 
-def ensure_prompt(project: Client, known_id: str | None) -> dict[str, Any]:
-    """Install style-builder.md as a project prompt (or update the one recorded) and read it back."""
-    front, body = split_front_matter(BUILDER_PROMPT.read_text(encoding="utf-8"))
-    entry = None
-    if known_id:
-        try:
-            entry = project.get(f"/api/prompts/{known_id}")
-        except ApiError:
-            entry = None
-    if entry is None:
-        entry = project.post("/api/prompts", {"title": front["title"], "entry_type": front["entry_type"]})
-    saved = project.put(
-        f"/api/prompts/{entry['id']}",
-        {
-            "title": front["title"], "body": body, "base_revision": entry["revision"],
-            "entry_type": front["entry_type"], "metadata": {}, "inputs": front["inputs"],
-            "offer_on": front.get("offer_on", []), "context_strategy": front.get("context_strategy"),
-        },
-    )
-    return project.get(f"/api/prompts/{saved['id']}")
+def ensure_prompt(project: Client) -> dict[str, Any]:
+    """The built-in builder as the project lists it (the listing record carries the effective inputs).
+    Read, never installed: a project copy would sit beside the built-in under the same title."""
+    for entry in project.get("/api/prompts")["entries"]:
+        if entry.get("title") == BUILDER_TITLE:
+            return entry
+    raise SystemExit(f"No built-in prompt titled {BUILDER_TITLE!r}: is the backend serving this checkout?")
 
 
 def ensure_workspace(base_url: str, book: dict[str, Any], key: str, assistants: list[dict[str, Any]]) -> dict[str, Any]:
-    """The author's builder project: no style note, the builder prompt installed, an assistant per
+    """The author's builder project: no style note, the built-in builder, an assistant per
     builder model and judge (the judge matches in the same project)."""
     fixture = ensure_project(base_url, book, builder_root(key))
     # The builder reads the rules off the pages and then writes the note, often in one reply: give
@@ -106,7 +93,7 @@ def ensure_workspace(base_url: str, book: dict[str, Any], key: str, assistants: 
     fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), roomy)
     project = Client(base_url, fixture["root"])
     try:
-        fixture["prompt"] = ensure_prompt(project, fixture.get("prompt"))["id"]
+        fixture["prompt"] = ensure_prompt(project)["id"]
     finally:
         project.close()
     write_json(builder_root(key), fixture)
@@ -139,12 +126,12 @@ def stream_turn(
 def extract_note(
     project: Client, assistant_id: str, chat_id: str, history: list[dict[str, Any]], meta: dict[str, Any]
 ) -> tuple[str, str]:
-    """The create-mode extraction for a new lore:note; returns `(title, body)`. Read-only."""
+    """The create-mode extraction for a new style note; returns `(title, body)`. Read-only."""
     result = project.post(
         "/api/ai/entry-draft/extract",
         {
             "messages": [{"role": m["role"], "content": m["content"]} for m in history],
-            "assistant_id": assistant_id, "chat_id": chat_id, "entry_type": "lore:note",
+            "assistant_id": assistant_id, "chat_id": chat_id, "entry_type": NOTE_TYPE,
         },
     )
     patch = result.get("patch") or {}
@@ -296,7 +283,7 @@ def stamp_builder(out: Path) -> None:
     if path.is_file():
         made = json.loads(path.read_text(encoding="utf-8")).get("builder_sha256")
         if made != sha:
-            raise SystemExit(f"{out} was made with a different style-builder.md: use a new --out to measure this one.")
+            raise SystemExit(f"{out} was made with a different builder text: use a new --out to measure this one.")
         return
     out.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"builder_sha256": sha}, indent=2), encoding="utf-8")

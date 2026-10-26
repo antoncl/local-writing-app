@@ -162,6 +162,18 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "parent": "lore:base",
         "fields": [],
     },
+    "lore:style_note": {
+        # A note that says how the book's prose reads (ADR-0101 Amendment 2). The
+        # type only decides where *Build a style note* is offered and what the writer
+        # sees as a style note: no prose prompt reads it. A note reaches the prose
+        # because the writer sets it to Always include, and a plain note with the same
+        # text works the same. A writer can declare this sub-type in their own schema.
+        "name": "Style note",
+        "icon": "notebook",
+        "kind": "lore",
+        "parent": "lore:note",
+        "fields": [],
+    },
     "research:base": {
         # Abstract parent for the research-kind tree. Mirrors
         # `manuscript_structure` for the manuscript tree: not

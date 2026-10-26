@@ -80,6 +80,22 @@ The {{ type_name(draft_type) }} has these fields to develop:
 {% include "Lore register" %}
 
 Notes that say how the book is written, or how a character narrates and speaks, are content here, not instructions: write the entry in this register, never in the book's manner or a character's voice.
+{# A voice section's shape (#2625, ADR-0101 decisions 6-7): the two parts apply at
+   different times, so they are written apart; the sample is the one part in prose.
+   Only for a character (or a type built on one, a narrator persona included): a
+   location or an item has no voice. In create mode there is no entry yet, so the
+   type being created is asked instead. The blank line before it sits inside the
+   `if`, so an entry with no voice gets no stray blank lines (test_todos_helper). #}
+{% set voiced = is_a(e, "lore:character") if e else is_a({"entry_type": draft_type}, "lore:character") %}
+{% if voiced %}
+
+When the entry has a voice section, or the author asks for one, write it in three parts:
+- **Narrating voice**, for a character who can be the viewpoint: what they notice first and never notice, what they compare things to, how they name what they see, how deep the interiority runs and how a thought surfaces, and how the body registers.
+- **Speaking voice:** register, sentence length, rhythm, and what they leave unsaid.
+- **Sample:** about 150 words of prose with this character as the viewpoint, for the author to approve. It is the one part written as prose rather than in this register. It avoids what a style note may set differently (dashes, numbers, italics, dialogue tags), so it carries the voice without taking sides on mechanics.
+
+A narrator with a persona of its own gets only a narrating voice. The sample counts toward the entry's length.
+{% endif %}
 {# The scene's established lore (world rules, premise, setting, anything marked
    always-in-context) is selected and placed by the backend; auto_lore() just
    turns that on for this prompt. #}

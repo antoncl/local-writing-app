@@ -103,6 +103,18 @@ class DraftScenePromptTests(unittest.TestCase):
         text = self._preview(self.scene_ids[1])
         self.assertIn("## Character voice", text)
 
+    def test_the_voice_has_a_narrating_and_a_speaking_part(self) -> None:
+        # #2625 (ADR-0101 decision 6): the narrating voice holds only for the viewpoint
+        # character, the speaking voice for every speaker; a sample is written like,
+        # never from (the baseline lifted 7-12-word runs from samples).
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        text = self._preview(self.scene_ids[1])
+        self.assertIn("**The narrating voice** applies only while that character is the viewpoint", text)
+        self.assertIn("**The speaking voice** applies whenever they speak", text)
+        self.assertIn("Write like it, never from it", text)
+        # The frequency rule (#2580) is kept after the two parts.
+        self.assertLess(text.index("**The speaking voice**"), text.index("they are not a quota"))
+
     PROSE_BUILTINS = {
         "continue.md", "describe.md", "draft-scene.md", "expand.md", "finalize-roleplay.md",
         "line-edit.md", "rephrase.md", "shorten.md", "show-dont-tell.md", "tighten-grammar.md",
@@ -380,6 +392,28 @@ class DraftScenePromptTests(unittest.TestCase):
             with self.subTest(prompt=title):
                 text = self._render(title, self.scene_ids[0], {"entry": self.honor.id})
                 self.assertIn(sentence, text)
+
+    def test_revise_entry_shapes_a_voice_section(self) -> None:
+        # #2625 (ADR-0101 decision 7): narrating and speaking voice apart, and a ~150-word
+        # sample that is the one part in prose and counts toward the length.
+        text = self._render("Revise entry", self.scene_ids[0], {"entry": self.honor.id})
+        self.assertIn("When the entry has a voice section, or the author asks for one, write it in three parts", text)
+        self.assertIn("**Sample:** about 150 words of prose", text)
+        self.assertIn("A narrator with a persona of its own gets only a narrating voice.", text)
+        self.assertNotIn("A voice section's shape", text)  # the template comment doesn't render
+
+    def test_revise_entry_offers_no_voice_to_a_location(self) -> None:
+        # #2626 review: a location or an item has no voice; the rule stays off it.
+        from app.models import CreateLoreEntryRequest
+
+        harbour = self.service.create_lore_entry(CreateLoreEntryRequest(title="The harbour", entry_type="lore:location"))
+        text = self._render("Revise entry", self.scene_ids[0], {"entry": harbour.id})
+        self.assertNotIn("write it in three parts", text)
+        # Create mode asks the type being created (the picker is blank, as the app sends it).
+        made = self._render("Revise entry", self.scene_ids[0], {"entry": "[]", "entry_type": "lore:character"})
+        self.assertIn("write it in three parts", made)
+        made = self._render("Revise entry", self.scene_ids[0], {"entry": "[]", "entry_type": "lore:location"})
+        self.assertNotIn("write it in three parts", made)
 
     def test_draft_scene_lists_the_scenes_anchored_changes_as_its_brief(self) -> None:
         from mutation_helpers import save_scenes_with_mutations

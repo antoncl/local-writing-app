@@ -129,7 +129,16 @@ def tally(notes: dict[str, dict[str, Any]], drafts: list[dict[str, Any]], author
         if picked == draft["key"]:
             per["correct"] += 1
             row["correct"] += 0 if leaked[draft["key"]] else 1
-    for row in models.values():
+    # An author with no drafts for a model (its note failed, or was never built) still owes them: count
+    # them as out of reach rather than letting the total, and with it the bar, shrink.
+    seen: dict[tuple[str, str], int] = {}
+    for draft in drafts:
+        seen[(draft["model"], draft["key"])] = seen.get((draft["model"], draft["key"]), 0) + 1
+    per_author = max(seen.values(), default=0)
+    for model, row in models.items():
+        missing = sum(per_author for key in keys if not seen.get((model, key)))
+        row["total"] += missing
+        row["out_of_reach"] += missing
         row["bar"] = bar_for(row["total"])
         row["passed"] = row["correct"] >= row["bar"]
     cost = sum(n.get("cost_usd") or 0 for n in notes.values()) + sum(

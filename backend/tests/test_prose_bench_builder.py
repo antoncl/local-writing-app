@@ -99,6 +99,18 @@ def test_a_leaking_author_fails_outright():
     assert not core.tally(notes, _drafts("m", 12), AUTHORS)["models"]["m"]["passed"]
 
 
+def test_a_failed_note_counts_its_missing_drafts_against_the_bar():
+    # #2624 review: wharton's note failed, so it has no drafts; the bar must stay 9 of 12, not 7 of 9.
+    notes = {k: dict(NOTE) for k in KEYS}
+    notes["wharton"]["status"] = "out_of_reach"
+    drafts = [d for d in _drafts("m", 12) if d["key"] != "wharton"]
+    row = core.tally(notes, drafts, AUTHORS)["models"]["m"]
+    assert (row["total"], row["out_of_reach"], row["bar"]) == (12, 3, 9)
+    assert row["correct"] == 9 and row["passed"]
+    fewer = [d for d in _drafts("m", 7) if d["key"] != "wharton"]
+    assert not core.tally(notes, fewer, AUTHORS)["models"]["m"]["passed"]
+
+
 def test_a_run_of_one_author_tallies_picks_of_the_others():
     # #2623 smoke run: --authors crane, and the judge picked Chopin's excerpt.
     crane = [a for a in AUTHORS if a["key"] == "crane"]

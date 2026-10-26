@@ -27,6 +27,7 @@ Layout under BUILD_OUT: notes/<key>.json|.md, drafts/<key>/<model>/draft_scene/<
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from functools import partial
@@ -310,6 +311,20 @@ def report(out: Path) -> str:
     return text
 
 
+def stamp_builder(out: Path) -> None:
+    """Record which builder text BUILD_OUT was made with, and refuse a different one: kept notes and
+    their drafts are reused, so a changed builder would mix two versions in one result."""
+    sha = hashlib.sha256(BUILDER_PROMPT.read_bytes()).hexdigest()
+    path = out / "builder.json"
+    if path.is_file():
+        made = json.loads(path.read_text(encoding="utf-8")).get("builder_sha256")
+        if made != sha:
+            raise SystemExit(f"{out} was made with a different style-builder.md: use a new --out to measure this one.")
+        return
+    out.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"builder_sha256": sha}, indent=2), encoding="utf-8")
+
+
 def run(args: argparse.Namespace) -> None:
     base_url = discover_backend()
     all_models = load_models()
@@ -328,6 +343,7 @@ def run(args: argparse.Namespace) -> None:
         raise SystemExit(f"Unknown brief {brief!r}.")
     authors = [a for a in load_authors() if not args.authors or a["key"] in args.authors]
     out = args.out
+    stamp_builder(out)
     for author in authors:
         note = build_note(base_url, book, author, builder, out)
         if note["status"] != "ok":

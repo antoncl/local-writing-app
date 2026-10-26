@@ -88,6 +88,22 @@ aliases current so nicknames are caught. How those mentions turn into the lore
 an AI chat receives — and the per-entry **Context policy** that keeps a spoiler
 out of it — is covered in **[What the AI sees](#guide:ai-context)**.
 
+## Notes the AI always sees
+
+Some notes aren't about one thing in your world but about how all of it works: a
+magic system, a calendar, how names are formed. Set such a note's **Context
+policy** to *Always include* and the AI receives it with nearly every prompt,
+whether or not anything names it (the exceptions are in
+**[What the AI sees](#guide:ai-context)**).
+
+**Naming conventions** are the common case. If you want the names the AI invents
+to fit your world — how a family name is built, what ships or inns are called —
+keep them in a note of their own and set it to *Always include*. Draft scene,
+Continue and the brainstorm prompts then see it whenever they coin a name. Keep
+naming out of a style note: a style note says how the prose reads, and the style
+builder leaves naming out of it (see
+**[How your prose is steered](#guide:prose-steering)**).
+
 ## Tags
 
 Tags are a light, cross-cutting way to organise — *protagonist*, *chapter-3*,

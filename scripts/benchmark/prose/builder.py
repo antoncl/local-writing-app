@@ -1,13 +1,14 @@
 """The builder test of the prose harness (#2623, measuring-prose-quality.md §4.3).
 
-  builder.py run --out BUILD_OUT [--models M ...] [--drafts 3] [--brief KEY] [--authors KEY ...]
+  builder.py run --out BUILD_OUT [--models M ...] [--authors KEY ...]
   builder.py report BUILD_OUT
 
-For each of four authors (`fixture/authors.yaml`, public-domain pages) the style builder
-(`fixture/style-builder.md`, installed in a project of its own) is handed the pages and asked to
-infer the style note. The note is then given to Draft scene, a brief is drafted `--drafts` times per
-model, and the judge says which of the four authors' excerpts, unnamed, each draft is closest to.
-Bar: 9 of 12 attributed correctly; a note that names the author or the work fails outright.
+For each builder model (`--models`, default every model in models.yaml) and each of four authors
+(`fixture/authors.yaml`, public-domain pages) the style builder (`fixture/style-builder.md`,
+installed in a project of its own) is handed the pages and asked to infer the style note. The
+judge is then shown each of the author's three held-out excerpts with that model's four notes,
+unlabelled, and says which note describes the writing. Bar, per model: 9 of 12 excerpts matched
+to the right note; a note that names the author or the work fails outright. No drafting (§4.3).
 
 Everything goes through the dev backend's routes, in the sequence run.py mirrors for Draft scene:
   POST /api/prompts, PUT /api/prompts/{id}   routers/lore.py; lib/api/prompts.ts (createPromptEntry,
@@ -19,9 +20,8 @@ Everything goes through the dev backend's routes, in the sequence run.py mirrors
                                              extraction chatCommit.svelte.ts runs for a NEW lore:note
                                              (`draftExtractHost`); read-only, the note is never written
 
-Resumable: a built note, a draft and an attribution already on disk are kept.
-Layout under BUILD_OUT: notes/<key>.json|.md, drafts/<key>/<model>/draft_scene/<brief>/draft_<n>.md
-(+ meta_<n>.json, attribution_<n>.json), result.md.
+Resumable: a built note and an answered match already on disk are kept.
+Layout under BUILD_OUT: notes/<model>/<key>.json|.md, matches/<model>/<key>_<i>.json, result.md.
 """
 
 from __future__ import annotations
@@ -37,20 +37,21 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from builder_core import (  # noqa: E402
     BUILDER_PROMPT,
+    EXCERPTS_PER_AUTHOR,
     FOLLOW_UP,
+    LABELS,
     MAX_FOLLOW_UPS,
-    SYSTEM_ATTRIBUTION,
-    attribution_message,
-    excerpt_order,
+    SYSTEM_MATCH,
     first_user_turn,
     leaks,
     load_authors,
+    match_message,
+    match_order,
     needs_follow_up,
     render_result,
     split_front_matter,
     tally,
 )
-from checks import iter_drafts  # noqa: E402
 from fixture_gen import builder_root, ensure_project, load_book, write_json  # noqa: E402
 from judge import CALL_TIMEOUT_S, ask, is_done, pick_judge  # noqa: E402
 from lwa_client import ApiError, Client, discover_backend  # noqa: E402
@@ -61,16 +62,12 @@ from run import (  # noqa: E402
     chat_payload,
     cost_of,
     done_summary,
-    drive_draft_scene,
-    find_prompts,
     open_chat,
     preview_lock,
     run_cell,
-    write_draft,
 )
 from setup_backend import load_judges, load_models, select_models, setup_project  # noqa: E402
 
-BRIEF_PROMPT = "draft_scene"
 # run_cell's `kind` for the builder chat: it takes the chat record the way a Draft scene chat does.
 CHAT_KIND = "draft_scene"
 
@@ -97,10 +94,11 @@ def ensure_prompt(project: Client, known_id: str | None) -> dict[str, Any]:
     return project.get(f"/api/prompts/{saved['id']}")
 
 
-def ensure_workspace(base_url: str, book: dict[str, Any], key: str, builder: dict[str, Any]) -> dict[str, Any]:
-    """The author's builder project: no style note, the builder prompt installed, an assistant for it."""
+def ensure_workspace(base_url: str, book: dict[str, Any], key: str, assistants: list[dict[str, Any]]) -> dict[str, Any]:
+    """The author's builder project: no style note, the builder prompt installed, an assistant per
+    builder model and judge (the judge matches in the same project)."""
     fixture = ensure_project(base_url, book, builder_root(key))
-    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), [builder])
+    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), assistants)
     project = Client(base_url, fixture["root"])
     try:
         fixture["prompt"] = ensure_prompt(project, fixture.get("prompt"))["id"]
@@ -194,15 +192,18 @@ def note_record(key: str, body: str, meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_note(base_url: str, book: dict[str, Any], author: dict[str, Any], builder: dict[str, Any], out: Path) -> dict[str, Any]:
-    """Run (or resume) the builder for one author; saves notes/<key>.json and, when ok, .md."""
-    path = out / "notes" / f"{author['key']}.json"
+def build_note(
+    base_url: str, fixture: dict[str, Any], author: dict[str, Any], builder: dict[str, Any], out: Path
+) -> dict[str, Any]:
+    """Run (or resume) the builder for one author with one model; saves notes/<model>/<key>.json and,
+    when ok, .md."""
+    path = out / "notes" / builder["name"] / f"{author['key']}.json"
+    label = f"{builder['name']}/{author['key']}"
     if path.is_file():
         kept = json.loads(path.read_text(encoding="utf-8"))
         if kept["status"] != "error":
-            print(f"{author['key']}: note kept ({kept['status']})", flush=True)
+            print(f"{label}: note kept ({kept['status']})", flush=True)
             return kept
-    fixture = ensure_workspace(base_url, book, author["key"], builder)
     project = Client(base_url, fixture["root"])
     try:
         # The listing record, as run.py uses: it carries `effective_inputs`, which the preview
@@ -218,102 +219,73 @@ def build_note(base_url: str, book: dict[str, Any], author: dict[str, Any], buil
     if record["status"] == "ok":
         path.with_suffix(".md").write_text(body, encoding="utf-8")
     found = leaks(body, author["leak_terms"])
-    print(f"{author['key']}: note {record['status']}, {record['follow_ups']} follow-ups, leaks: {found or 'none'}", flush=True)
+    print(f"{label}: note {record['status']}, {record['follow_ups']} follow-ups, leaks: {found or 'none'}", flush=True)
     return record
 
 
-def draft_folder(out: Path, key: str, model: str, brief: str) -> Path:
-    return out / "drafts" / key / model / BRIEF_PROMPT / brief
-
-
-def pending_drafts(out: Path, key: str, models: list[dict[str, Any]], brief: str, count: int) -> list[tuple[dict[str, Any], int]]:
-    """The `(model, n)` drafts of `brief` not yet on disk."""
-    return [
-        (m, n) for m in models for n in range(1, count + 1)
-        if not (draft_folder(out, key, m["name"], brief) / f"draft_{n}.md").is_file()
-    ]
-
-
-def drafting_fixture(
-    base_url: str, book: dict[str, Any], key: str, note: dict[str, Any], models: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """The author's drafting project (the inferred note as its style note) with an assistant per model."""
-    root = builder_root(key, drafts=True)
-    fixture = ensure_project(base_url, book, root, {"title": note["note_title"], "body": note["note_body"]})
-    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), models)
-    write_json(root, fixture)
-    return fixture
-
-
-def draft_pending(
-    base_url: str, fixture: dict[str, Any], key: str, todo: list[tuple[dict[str, Any], int]], brief: str, out: Path
+def match_excerpts(
+    base_url: str, fixtures: dict[str, dict[str, Any]], authors: list[dict[str, Any]],
+    builder: dict[str, Any], out: Path,
 ) -> None:
-    """Draft `brief` for each pending `(model, n)` with Draft scene and save it as run.py does."""
-    project = Client(base_url, fixture["root"])
-    try:
-        prompt = find_prompts(project.get("/api/prompts")["entries"])[BRIEF_PROMPT]
-        for model, n in todo:
-            drive = partial(drive_draft_scene, project, prompt, fixture["assistants"][model["name"]], fixture["scenes"][brief], n)
-            draft, meta = run_cell(project, BRIEF_PROMPT, drive, 0)
-            write_draft(draft_folder(out, key, model["name"], brief), n, draft, meta)
-            print(f"{key}/{model['name']}/{brief} #{n}: {meta['status']}", flush=True)
-    finally:
-        project.close()
-
-
-def attribute_drafts(base_url: str, out: Path, model_ids: dict[str, str]) -> None:
-    """The judge's attribution for every ok draft that has none yet, saved as attribution_<n>.json."""
-    authors = {a["key"]: a for a in load_authors()}
+    """The judge's match for every excerpt not yet answered, saved as matches/<model>/<key>_<i>.json.
+    Needs every author's note from `builder` to be ok; otherwise no trial of this model can run."""
+    model, keys = builder["name"], [a["key"] for a in authors]
+    bodies = {}
+    for key in keys:
+        path = out / "notes" / model / f"{key}.json"
+        note = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        if note.get("status") != "ok":
+            print(f"{model}: no ok note for {key}; its matches are out of reach", flush=True)
+            return
+        bodies[key] = note["note_body"]
     judges = load_judges()
-    clients: dict[str, Client] = {}
-    try:
-        for item in iter_drafts(out / "drafts"):
-            if item["meta"].get("status", "ok") != "ok":
-                continue
-            key, model, n = item["case"], item["model"], item["n"]
-            path = draft_folder(out, key, model, item["brief"]) / f"attribution_{n}.json"
-            if path.is_file() and is_done(json.loads(path.read_text(encoding="utf-8"))):
-                continue
-            which = pick_judge(model_ids[model], judges)
-            fixture = json.loads((builder_root(key, drafts=True) / "fixture.json").read_text(encoding="utf-8"))
-            client = clients.setdefault(key, Client(base_url, fixture["root"], timeout=CALL_TIMEOUT_S))
-            order = excerpt_order(key, model, n)
-            message = attribution_message(item["text"], [authors[k]["excerpt"] for k in order])
-            verdict = ask(client, fixture["assistants"][judges[which]["name"]], SYSTEM_ATTRIBUTION, message, tuple("ABCD"))
-            record = {"order": order, **verdict, "judge": which, "judge_model": judges[which]["model"]}
-            record["correct"] = order["ABCD".index(verdict["answer"])] == key if verdict["answer"] in tuple("ABCD") else None
-            path.write_text(json.dumps(record, indent=2), encoding="utf-8")
-            print(f"{key}/{model} #{n} [{which}]: {verdict['answer']} correct={record['correct']}", flush=True)
-    finally:
-        for client in clients.values():
+    which = pick_judge(builder["model"], judges)
+    for author in authors:
+        key = author["key"]
+        client = Client(base_url, fixtures[key]["root"], timeout=CALL_TIMEOUT_S)
+        try:
+            for i in range(EXCERPTS_PER_AUTHOR):
+                path = out / "matches" / model / f"{key}_{i}.json"
+                if path.is_file() and is_done(json.loads(path.read_text(encoding="utf-8"))):
+                    continue
+                order = match_order(model, key, i, keys)
+                message = match_message(author["excerpts"][i], [bodies[k] for k in order])
+                choices = tuple(LABELS[: len(order)])
+                assistant = fixtures[key]["assistants"][judges[which]["name"]]
+                verdict = ask(client, assistant, SYSTEM_MATCH, message, choices)
+                record = {"order": order, **verdict, "judge": which, "judge_model": judges[which]["model"]}
+                record["correct"] = order[choices.index(verdict["answer"])] == key if verdict["answer"] in choices else None
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+                print(f"{model}/{key}_{i} [{which}]: {verdict['answer']} correct={record['correct']}", flush=True)
+        finally:
             client.close()
 
 
-def collect(out: Path) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    """Every note and draft record under BUILD_OUT, as `core.tally` takes them."""
-    notes = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted((out / "notes").glob("*.json"))}
-    drafts = []
-    for item in iter_drafts(out / "drafts"):
-        path = draft_folder(out, item["case"], item["model"], item["brief"]) / f"attribution_{item['n']}.json"
-        drafts.append({
-            "key": item["case"], "model": item["model"], "status": item["meta"].get("status", "ok"),
-            "cost_usd": item["meta"].get("cost_usd"),
-            "attribution": json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None,
-        })
-    return notes, drafts
+def collect(out: Path) -> tuple[list[str], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """The model names and every note and match record under BUILD_OUT, as `core.tally` takes them."""
+    notes: dict[str, dict[str, Any]] = {}
+    matches: dict[str, dict[str, Any]] = {}
+    for folder in sorted((out / "notes").glob("*")):
+        notes[folder.name] = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted(folder.glob("*.json"))}
+        matches[folder.name] = {
+            p.stem: json.loads(p.read_text(encoding="utf-8")) for p in sorted((out / "matches" / folder.name).glob("*.json"))
+        }
+    return sorted(notes), notes, matches
 
 
 def report(out: Path) -> str:
-    notes, drafts = collect(out)
-    authors = [a for a in load_authors() if a["key"] in notes]
-    text = render_result(tally(notes, drafts, authors))
+    models, notes, matches = collect(out)
+    built = {key for model_notes in notes.values() for key in model_notes}
+    authors = [a for a in load_authors() if a["key"] in built]
+    text = render_result(tally(notes, matches, authors, models))
     (out / "result.md").write_text(text, encoding="utf-8")
     return text
 
 
 def stamp_builder(out: Path) -> None:
-    """Record which builder text BUILD_OUT was made with, and refuse a different one: kept notes and
-    their drafts are reused, so a changed builder would mix two versions in one result."""
+    """Record which builder text BUILD_OUT was made with, and refuse a different one: kept notes
+    are reused, so a changed builder would mix two versions in one result."""
     sha = hashlib.sha256(BUILDER_PROMPT.read_bytes()).hexdigest()
     path = out / "builder.json"
     if path.is_file():
@@ -327,47 +299,32 @@ def stamp_builder(out: Path) -> None:
 
 def run(args: argparse.Namespace) -> None:
     base_url = discover_backend()
-    all_models = load_models()
-    models = select_models(all_models, args.models)
+    models = select_models(load_models(), args.models)
     judges = list(load_judges().values())
-    builder = (
-        select_models(all_models, [args.builder_model])[0] if args.builder_model
-        else next((m for m in all_models if m.get("primary")), all_models[0])
-    )
     names = [m["name"] for m in [*models, *judges]]
     if len(names) != len(set(names)):
         raise SystemExit(f"Model and judge names must be distinct: {', '.join(sorted(names))}")
     book = load_book()
-    brief = args.brief or book["scenes"][0]["key"]
-    if brief not in {s["key"] for s in book["scenes"]}:
-        raise SystemExit(f"Unknown brief {brief!r}.")
     authors = [a for a in load_authors() if not args.authors or a["key"] in args.authors]
     out = args.out
     stamp_builder(out)
-    for author in authors:
-        note = build_note(base_url, book, author, builder, out)
-        if note["status"] != "ok":
-            continue
-        # Always (re)set the drafting project's assistants, not only when drafts are pending: a
-        # changed setting (a judge's output cap, say) must reach the judge before it attributes.
-        fixture = drafting_fixture(base_url, book, author["key"], note, [*models, *judges])
-        todo = pending_drafts(out, author["key"], models, brief, args.drafts)
-        if todo:
-            draft_pending(base_url, fixture, author["key"], todo, brief, out)
-    attribute_drafts(base_url, out, {m["name"]: m["model"] for m in all_models})
+    # Always (re)set each workspace's assistants, not only when work is pending: a changed setting
+    # (a judge's output cap, say) must reach the judge before it matches.
+    fixtures = {a["key"]: ensure_workspace(base_url, book, a["key"], [*models, *judges]) for a in authors}
+    for model in models:
+        for author in authors:
+            build_note(base_url, fixtures[author["key"]], author, model, out)
+        match_excerpts(base_url, fixtures, authors, model, out)
     print(report(out))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    run_parser = sub.add_parser("run", help="build the notes, draft from them, attribute, report")
+    run_parser = sub.add_parser("run", help="build the notes, match the excerpts to them, report")
     run_parser.add_argument("--out", type=Path, required=True)
-    run_parser.add_argument("--models", nargs="+", help="drafting models from models.yaml (default: all)")
-    run_parser.add_argument("--drafts", type=int, default=3)
-    run_parser.add_argument("--brief", help="a scene key from book.yaml (default: the first)")
+    run_parser.add_argument("--models", nargs="+", help="builder models from models.yaml (default: all)")
     run_parser.add_argument("--authors", nargs="+", choices=[a["key"] for a in load_authors()])
-    run_parser.add_argument("--builder-model", help="the model that runs the builder (default: the primary, else the first)")
     report_parser = sub.add_parser("report", help="print and write result.md for a BUILD_OUT")
     report_parser.add_argument("out", type=Path)
     args = parser.parse_args()

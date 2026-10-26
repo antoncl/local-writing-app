@@ -1,6 +1,6 @@
 """The pure parts of the builder test (#2623, measuring-prose-quality.md §4.3): what to say next,
-the leak check, the attribution draw and prompt, the tally and the report. No I/O beyond reading
-the two fixture files, so every rule here is unit-tested without a backend."""
+the leak check, the match draw and prompt, the tally and the report. No I/O beyond reading the two
+fixture files, so every rule here is unit-tested without a backend."""
 
 from __future__ import annotations
 
@@ -20,15 +20,17 @@ BUILDER_PROMPT = FIXTURE / "style-builder.md"
 FIRST_MESSAGE = "Infer this writing's style from these pages and propose the note."
 FOLLOW_UP = "No preference; propose the note from the pages."
 MAX_FOLLOW_UPS = 3
-# measuring-prose-quality.md §2: 9 of the 12 drafts (4 authors x 3) attributed correctly; chance is 3.
+# measuring-prose-quality.md §2: 9 of the 12 held-out excerpts (4 authors x 3) matched to the right
+# note; chance is 3.
 BAR_NUM, BAR_DEN = 9, 12
 LABELS = "ABCD"
+EXCERPTS_PER_AUTHOR = 3
 
-SYSTEM_ATTRIBUTION = (
-    "You are shown a passage of fiction and four excerpts, A to D, each by a different writer. Say "
-    "which writer the passage is closest to in style: diction, rhythm, how sentences and paragraphs are "
-    "built, how dialogue and thought are set on the page. Do not judge quality, and do not go by "
-    "subject or setting. Reply with ONLY a JSON object: "
+SYSTEM_MATCH = (
+    "You are shown a passage of fiction and four style notes, A to D, each inferred from a different "
+    "writer's pages. Say which note describes the writing of the passage: diction, rhythm, how sentences "
+    "and paragraphs are built, how dialogue and thought are set on the page. Do not judge quality, and "
+    "do not go by subject or setting. Reply with ONLY a JSON object: "
     '{"answer": "A", "B", "C" or "D", "quote": "<the shortest passage that decides it, verbatim>"}'
 )
 
@@ -75,87 +77,93 @@ def leaks(note_body: str, leak_terms: Sequence[str]) -> list[str]:
     return found
 
 
-def excerpt_order(key: str, model: str, n: int, keys: Sequence[str] | None = None) -> list[str]:
-    """The authors in slot order A-D for one draft: a permutation fixed by a hash of its path, so
-    reruns agree and the true author does not always sit in the same slot."""
-    seed = f"{key}/{model}/{n}"
+def match_order(model: str, key: str, i: int, keys: Sequence[str] | None = None) -> list[str]:
+    """The authors in slot order A-D for one trial (author `key`'s excerpt `i`, the notes of `model`):
+    a permutation fixed by a hash of the trial, so reruns agree and the true note does not always
+    sit in the same slot."""
+    seed = f"{model}/{key}/{i}"
     return sorted(keys or author_keys(), key=lambda k: hashlib.sha256(f"{seed}/{k}".encode()).digest())
 
 
-def attribution_message(draft: str, excerpts: Sequence[str]) -> str:
-    shown = "\n\n".join(f"Excerpt {label}:\n{text.strip()}" for label, text in zip(LABELS, excerpts, strict=True))
-    return f"{shown}\n\nPassage:\n{draft.strip()}\n\nQuestion: which excerpt's writer is this passage closest to in style?"
+def match_message(excerpt: str, notes: Sequence[str]) -> str:
+    shown = "\n\n".join(f"Style note {label}:\n{text.strip()}" for label, text in zip(LABELS, notes, strict=False))
+    return f"{shown}\n\nPassage:\n{excerpt.strip()}\n\nQuestion: which note describes the writing of this passage?"
 
 
 def bar_for(total: int) -> int:
-    """Correct attributions needed out of `total` drafts (9 of 12, scaled for fewer or more)."""
+    """Correct matches needed out of `total` trials (9 of 12, scaled for fewer or more)."""
     return math.ceil(total * BAR_NUM / BAR_DEN)
 
 
-def picked_author(attribution: dict[str, Any] | None) -> str | None:
-    """The author a recorded attribution chose, or None for a missing, errored or unparsed one."""
-    record = attribution or {}
+def picked_author(match: dict[str, Any] | None) -> str | None:
+    """The author whose note a recorded match chose, or None for a missing, errored or unparsed one."""
+    record = match or {}
     answer, order = record.get("answer"), record.get("order") or []
     return order[LABELS.index(answer)] if answer in tuple(LABELS) and order else None
 
 
-def tally(notes: dict[str, dict[str, Any]], drafts: list[dict[str, Any]], authors: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per model and per author. `drafts` are `{key, model, status, cost_usd, attribution}` (attribution
-    may be None). A leaking author fails outright: its drafts never count as correct. The bar is taken
-    over every draft recorded for the model, so one out of reach counts against it."""
+def tally(
+    notes: dict[str, dict[str, dict[str, Any]]], matches: dict[str, dict[str, dict[str, Any]]],
+    authors: list[dict[str, Any]], models: Sequence[str],
+) -> dict[str, Any]:
+    """Per builder model and per author. `notes[model][key]` is a note record and
+    `matches[model]["<key>_<i>"]` a match record. A model is judged over every trial of the run
+    (authors x 3): one with any note missing or not ok has none of them run, and a trial with no
+    answer is out of reach; both count against the bar. A leaking author fails outright: its trials
+    never count as correct. An answer that did not parse is wrong."""
     keys = [a["key"] for a in authors]
-    leaked = {a["key"]: leaks(notes.get(a["key"], {}).get("note_body") or "", a["leak_terms"]) for a in authors}
-    by_author = {
-        key: {
-            "status": notes.get(key, {}).get("status", "missing"), "leaked": leaked[key],
-            "ok": 0, "correct": 0, "answers": dict.fromkeys(keys, 0),
+    result_models: dict[str, dict[str, Any]] = {}
+    result_authors: dict[str, dict[str, dict[str, Any]]] = {}
+    cost = 0.0
+    for model in models:
+        model_notes, model_matches = notes.get(model, {}), matches.get(model, {})
+        runnable = all(model_notes.get(k, {}).get("status") == "ok" for k in keys)
+        row = {"total": len(keys) * EXCERPTS_PER_AUTHOR, "correct": 0, "out_of_reach": 0}
+        per_author = {
+            a["key"]: {
+                "status": model_notes.get(a["key"], {}).get("status", "missing"),
+                "leaked": leaks(model_notes.get(a["key"], {}).get("note_body") or "", a["leak_terms"]),
+                "correct": 0, "answers": dict.fromkeys(keys, 0),
+            }
+            for a in authors
         }
-        for key in keys
-    }
-    models: dict[str, dict[str, Any]] = {}
-    for draft in drafts:
-        row = models.setdefault(draft["model"], {"total": 0, "ok": 0, "out_of_reach": 0, "correct": 0})
-        row["total"] += 1
-        if draft["status"] != "ok":
-            row["out_of_reach"] += 1
-            continue
-        row["ok"] += 1
-        per = by_author[draft["key"]]
-        per["ok"] += 1
-        picked = picked_author(draft.get("attribution"))
-        if picked:
-            # The judge can pick any of the four excerpts, also an author left out of this run.
-            per["answers"][picked] = per["answers"].get(picked, 0) + 1
-        if picked == draft["key"]:
-            per["correct"] += 1
-            row["correct"] += 0 if leaked[draft["key"]] else 1
-    # An author with no drafts for a model (its note failed, or was never built) still owes them: count
-    # them as out of reach rather than letting the total, and with it the bar, shrink.
-    seen: dict[tuple[str, str], int] = {}
-    for draft in drafts:
-        seen[(draft["model"], draft["key"])] = seen.get((draft["model"], draft["key"]), 0) + 1
-    per_author = max(seen.values(), default=0)
-    for model, row in models.items():
-        missing = sum(per_author for key in keys if not seen.get((model, key)))
-        row["total"] += missing
-        row["out_of_reach"] += missing
+        for key in keys:
+            per = per_author[key]
+            for i in range(EXCERPTS_PER_AUTHOR):
+                record = model_matches.get(f"{key}_{i}")
+                if not runnable or record is None or record.get("answer") == "error":
+                    row["out_of_reach"] += 1
+                    continue
+                picked = picked_author(record)
+                if picked:
+                    per["answers"][picked] = per["answers"].get(picked, 0) + 1
+                if picked == key and not per["leaked"]:
+                    per["correct"] += 1
+                    row["correct"] += 1
         row["bar"] = bar_for(row["total"])
         row["passed"] = row["correct"] >= row["bar"]
-    cost = sum(n.get("cost_usd") or 0 for n in notes.values()) + sum(
-        (d.get("cost_usd") or 0) + ((d.get("attribution") or {}).get("cost_usd") or 0) for d in drafts
-    )
-    return {"models": models, "authors": by_author, "cost_usd": round(cost, 4)}
+        result_models[model], result_authors[model] = row, per_author
+        cost += sum(n.get("cost_usd") or 0 for n in model_notes.values())
+        cost += sum(m.get("cost_usd") or 0 for m in model_matches.values())
+    return {
+        "models": result_models, "authors": result_authors, "cost_usd": round(cost, 4),
+        "partial": len(keys) < len(author_keys()),
+    }
 
 
 def render_result(result: dict[str, Any]) -> str:
     """The tally as Markdown, ready for a PR body."""
-    lines = ["## Builder test (H3)", "", "### Attribution by model", "",
-             "| Model | Correct | Of ok drafts | Out of reach | Bar | Result |", "|---|---|---|---|---|---|"]
+    lines = ["## Builder test (H3)", ""]
+    if result["partial"]:
+        lines += ["Partial run: only some of the authors were built and matched, so the bar is scaled.", ""]
+    lines += ["### Matching by model", "", "| Model | Correct | Out of reach | Bar | Result |", "|---|---|---|---|---|"]
     for model, row in sorted(result["models"].items()):
         verdict = "pass" if row["passed"] else "FAIL"
-        lines.append(f"| {model} | {row['correct']} | {row['ok']} | {row['out_of_reach']} | {row['bar']} of {row['total']} | {verdict} |")
-    lines += ["", "### Authors", "", "| Author | Note | Leak | Drafts attributed to it |", "|---|---|---|---|"]
-    for key, row in result["authors"].items():
-        leak = "FAIL: " + ", ".join(row["leaked"]) if row["leaked"] else "none"
-        lines.append(f"| {key} | {row['status']} | {leak} | {row['correct']} of {row['ok']} |")
+        lines.append(f"| {model} | {row['correct']} | {row['out_of_reach']} | {row['bar']} of {row['total']} | {verdict} |")
+    lines += ["", "### Authors", "", "| Model | Author | Note | Leak | Excerpts matched to |", "|---|---|---|---|---|"]
+    for model, authors in sorted(result["authors"].items()):
+        for key, row in authors.items():
+            leak = "FAIL: " + ", ".join(row["leaked"]) if row["leaked"] else "none"
+            matched = ", ".join(f"{k} {n}" for k, n in row["answers"].items() if n) or "-"
+            lines.append(f"| {model} | {key} | {row['status']} | {leak} | {matched} |")
     return "\n".join([*lines, "", f"Total cost: ${result['cost_usd']:.2f}", ""])

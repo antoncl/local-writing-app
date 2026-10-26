@@ -81,7 +81,7 @@ It leaves out:
 
 How each rule is written:
 - Each rule takes one line, with one clause saying why: "Inner thought: woven into the narration, unmarked — the narration is already inside the head."
-- Give an example only where a rule isn't obvious.
+- Give an example only where a rule isn't obvious, and invent it: never a line quoted from the pages. A quoted line carries the book's names and signature words into the note, and a draft would copy them instead of following the rule.
 - Write it as a series bible would: terse and declarative.
 - Never name the author or a book: describe the style itself.
 

@@ -73,9 +73,9 @@ def write_fixture(case: str, fixture: dict[str, Any]) -> None:
     write_json(case_root(case), fixture)
 
 
-def builder_root(key: str, drafts: bool = False) -> Path:
-    """The builder test's projects for one author (#2623): the workspace, and the drafting project."""
-    return FIXTURE_ROOT / (f"builder-{key}-drafts" if drafts else f"builder-{key}")
+def builder_root(key: str) -> Path:
+    """The builder test's workspace project for one author (#2623)."""
+    return FIXTURE_ROOT / f"builder-{key}"
 
 
 def _remove_roots(*roots: Path) -> None:
@@ -253,42 +253,28 @@ def build_case(base_url: str, book: dict[str, Any], case: str) -> dict[str, Any]
     }
 
 
-def note_sha256(note: dict[str, str] | None) -> str | None:
-    return None if note is None else hashlib.sha256(note["body"].encode("utf-8")).hexdigest()
-
-
-def build_style_project(
-    base_url: str, root: Path, book: dict[str, Any], note: dict[str, str] | None
-) -> dict[str, Any]:
-    """One briefs project like a style case's, with `note` as its style note (None: no note)."""
+def build_style_project(base_url: str, root: Path, book: dict[str, Any]) -> dict[str, Any]:
+    """One briefs project like a style case's, with no style note."""
     project, made_root = _new_project(base_url, root, book)
     try:
         characters = _make_characters(project, book)
-        made = None if note is None else _create_note(project, note)
         scenes = _make_briefs(project, book, characters)
     finally:
         project.close()
-    return {
-        "root": made_root, "book_sha256": book_sha256(), "characters": characters, "note": made,
-        "note_sha256": note_sha256(note),
-        "scenes": scenes,
-    }
+    return {"root": made_root, "book_sha256": book_sha256(), "characters": characters, "scenes": scenes}
 
 
-def ensure_project(
-    base_url: str, book: dict[str, Any], root: Path, note: dict[str, str] | None = None, regen: bool = False
-) -> dict[str, Any]:
+def ensure_project(base_url: str, book: dict[str, Any], root: Path, regen: bool = False) -> dict[str, Any]:
     """Build (or reuse) a project at `root` and record it in its `fixture.json`. A recorded project is
-    reused only when it holds the same note body; any other is deleted and rebuilt."""
+    reused only when it was built from the same book; any other is deleted and rebuilt."""
     path = root / "fixture.json"
-    wanted = note_sha256(note)
     if not regen and path.is_file():
         fixture = json.loads(path.read_text(encoding="utf-8"))
-        if fixture.get("note_sha256") == wanted and fixture.get("book_sha256") == book_sha256():
+        if fixture.get("book_sha256") == book_sha256():
             return fixture
     _remove_roots(root)
     root.parent.mkdir(parents=True, exist_ok=True)
-    fixture = build_style_project(base_url, root, book, note)
+    fixture = build_style_project(base_url, root, book)
     write_json(root, fixture)
     return fixture
 

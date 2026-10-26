@@ -54,8 +54,11 @@ def first_user_turn(pages: str) -> str:
 
 
 def _label(word: str) -> re.Pattern[str]:
-    """A line that opens with `word` as a Markdown heading or a bold/italic label (a bullet allowed)."""
-    return re.compile(rf"^[ \t]*(?:[-*+][ \t]+)?(?:#{{1,6}}[ \t]*|\*{{1,2}}|_{{1,2}})[ \t]*{word}\b", re.I | re.M)
+    """A line that opens with `word` as a Markdown heading, a bold/italic label (a bullet allowed),
+    or a plain label ending in a colon ("Mechanics:"), which GPT-4.1 mini writes (#2624)."""
+    marked = rf"(?:[-*+][ \t]+)?(?:#{{1,6}}[ \t]*|\*{{1,2}}|_{{1,2}})[ \t]*{word}\b"
+    plain = rf"{word}[ \t]*:"
+    return re.compile(rf"^[ \t]*(?:{marked}|{plain})", re.I | re.M)
 
 
 MECHANICS, MANNER = _label("Mechanics"), _label("Manner")

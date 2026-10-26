@@ -43,6 +43,13 @@ def test_one_part_alone_still_needs_a_follow_up():
     assert core.needs_follow_up("## Manner\n- Frank.")
 
 
+def test_plain_colon_labels_are_a_proposed_note():
+    # #2624: GPT-4.1 mini wrote "Mechanics:" / "Manner:" as plain lines; it was asked again and again.
+    assert not core.needs_follow_up("Mechanics:  \n- Inner thought: unmarked.\n\nManner:\n- Diction: plain.")
+    # A rule that merely mentions the word is not a label.
+    assert core.needs_follow_up("The mechanics of dialogue are simple. Manner matters too. Which is closer?")
+
+
 def test_leaks_are_whole_words_ignoring_case():
     assert core.leaks("Written like crane's dialect.", ["Crane"]) == ["Crane"]
     assert core.leaks("the rum  alley mob", ["Rum Alley"]) == ["Rum Alley"]

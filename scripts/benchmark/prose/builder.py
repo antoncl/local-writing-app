@@ -70,6 +70,7 @@ from setup_backend import load_judges, load_models, select_models, setup_project
 
 # run_cell's `kind` for the builder chat: it takes the chat record the way a Draft scene chat does.
 CHAT_KIND = "draft_scene"
+BUILDER_MAX_TOKENS = 8192
 
 
 def ensure_prompt(project: Client, known_id: str | None) -> dict[str, Any]:
@@ -98,7 +99,11 @@ def ensure_workspace(base_url: str, book: dict[str, Any], key: str, assistants: 
     """The author's builder project: no style note, the builder prompt installed, an assistant per
     builder model and judge (the judge matches in the same project)."""
     fixture = ensure_project(base_url, book, builder_root(key))
-    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), assistants)
+    # The builder reads the rules off the pages and then writes the note, often in one reply: give
+    # its assistants room (a 4096 cap cut Sonnet off mid-note, #2624). Only this workspace's
+    # assistants; the drafting projects keep the drafting cap the baseline was run with.
+    roomy = [{**a, "max_tokens": max(a.get("max_tokens") or 0, BUILDER_MAX_TOKENS)} for a in assistants]
+    fixture["assistants"] = setup_project(base_url, fixture["root"], fixture.get("assistants", {}), roomy)
     project = Client(base_url, fixture["root"])
     try:
         fixture["prompt"] = ensure_prompt(project, fixture.get("prompt"))["id"]

@@ -194,6 +194,29 @@ calls a backend or a model.
    would overstate p.
 5. Paste `result.md` into the PR.
 
+## Builder test (H3)
+
+Whether the style builder (`fixture/style-builder.md`, #2623) infers a usable style note from pages
+alone. For each of four authors (`fixture/authors.yaml`: public-domain Project Gutenberg pages, plus
+a later excerpt of each) the builder is given ~1500 words and asked to propose the note; the
+fixed reply "No preference; propose the note from the pages." answers any contrast question (at
+most 3). The note is then drafted from (`--drafts` times per model, one brief), and the judge
+says which of the four unnamed excerpts each draft is closest to in style, in an order fixed by a
+hash of the draft's path.
+
+- **Bar:** 9 of the 12 drafts attributed to the right author (chance is 3). A note that names the
+  author or the work (`leak_terms`, whole words, case-insensitive) fails that author outright.
+  A draft out of reach counts against the bar and is listed apart.
+- **Run:** with a dev backend up, keys set by `setup_backend.py`, and judges in `models.yaml`:
+  `builder.py run --out tmp/builder-run` (`--models`, `--drafts 3`, `--brief KEY`,
+  `--authors KEY ...`, `--builder-model NAME`, default the primary model). A rerun resumes: a
+  built note, a draft and an attribution already on disk are kept; delete `notes/<key>.json` to
+  rebuild a note. `builder.py report tmp/builder-run` rewrites `result.md`, ready for a PR body.
+- **Cost:** about $1-2 for four authors, three drafts, one model.
+- The builder runs in `builder-<key>` (no style note, the prompt installed through the app's
+  prompt routes); drafts run in `builder-<key>-drafts`, whose style note is the inferred body,
+  set to Always include. Both are under `tmp/benchmark-fixtures/prose/`.
+
 ## Files
 
 | File | Role |
@@ -212,5 +235,6 @@ calls a backend or a model.
 | `calibration_page.html` | The reading page (offline, no dependencies). |
 | `pairs.py` | Blind pairs: `make` draws the page and key, `tally` reports the readers' picks. |
 | `pairs_page.html` | The pairs page template (offline, no dependencies). |
+| `builder.py` | The builder test: `run` and `report` (`builder_core.py` holds its pure rules). |
 | `parity.py` | The mirror-versus-hand-run guard. |
 | `lwa_client.py` | The HTTP client and backend discovery. |

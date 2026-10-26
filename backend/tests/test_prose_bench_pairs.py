@@ -58,7 +58,7 @@ def runs(tmp_path):
 
 
 def _make(runs, out: Path, seed: int = 2617, cases: tuple[str, ...] | None = None) -> dict:
-    pairs.make(runs[0], runs[1], out, 60, seed, None, *((cases,) if cases else ()))
+    pairs.make(runs[0], runs[1], out, 60, seed, None, cases=cases or pairs.CASES)
     return json.loads((out / "key.json").read_text(encoding="utf-8"))
 
 

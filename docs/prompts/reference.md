@@ -169,6 +169,7 @@ Older prompts may use these. Each now has a replacement:
 | `novel` | `project` |
 | `relevant_lore(…)` | `auto_lore()`, or `use()` for specific entries |
 | `{% cache_break %}` | nothing — the app arranges caching for you |
+| `{% set brief_scene = … %}` before *Scene brief* | `{% set prose_scene = … %}` — one name for all the scene snippets ([include](#include)) |
 
 ---
 

@@ -18,6 +18,8 @@ metadata:
   context's `scene` (the editor's scene, or the preview's target scene). With
   neither, it renders nothing. The same convention as "Character voice in
   prose" and "Prose generation settings" (#2634), so one `set` serves all three.
+  A prompt written before #2634 may still set the retired `brief_scene`; it is
+  read first, so such a prompt keeps briefing the scene it chose.
 
   Which fields: the ones the AI may write ("AI may write this field when
   committing a brainstorm" — `proposable`), plus references, which are story
@@ -34,7 +36,7 @@ metadata:
 #}
 {#- A list item value by its option label, when its member has options. -#}
 {% macro shown(member, value) %}{{ member.option_labels.get(value, value) if (member and value is string) else value }}{% endmacro %}
-{% set s = prose_scene if prose_scene is defined else (scene if scene is defined else none) %}
+{% set s = brief_scene if brief_scene is defined else (prose_scene if prose_scene is defined else (scene if scene is defined else none)) %}
 {% if s %}
 ## This scene: {{ s.title }}
 {{ s.summary }}

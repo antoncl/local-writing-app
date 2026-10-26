@@ -242,11 +242,15 @@ class DraftScenePromptTests(unittest.TestCase):
         # preview of it alone failed with an undefined name. It now reads
         # `prose_scene`, else the render context's `scene`.
         self._set(self.scene_ids[1], summary="Honor meets the admiral.")
-        snippet = next(e for e in self.service.list_prompt_entries().entries if e.title == "Scene brief")
         text = self._render_source('{% role "system" %}{% include "Scene brief" %}{% endrole %}', self.scene_ids[1])
         self.assertIn("## This scene: ", text)
         self.assertIn("Honor meets the admiral.", text)
-        self.assertNotIn("brief_scene", snippet.body.split("#}")[-1])
+        # No built-in sets the retired name any more; only the snippet reads it, for
+        # prompts written before the change.
+        for entry in self.service.list_prompt_entries().entries:
+            if entry.is_library and entry.title != "Scene brief":
+                with self.subTest(prompt=entry.title):
+                    self.assertNotIn("brief_scene", entry.body)
 
     def test_draft_scene_briefs_the_picked_scene_not_the_editor_scene(self) -> None:
         # The brief follows `prose_scene` (Draft scene's picked `entry`), so a chat
@@ -257,6 +261,20 @@ class DraftScenePromptTests(unittest.TestCase):
         brief = text[text.index("## This scene: "):]
         self.assertIn("Honor meets the admiral.", brief)
         self.assertNotIn("Honor leaves the station.", brief)
+
+    def test_a_prompt_setting_the_retired_brief_scene_still_briefs_its_scene(self) -> None:
+        # A prompt (or a v1.0.x clone of Draft scene) written to the old pattern
+        # sets `brief_scene`; the snippet reads it first, so the brief doesn't
+        # silently fall back to the render scene (#2634 review).
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        self._set(self.scene_ids[1], summary="Honor meets the admiral.")
+        source = (
+            '{% role "system" %}{% set brief_scene = entry(inputs.entry) %}'
+            '{% include "Scene brief" %}{% endrole %}'
+        )
+        text = self._render_source(source, self.scene_ids[0], {"entry": self.scene_ids[1]})
+        self.assertIn("Honor meets the admiral.", text)
+        self.assertNotIn("Honor leaves the station.", text)
 
     def test_scene_brief_shows_a_select_by_its_label(self) -> None:
         self._add_scene_design_fields()

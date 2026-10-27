@@ -378,7 +378,9 @@ class PreviewErrorInfo(BaseModel):
                             `undefined_namespace` the namespace it was accessed
                             on (`project` for `project.language`) when the miss
                             was an attribute on a real render-context object
-                            rather than an undeclared input.
+                            rather than an undeclared input. `undefined_bare`
+                            is set when it was a bare name, which is never a
+                            missing input.
       - "syntax"          → TemplateSyntaxError; `line` is set.
       - "scene_not_found" → preview target_scene_id didn't resolve.
       - "include"         → an `{% include %}` name didn't resolve to one snippet
@@ -397,6 +399,9 @@ class PreviewErrorInfo(BaseModel):
     col: int | None = None
     undefined_name: str | None = None
     undefined_namespace: str | None = None
+    # True when the undefined was a bare name (`brief_scene`), not an attribute
+    # miss: never a missing input, since inputs are reached as `inputs.x` (#2634).
+    undefined_bare: bool = False
 
 
 class AIPreviewResponse(BaseModel):

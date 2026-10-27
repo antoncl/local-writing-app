@@ -334,6 +334,13 @@ export function friendlyTemplateError(
         // `input.x` leaves `input` itself undefined (missing === "input").
         return `The inputs namespace is plural — write \`inputs.<name>\`, not \`input.<name>\`.`;
       }
+      if (err.undefined_bare) {
+        // A bare name is never a missing input: inputs are reached only as
+        // `inputs.<name>` (#2634). Most often a snippet expects the prompt that
+        // includes it to `set` the name first, so it can't render on its own.
+        if (decl) return `\`${missing}\` isn't defined here. To read the input of that name, write \`inputs.${missing}\`.`;
+        return `\`${missing}\` isn't defined here. If this is a snippet that expects the prompt including it to set \`${missing}\`, preview that prompt instead, or give the snippet a fallback.`;
+      }
       if (decl) {
         const draft = drafts[missing];
         const isEmpty =

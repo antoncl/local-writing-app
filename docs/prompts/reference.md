@@ -169,6 +169,7 @@ Older prompts may use these. Each now has a replacement:
 | `novel` | `project` |
 | `relevant_lore(…)` | `auto_lore()`, or `use()` for specific entries |
 | `{% cache_break %}` | nothing — the app arranges caching for you |
+| `{% set brief_scene = … %}` before *Scene brief* | `{% set prose_scene = … %}` — one name for all the scene snippets ([include](#include)) |
 
 ---
 
@@ -645,3 +646,19 @@ one-message prompt needs no role at all.
 `{% include "Project settings" %}` — inserts a snippet, found by its title. A
 snippet is a prompt you can't run on its own, kept to be reused. What it prints
 lands where you include it, and it sees the same values your prompt does.
+
+That includes anything you `set` before the include. The built-in snippets that
+work on a scene (*Scene brief*, *Prose generation settings*, *Character voice in
+prose*) use this for one thing: which scene. Each reads `prose_scene` if your
+prompt set it, and the editor's `scene` otherwise, so a prompt that works on a
+scene the writer picked sets it once, before including them:
+
+```jinja
+{% set prose_scene = entry(inputs.entry) %}
+{% include "Prose generation settings" %}
+{% include "Scene brief" %}
+```
+
+A snippet of your own that expects a value from the prompt including it should
+say so in its comment, and fall back to something sensible when the value isn't
+there, so it still renders when you preview it on its own.

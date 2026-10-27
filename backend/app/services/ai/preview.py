@@ -470,6 +470,7 @@ class PreviewError(Exception):
         kind: str = "other",
         undefined_name: str | None = None,
         undefined_namespace: str | None = None,
+        undefined_bare: bool = False,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -479,6 +480,7 @@ class PreviewError(Exception):
         self.kind = kind
         self.undefined_name = undefined_name
         self.undefined_namespace = undefined_namespace
+        self.undefined_bare = undefined_bare
 
 
 # UndefinedError messages from Jinja2 look like:
@@ -995,6 +997,7 @@ def _raise_preview_error_from_template(
     line = getattr(exc, "lineno", None)
     undefined_namespace = None
     undefined_name = None
+    undefined_bare = False
     # Default message: the exception class + its text. The include case overrides
     # it with the loader's already-friendly text (no `TemplateNotFound:` prefix).
     message = f"{type(exc).__name__}: {exc.message}"
@@ -1015,6 +1018,10 @@ def _raise_preview_error_from_template(
         kind = "undefined"
         undefined_name, obj_type = _extract_undefined_ref(exc.message or "")
         undefined_namespace = _namespace_for_object_type(context, obj_type)
+        # A bare name ("'x' is undefined") is never a missing input: since ADR-0060
+        # inputs are reached only as `inputs.x`, an attribute miss on a dict (#2634).
+        # Usually a variable a snippet expects its including prompt to set.
+        undefined_bare = undefined_name is not None and obj_type is None
     elif isinstance(exc, TemplateSyntaxError):
         kind = "syntax"
     else:
@@ -1026,6 +1033,7 @@ def _raise_preview_error_from_template(
         kind=kind,
         undefined_name=undefined_name,
         undefined_namespace=undefined_namespace,
+        undefined_bare=undefined_bare,
     ) from exc
 
 

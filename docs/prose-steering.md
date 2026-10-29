@@ -60,13 +60,20 @@ A style note holds two things, each rule in one line with a short reason:
   documents, emphasis, numbers and invented terms are set on the page; how far
   violence and intimacy go; how background reaches the reader.
 - **Manner** — the stance every voice shares: frank or euphemistic, how far
-  figures of speech go, how paragraphs are built. Then a short **Never** list,
-  three to six things this book never does.
+  figures of speech go, how a paragraph is built (what one paragraph holds, and
+  in what order). Then a short **Never** list, three to six things this book
+  never does.
+
+Every rule is written so it would fit any story told in this style. The note
+goes out with every prose action, and a word in it tends to turn up in the
+drafts, so the story's own objects, trades and invented terms stay out of it.
 
 It leaves out what lives elsewhere:
 
 - the point of view and tense, which are the narration settings
 - any one character's voice, which belongs in their entry
+- facts about the story, such as what things are called or who the viewpoint
+  character is, which belong in lore entries
 - sample passages, since a sample has a voice and would pull every viewpoint
   toward it
 - naming conventions, which are about the world, not the prose: keep them in a

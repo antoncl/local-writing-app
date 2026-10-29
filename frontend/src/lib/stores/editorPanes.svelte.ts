@@ -1345,6 +1345,16 @@ class EditorPanesController {
           }
         : candidate,
     );
+    // The mounted NodeEditor keeps its own title/metadata copy and re-seeds it
+    // only on the reload signals — without this bump a server-side change to a
+    // field (a replace into the summary, a snapshot restore, a finalize) kept
+    // showing the old value, and the next body edit autosaved it back (#2641).
+    reseedPaneFields(this, pane.id, {
+      draftTitle: scene.title,
+      draftStatus: scene.status,
+      draftEntryType: scene.entry_type,
+      draftMetadata: scene.metadata,
+    });
     await this.editorPaneComponents[pane.id]?.reloadScene(scene, mode);
   }
 

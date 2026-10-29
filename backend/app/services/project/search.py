@@ -34,6 +34,7 @@ from app.services.project.metadata_refs import (
     RefOccurrence,
     rewrite_ref_occurrences,
 )
+from app.services.project.metadata_text import slot_label
 from app.services.project.node_index import NodeIndex
 from app.services.project.search_corpus import CorpusEntry
 from app.services.tree_structure import StructureVisitor, TreeStructureService
@@ -231,7 +232,41 @@ class SearchMixin:
                             owned=entry.owned,
                         )
                     )
+            hits.extend(self._corpus_text_slot_hits(entry, pattern, display))
             hits.extend(self._corpus_body_hits(entry, pattern, display))
+        return hits
+
+    def _corpus_text_slot_hits(
+        self, entry: CorpusEntry, pattern: re.Pattern[str], display: str
+    ) -> list[SearchHit]:
+        """One anchored hit per occurrence inside a stored free-text value
+        (ADR-0085 Amendment 2) — the metadata counterpart of a body hit, with
+        `start`/`end` into the slot's string and its `metadata_path`, so replace
+        can verify and rewrite exactly what the writer saw."""
+        hits: list[SearchHit] = []
+        for path, value in entry.text_slots:
+            label = slot_label(path)
+            for match in pattern.finditer(value):
+                window = excerpt_window(value, match.start(), match.end())
+                hits.append(
+                    SearchHit(
+                        kind=entry.kind,
+                        entry_type=entry.entry_type,
+                        file_id=entry.id,
+                        path=f"{display} metadata",
+                        line=1,
+                        excerpt=f"{label}: {window.text}",
+                        clipped_before=window.clipped_before,
+                        clipped_after=window.clipped_after,
+                        field="metadata",
+                        start=match.start(),
+                        end=match.end(),
+                        revision=entry.revision,
+                        owned=entry.owned,
+                        text=match.group(),
+                        metadata_path=list(path),
+                    )
+                )
         return hits
 
     def _corpus_body_hits(

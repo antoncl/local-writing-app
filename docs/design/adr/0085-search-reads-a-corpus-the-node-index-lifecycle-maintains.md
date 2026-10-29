@@ -165,3 +165,20 @@ The writer renames a city. She opens Search and types "Aetheria"; by the third l
 ## Amendment 1 — Opening a hit lands on the match (2026-09-13)
 
 The anti-goal "not a jump-to-offset in the editor" held that clicking a hit opens the node and nothing more, because positioning the editor at a markdown offset needs a markdown-offset ↔ ProseMirror-position seam that does not exist. #1925 lands on the match without that seam: the pane sends the query (with the options it was found with) and the hit's ordinal among its node's body hits, and the editor finds the matches itself — `SearchMatchHighlight` (`frontend/src/lib/editor-core/searchMatchHighlight.ts`) scans the live document with the one pattern the backend and the pane build (`compileSearchPattern`), marks every match and selects the ordinal-th; a code body's CodeMirror editor does the same (`codeSearchReveal.ts`). No offset crosses the pane boundary: `start`/`end` stay what §2 made them, the replace anchor. The seam remains unbuilt and undecided.
+
+## Amendment 2 — Replace reaches free text stored in metadata (2026-10-29)
+
+Approved by Anton Lauridsen, 2026-10-29 (#2641).
+
+**Why.** The anti-goal "not replace into metadata" made every metadata hit find-only. The reason §4.1 gives holds for two things: a title, which renames the file, and a reference field, whose hit matched a *resolved title* that is not stored text. It does not hold for free text. A scene's `summary`, its beat list, a plot card's `follow_ups` are prose the writer typed, stored verbatim in front matter, and the scene editor shows the summary directly above the body. Renaming a character with Replace all left the old name in every summary and beat. The pane listed those hits as "metadata — not replaceable", but to the writer the replace had not taken effect.
+
+**Decision.** A **text slot** is a string stored verbatim under a field the schema types `text` or `long_text`: a top-level field, one item of a `list` whose item shape is a text scalar, or a text member of one `list`-of-`item_group` item. A group's declared identity member is not a slot, because its value is a minted id (ADR-0096 §1). `metadata_text.py` (`iter_text_slots`) is the one definition of where slots live. Search and replace both read it, the way every reference pass reads `metadata_refs.py`.
+
+- **§1.** A corpus entry carries its text slots with their paths. `metadata_values` keeps only the find-only remainder (titles, resolved references, selects, numbers), so no match is reported twice.
+- **§2.** A match inside a slot is an anchored metadata hit, one per occurrence: `field: "metadata"`, `metadata_path` (the key path, e.g. `["summary"]`, `["follow_ups", 2]`, `["instance_beats", 0, "specifics"]`), and `start`/`end`/`text` into that string. A find-only metadata hit carries no path and keeps `start = end = 0`.
+- **§4.** A hit with a `metadata_path` is writable like a body hit. Rule 1 refuses only path-less metadata hits as `not_replaceable/metadata`. Rule 2 checks the slot the read still holds at that path; a slot that is gone or changed makes the node's hits `stale`. Rule 3 substitutes the body and the touched slots and submits the whole node to the same save, once. A written card's body stays frozen (ADR-0097 §3), but its own metadata is still replaceable.
+- **§5.** The pane offers Replace on a slot hit exactly as on a body hit. The open-and-dirty rule and the reconcile entry point apply unchanged.
+
+**Still out.** Replace into titles (a rename is a file move, done on the node), reference fields, select/multi-select/tag values, computed fields, identity members, inherited nodes, and chats.
+
+**Migration.** None. Nothing on disk changes shape; `metadata_path` is an API field (§8 holds).

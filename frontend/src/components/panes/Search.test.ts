@@ -330,6 +330,33 @@ describe("Search pane — replace (ADR-0085 §4/§5)", () => {
     expect(container.querySelectorAll("mark")).toHaveLength(1);
   });
 
+  // #2641: a text-slot metadata hit is previewed, but only in its window — the
+  // field label ahead of it is never struck, even when the query matches it.
+  it("previews a text-slot hit without striking a match inside its field label", async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      query: "sum",
+      hits: [
+        hit("scenes/arrival.md metadata", 1, "summary: the sum of it", "manuscript", {
+          field: "metadata",
+          metadata_path: ["summary"],
+          clipped_before: true,
+        }),
+      ],
+    });
+    const { container } = render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in the project");
+    await fireEvent.input(input, { target: { value: "sum" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+    await fireEvent.input(screen.getByPlaceholderText("Replace with"), { target: { value: "total" } });
+    await tick();
+
+    const excerpt = container.querySelector(".search-excerpt");
+    expect(excerpt?.textContent).toBe("summary: …the sumtotal of it");
+    expect(container.querySelectorAll(".search-del")).toHaveLength(1);
+  });
+
   it("shows the inherited note instead of a Replace button", async () => {
     vi.mocked(api.search).mockResolvedValue({
       query: "aetheria",

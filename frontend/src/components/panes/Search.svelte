@@ -117,6 +117,16 @@
     return { destroy: () => observer.disconnect() };
   };
 
+  // A metadata hit's excerpt is `"<label>: <window>"` (search.py). The label
+  // names the field and is never what a replace writes, so it renders apart —
+  // ahead of the clip ellipsis, outside the match highlight and the replace
+  // preview (a query matching the label must not show the label replaced).
+  function excerptParts(hit: SearchHit): { label: string; text: string } {
+    const cut = hit.field === "metadata" ? hit.excerpt.indexOf(": ") : -1;
+    if (cut < 0) return { label: "", text: hit.excerpt };
+    return { label: hit.excerpt.slice(0, cut + 2), text: hit.excerpt.slice(cut + 2) };
+  }
+
   // Split an excerpt around matches of `q` so the match can be wrapped in
   // <mark>. Only the excerpt is highlighted — never the path/line. The
   // pattern is the one the backend and the editor's reveal build
@@ -243,10 +253,11 @@
       {#each group.hits as hit}
         {@const elig = ctrl.eligibility(hit)}
         {@const previewReplace = ctrl.replacement !== "" && elig === "ok"}
+        {@const parts = excerptParts(hit)}
         <NodeRow title={`${hit.path}:${hit.line}`} onClick={() => onOpenHit(hit, ctrl.revealFor(hit))}>
           {#snippet detailSlot()}
             <small class="search-excerpt"
-              >{#if hit.clipped_before}<span class="search-clip">…</span>{/if}{#each segments(hit.excerpt, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
+              >{parts.label}{#if hit.clipped_before}<span class="search-clip">…</span>{/if}{#each segments(parts.text, ctrl.lastQuery, ctrl.lastMatchCase, ctrl.lastWholeWord) as seg}{#if seg.hit}{#if previewReplace}<del
                     class="search-del">{seg.text}</del
                   ><ins class="search-ins">{ctrl.replacement}</ins>{:else}<mark>{seg.text}</mark>{/if}{:else}{seg.text}{/if}{/each}{#if hit.clipped_after}<span
                   class="search-clip">…</span

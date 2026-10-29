@@ -48,8 +48,9 @@ export type SearchPaneDeps = {
   confirm: (n: number, nodes: number, query: string, replacement: string) => Promise<boolean>;
 };
 
-// A hit's replace eligibility (§4/§5). `todo` and `metadata`/`inherited`/`dirty`
-// are all reasons a hit can't be sent; `ok` is the only one Replace/Replace all
+// A hit's replace eligibility (§4/§5). `todo`, `metadata` (a find-only
+// metadata hit: one with no text-slot path, Amendment 2), `inherited` and
+// `dirty` are all reasons a hit can't be sent; `ok` is the only one Replace/Replace all
 // act on. Undispatched kinds (assistant/view/tag/chat — no save primitive) come
 // back from the server as `not_replaceable/kind` and are counted as skipped,
 // same as a stale hit — the pane never guesses a kind's dispatch itself.
@@ -121,7 +122,9 @@ export class SearchPaneController {
   // a TODO hit has no body range at all, so it's checked before field/owned.
   eligibility(hit: SearchHit): ReplaceEligibility {
     if (hit.todo_id) return "todo";
-    if (hit.field !== "body") return "metadata";
+    // A metadata hit is replaceable only inside stored free text — one that
+    // carries a `metadata_path` (ADR-0085 Amendment 2); the rest are find-only.
+    if (hit.field !== "body" && !hit.metadata_path) return "metadata";
     if (!hit.owned) return "inherited";
     if (this.deps.isDirtyOpen(hit.file_id, hit.kind, hit.entry_type)) return "dirty";
     return "ok";
@@ -246,6 +249,7 @@ export class SearchPaneController {
         end: hit.end,
         text: hit.text,
         revision: hit.revision,
+        ...(hit.metadata_path ? { metadata_path: hit.metadata_path } : {}),
       }));
       await this.run(async () => {
         const res = await api.replace({ replacement: this.replacement, hits: refs });

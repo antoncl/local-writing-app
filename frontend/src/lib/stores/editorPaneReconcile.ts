@@ -29,7 +29,7 @@
 
 import { api } from "@/lib/api";
 import { resetLorePane, resetPromptPane } from "./editorPaneAncestry";
-import { RELOAD_GETTERS, type ReloadableDocument } from "./editorPaneSave";
+import { RELOAD_GETTERS, reseedPaneFields, type ReloadableDocument, type SaveFailureHost } from "./editorPaneSave";
 import {
   cloneMetadata,
   documentStatus,
@@ -42,7 +42,8 @@ import type { EditableDocument, LoreEntry, PromptEntry, Scene } from "@/lib/type
 // minimal surface, mirroring PaneOpenHost / SaveFailureHost's narrow-host
 // precedent. `panes` alone (not the full LoreAncestryHost) is also enough to
 // satisfy resetLorePane/resetPromptPane's structural parameter type.
-export interface PaneReconcileHost {
+export interface PaneReconcileHost
+  extends Pick<SaveFailureHost, "titleReloadsByPane" | "metadataReloadsByPane" | "nextMetadataReloadToken"> {
   panes: EditorPaneState[];
   patchPane(id: string, patch: Partial<EditorPaneState>): void;
   reconcileSceneFromServer(scene: Scene, mode?: "boundary" | "reconcile"): Promise<void>;
@@ -131,6 +132,24 @@ export async function reconcileNodeFromServer(
   const pane = findOpenPane(host, docType, nodeId);
   if (!pane || pane.dirty) return;
 
+  await rebaselinePane(host, pane, docType, nodeId);
+  if (docType === "manuscript") return; // reconcileSceneFromServer re-seeds its own
+  // Re-baselining the pane's drafts and body does not reach the mounted
+  // NodeEditor's own title/metadata widgets — they hold a local copy and only
+  // re-seed on the reload signals. A replace into a summary or a beat
+  // (ADR-0085 Amendment 2) must show in the open editor — and must not be
+  // autosaved back by the next edit — so bump them from the fresh drafts, the
+  // same re-seed a rung-2 field merge does.
+  const fresh = host.panes.find((candidate) => candidate.id === pane.id);
+  if (fresh) reseedPaneFields(host, fresh.id, fresh);
+}
+
+async function rebaselinePane(
+  host: PaneReconcileHost,
+  pane: EditorPaneState,
+  docType: DocumentRef["type"],
+  nodeId: string,
+): Promise<void> {
   if (docType === "manuscript") {
     const scene = await api.getScene(nodeId);
     // "boundary", not "reconcile": the editor's content is the OLD text here (the

@@ -24,13 +24,19 @@ export type SearchHit = {
   owned: boolean;
   // The matched text itself (ADR-0085 §4 rule 2): lets a replace verify the
   // range still matches what the query found before writing through it. Empty
-  // for a metadata hit — those never replace.
+  // for a find-only metadata hit.
   text: string;
+  // A metadata hit inside stored free text (ADR-0085 Amendment 2): the key path
+  // to that string (`["summary"]`, `["follow_ups", 2]`, `["beats", 1, "note"]`),
+  // with `start`/`end` into it. Absent/null for a body hit and for a find-only
+  // metadata hit (title, reference, select …), which never replaces.
+  metadata_path?: (string | number)[] | null;
 };
 
 // One hit a replace asks the backend to apply — the anchor `SearchHit` carried
-// back (ADR-0085 §4). `field` rides along so a metadata hit sent by mistake (or
-// a stale client) reports `not_replaceable/metadata` instead of being dropped.
+// back (ADR-0085 §4). `field` rides along so a find-only metadata hit sent by
+// mistake (or a stale client) reports `not_replaceable/metadata` instead of
+// being dropped; `metadata_path` marks a text-slot hit, which replaces.
 export type ReplaceHitRef = {
   file_id: string;
   field: "body" | "metadata";
@@ -38,6 +44,7 @@ export type ReplaceHitRef = {
   end: number;
   text: string;
   revision: string;
+  metadata_path?: (string | number)[] | null;
 };
 
 export type ReplaceStatus = "replaced" | "stale" | "not_replaceable";

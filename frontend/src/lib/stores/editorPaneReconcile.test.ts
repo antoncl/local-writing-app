@@ -31,6 +31,9 @@ function fakeHost(panes: EditorPaneState[]): PaneReconcileHost & {
     }),
     reconcileSceneFromServer: vi.fn(async () => {}),
     editorPaneComponents: { p1: { reloadScene: vi.fn() } } as PaneReconcileHost["editorPaneComponents"],
+    titleReloadsByPane: {} as PaneReconcileHost["titleReloadsByPane"],
+    metadataReloadsByPane: {} as PaneReconcileHost["metadataReloadsByPane"],
+    nextMetadataReloadToken: 1,
   };
   return host;
 }
@@ -132,5 +135,41 @@ describe("reconcileNodeFromServer", () => {
     // The body-redraw gap the ADR names: reloadScene IS still called (it
     // forwards to the mounted body view, which redraws for a prose body).
     expect(host.editorPaneComponents.p1?.reloadScene).toHaveBeenCalledWith(entry, "boundary");
+  });
+
+  // #2641: a replace into a summary or beat (ADR-0085 Amendment 2) must reach
+  // the open editor's metadata widgets, which re-seed only on the reload
+  // signal — re-baselining the pane's drafts alone left the old text showing.
+  it("bumps the title/metadata reload signals from the fresh drafts", async () => {
+    const pane = paneFor({ type: "lore", id: "lore_1" }, { dirty: false });
+    const host = fakeHost([pane]);
+    const entry: LoreEntry = {
+      id: "lore_1",
+      title: "Coma",
+      body: "",
+      revision: "rev2",
+      entry_type: "lore:character",
+      metadata: { summary: "Coma is a smuggler." },
+      computed_metadata: {},
+    };
+    vi.mocked(api.getLoreEntry).mockResolvedValue(entry);
+
+    await reconcileNodeFromServer(host, "lore_1", "lore");
+
+    expect(host.metadataReloadsByPane.p1).toMatchObject({
+      token: 1,
+      metadata: { summary: "Coma is a smuggler." },
+      entryType: "lore:character",
+    });
+    expect(host.titleReloadsByPane.p1).toEqual({ token: 1, title: "Coma" });
+    expect(host.nextMetadataReloadToken).toBe(2);
+  });
+
+  it("does not bump the reload signals for a dirty pane", async () => {
+    const host = fakeHost([paneFor({ type: "lore", id: "lore_1" }, { dirty: true })]);
+
+    await reconcileNodeFromServer(host, "lore_1", "lore");
+
+    expect(host.metadataReloadsByPane).toEqual({});
   });
 });

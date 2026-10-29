@@ -118,6 +118,22 @@ class SceneSummaryTests(MetadataReplaceTestCase):
         self.assertEqual(self.service.read_scene(scene_id).metadata["summary"], "Someone else.")
 
 
+class StrayPathTests(MetadataReplaceTestCase):
+    def test_body_hit_with_a_stray_path_writes_the_body_not_the_slot(self) -> None:
+        # Classification and target agree on `field`: a body hit indexes the
+        # body even when a stale client sends a path along with it.
+        scene_id = self._scene("Arrival", "Halvik walked in.", {"summary": "Halvik reaches the flat."})
+        body_hit = next(h for h in self._hits("halvik", scene_id) if h.field == "body")
+        ref = _hit_ref(body_hit).model_copy(update={"metadata_path": ["summary"]})
+
+        response = self.service.replace(ReplaceRequest(replacement="Coma", hits=[ref]))
+
+        self.assertEqual([o.status for o in response.outcomes], ["replaced"])
+        after = self.service.read_scene(scene_id)
+        self.assertEqual(after.body, "Coma walked in.\n")
+        self.assertEqual(after.metadata["summary"], "Halvik reaches the flat.")
+
+
 class ListSlotTests(MetadataReplaceTestCase):
     def test_follow_up_items_on_a_written_card_are_replaced_its_body_is_not(self) -> None:
         card = self.service.create_card(CreateCardRequest(title="Card"))

@@ -62,6 +62,7 @@ from app.models import (
     CharacterArcEntry,
     DeckEntry,
     LoreEntry,
+    MetadataSchema,
     PlotlineEntry,
     PlotTemplate,
     ProjectNode,
@@ -259,8 +260,12 @@ def _stale(hit: ReplaceHitRef) -> ReplaceOutcome:
 
 def _target(hit: ReplaceHitRef) -> MetadataPath | None:
     """Which string a writable hit's offsets index: None for the body, the
-    slot's path for a text-slot hit (Amendment 2)."""
-    return tuple(hit.metadata_path) if hit.metadata_path else None
+    slot's path for a text-slot hit (Amendment 2). Keyed on `field` first, the
+    same split `_replace_node` classifies by — a body hit carrying a stray path
+    still indexes the body."""
+    if hit.field == "body" or not hit.metadata_path:
+        return None
+    return tuple(hit.metadata_path)
 
 
 def _overlaps(hits: list[ReplaceHitRef]) -> bool:
@@ -276,11 +281,29 @@ def _overlaps(hits: list[ReplaceHitRef]) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class _ReplaceScope:
+    """What one replace request resolves once and every node reads: the
+    corpus and index rule 1 checks against, the open root, the merged schema
+    the text slots are located by (Amendment 2), and the replacement text."""
+
+    corpus: dict[str, CorpusEntry]
+    index: NodeIndex
+    root: Path
+    schema: MetadataSchema
+    replacement: str
+
+
 class SearchReplaceMixin:
     def replace(self, request: ReplaceRequest) -> ReplaceResponse:
-        corpus = self._search_corpus()
         root = self._require_project().resolve()
-        index = self._build_node_index(root)
+        scope = _ReplaceScope(
+            corpus=self._search_corpus(),
+            index=self._build_node_index(root),
+            root=root,
+            schema=self.read_metadata_schema(),
+            replacement=request.replacement,
+        )
 
         # Group by node, preserving first-seen order — a node's hits need not
         # be contiguous in the request, and outcomes come back per hit.
@@ -291,7 +314,7 @@ class SearchReplaceMixin:
         outcomes: list[ReplaceOutcome] = []
         replaced_nodes = 0
         for file_id, hits in by_file.items():
-            node_outcomes, wrote = self._replace_node(file_id, hits, request.replacement, corpus, index, root)
+            node_outcomes, wrote = self._replace_node(file_id, hits, scope)
             outcomes.extend(node_outcomes)
             if wrote:
                 replaced_nodes += 1
@@ -301,20 +324,17 @@ class SearchReplaceMixin:
         self,
         file_id: str,
         hits: list[ReplaceHitRef],
-        replacement: str,
-        corpus: dict[str, CorpusEntry],
-        index: NodeIndex,
-        root: Path,
+        scope: _ReplaceScope,
     ) -> tuple[list[ReplaceOutcome], bool]:
         """Rules 1-3 for one node's hits. Returns the outcomes for every hit
         passed in, plus whether a write actually happened (for the caller's
         `replaced_nodes` tally)."""
-        entry = corpus.get(file_id)
+        entry = scope.corpus.get(file_id)
         if entry is None:
             return [_not_replaceable(hit, "unknown") for hit in hits], False
 
-        winner = index.by_id.get(file_id)
-        if not entry.owned or winner is None or not self._node_is_owned_here(winner, root):
+        winner = scope.index.by_id.get(file_id)
+        if not entry.owned or winner is None or not self._node_is_owned_here(winner, scope.root):
             return [_not_replaceable(hit, "inherited") for hit in hits], False
 
         # A metadata hit with no slot path matched a title, a resolved reference
@@ -336,15 +356,15 @@ class SearchReplaceMixin:
         if not body_hits and not slot_hits:
             return outcomes, False
 
-        written, wrote = self._replace_hits(file_id, body_hits + slot_hits, replacement, dispatch)
+        written, wrote = self._replace_hits(file_id, body_hits + slot_hits, dispatch, scope)
         return outcomes + written, wrote
 
     def _replace_hits(
         self,
         file_id: str,
         hits: list[ReplaceHitRef],
-        replacement: str,
         dispatch: _ReplaceDispatch,
+        scope: _ReplaceScope,
     ) -> tuple[list[ReplaceOutcome], bool]:
         """Rules 2-3 for one node's writable hits — body and text-slot alike —
         once rule 1 has cleared it."""
@@ -361,14 +381,14 @@ class SearchReplaceMixin:
         # string itself, so both are plain slice comparisons. A slot the read
         # no longer has (an item removed) is a move like any other.
         strings: dict[MetadataPath | None, str] = {None: read.body}
-        strings.update(iter_text_slots(read.metadata, self.read_metadata_schema()))
+        strings.update(iter_text_slots(read.metadata, scope.schema))
         if any(_target(hit) not in strings or strings[_target(hit)][hit.start : hit.end] != hit.text for hit in hits):
             return [_stale(hit) for hit in hits], False
 
         # Rule 3: write once, highest offset first within each string.
         for hit in sorted(hits, key=lambda hit: hit.start, reverse=True):
             target = _target(hit)
-            strings[target] = strings[target][: hit.start] + replacement + strings[target][hit.end :]
+            strings[target] = strings[target][: hit.start] + scope.replacement + strings[target][hit.end :]
         touched = {path for hit in hits if (path := _target(hit)) is not None}
         new_metadata = with_text_slots(read.metadata, {path: strings[path] for path in touched})
 

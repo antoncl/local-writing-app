@@ -57,7 +57,6 @@ export type ReplaceOutcome = {
   start: number;
   end: number;
   status: ReplaceStatus;
-  metadata_path?: (string | number)[] | null;
   reason?: string | null;
   detail?: string | null;
   revision?: string | null;

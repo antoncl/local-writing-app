@@ -133,11 +133,13 @@ export async function reconcileNodeFromServer(
   if (!pane || pane.dirty) return;
 
   await rebaselinePane(host, pane, docType, nodeId);
+  if (docType === "manuscript") return; // reconcileSceneFromServer re-seeds its own
   // Re-baselining the pane's drafts and body does not reach the mounted
   // NodeEditor's own title/metadata widgets — they hold a local copy and only
   // re-seed on the reload signals. A replace into a summary or a beat
-  // (ADR-0085 Amendment 2) must show in the open editor, so bump them from the
-  // fresh drafts, the same re-seed a rung-2 field merge does.
+  // (ADR-0085 Amendment 2) must show in the open editor — and must not be
+  // autosaved back by the next edit — so bump them from the fresh drafts, the
+  // same re-seed a rung-2 field merge does.
   const fresh = host.panes.find((candidate) => candidate.id === pane.id);
   if (fresh) reseedPaneFields(host, fresh.id, fresh);
 }

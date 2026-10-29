@@ -413,7 +413,7 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
 // re-seed a rung-2 merge needs. Takes only the four fields it reads — a lore
 // caller has no `draftInputs`/`draftOfferOn`/`draftContextStrategy` to give it.
 export function reseedPaneFields(
-  host: SaveFailureHost,
+  host: Pick<SaveFailureHost, "titleReloadsByPane" | "metadataReloadsByPane" | "nextMetadataReloadToken">,
   id: string,
   fields: Pick<DraftFields, "draftTitle" | "draftStatus" | "draftEntryType" | "draftMetadata">,
 ): void {

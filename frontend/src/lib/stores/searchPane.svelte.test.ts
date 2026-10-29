@@ -171,6 +171,13 @@ describe("SearchPaneController.eligibility (ADR-0085 §4/§5)", () => {
     expect(c.eligibility(hit("a", { field: "metadata" }))).toBe("metadata");
   });
 
+  // ADR-0085 Amendment 2 (#2641): a hit inside stored free text (a summary,
+  // a follow-up) carries its slot path and replaces like a body hit.
+  it("a metadata hit with a text-slot path is ok", () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    expect(c.eligibility(hit("a", { field: "metadata", metadata_path: ["summary"] }))).toBe("ok");
+  });
+
   it("a hit open dirty in an editor pane is dirty", () => {
     const deps = fakeDeps({ isDirtyOpen: vi.fn(() => true) });
     const c = new SearchPaneController(run, deps);
@@ -368,6 +375,21 @@ describe("SearchPaneController.replaceAll (ADR-0085 §4)", () => {
 
     expect(api.replace).toHaveBeenCalledWith(
       expect.objectContaining({ hits: [expect.objectContaining({ file_id: "ok1" })] }),
+    );
+  });
+
+  it("sends a text-slot metadata hit with its path", async () => {
+    const c = new SearchPaneController(run, fakeDeps());
+    c.hits = [hit("slot1", { field: "metadata", metadata_path: ["follow_ups", 1] })];
+    vi.mocked(api.search).mockResolvedValue({ query: "", hits: [] });
+    vi.mocked(api.replace).mockResolvedValue({ outcomes: [], replaced_nodes: 0 });
+
+    await c.replaceAll();
+
+    expect(api.replace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hits: [expect.objectContaining({ file_id: "slot1", field: "metadata", metadata_path: ["follow_ups", 1] })],
+      }),
     );
   });
 });

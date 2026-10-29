@@ -393,9 +393,15 @@ class SearchHit(BaseModel):
     revision: str = ""
     owned: bool = True
     # The matched text itself (ADR-0085 §4 rule 2): `body[start:end]` for a body
-    # hit, so a replace can verify the range still matches what the query found
-    # before writing through it. Empty for a metadata hit — those never replace.
+    # hit, `value[start:end]` for a text-slot hit, so a replace can verify the
+    # range still matches what the query found before writing through it. Empty
+    # for a find-only metadata hit.
     text: str = ""
+    # A metadata hit inside stored free text (ADR-0085 Amendment 2): the key
+    # path to that string — `["summary"]`, `["follow_ups", 2]`, `["beats", 1,
+    # "note"]` — with `start`/`end` offsets into it. None for a body hit and for
+    # a find-only metadata hit (title, reference, select …), which never replace.
+    metadata_path: list[str | int] | None = None
 
 
 class SearchResponse(BaseModel):
@@ -407,7 +413,8 @@ class ReplaceHitRef(BaseModel):
     """One hit the pane asks to replace — the anchor a `SearchHit` carried back
     to it (ADR-0085 §4). `field` is carried so a metadata hit sent by mistake
     (or a stale client) reports `not_replaceable/metadata` rather than being
-    silently dropped."""
+    silently dropped. A metadata hit WITH a `metadata_path` is a text slot
+    and is replaced like a body hit (Amendment 2)."""
 
     file_id: str
     field: Literal["body", "metadata"] = "body"
@@ -415,6 +422,9 @@ class ReplaceHitRef(BaseModel):
     end: int
     text: str
     revision: str
+    # Echoed from the hit: a metadata hit with a path is a text slot and
+    # replaceable (ADR-0085 Amendment 2); without one it is find-only.
+    metadata_path: list[str | int] | None = None
 
 
 class ReplaceRequest(BaseModel):
@@ -441,6 +451,9 @@ class ReplaceOutcome(BaseModel):
     start: int
     end: int
     status: ReplaceStatus
+    # The hit's text-slot path, echoed so outcomes on two fields of one node
+    # with equal offsets stay distinguishable; None for a body hit.
+    metadata_path: list[str | int] | None = None
     reason: str | None = None
     detail: str | None = None
     revision: str | None = None

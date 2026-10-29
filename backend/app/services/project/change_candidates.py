@@ -115,6 +115,14 @@ def _corpus_entry_mention_ids(
             continue
         for hit in scan_name_matcher(matcher, value):
             ids.add(hit.entry_id)
+    # Free text rides in `text_slots`, not `metadata_values` (ADR-0085
+    # Amendment 2). A top-level prose field or a text-list item is scanned; a
+    # group item's member (`(field, n, member)`) is skipped, as above.
+    for path, value in corpus_entry.text_slots:
+        if len(path) > 2 or path[0] not in prose_fields:
+            continue
+        for hit in scan_name_matcher(matcher, value):
+            ids.add(hit.entry_id)
     return ids
 
 

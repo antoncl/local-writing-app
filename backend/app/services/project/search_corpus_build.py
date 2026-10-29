@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.models import MetadataSchema
 from app.services.project.errors import ProjectServiceError
+from app.services.project.metadata_text import iter_text_slots, without_text_slots
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.overrides import OVERRIDES_FOLDER
@@ -110,11 +111,15 @@ class SearchCorpusMixin:
             override_records = index.overrides_by_target.get(entry.id)
             if override_records:
                 title, body = self.materialize_override_content(override_records, title, body)
-        metadata = self._resolve_reference_titles(
-            self._normalise_metadata(front_matter.get("metadata"), entry.path),
-            entry_type,
+        stored = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+        # Free text is anchored and replaceable (ADR-0085 Amendment 2); only the
+        # remainder — references by resolved title, selects, numbers — is the
+        # find-only metadata it always was. Reference resolution never touches a
+        # text slot, so blanking the slots after it leaves the same remainder.
+        text_slots = tuple(iter_text_slots(stored, schema))
+        metadata = without_text_slots(
+            self._resolve_reference_titles(stored, entry_type, schema, index),
             schema,
-            index,
         )
         # `entry_type` is deliberately NOT here (#1870): it is machine identity
         # (`kind:key`), not text the writer wrote, so a prose query matching
@@ -137,6 +142,7 @@ class SearchCorpusMixin:
             body=body,
             metadata_values=metadata_values,
             revision=revision,
+            text_slots=text_slots,
         )
 
     def _corpus_revision(self, entry: NodeIndexEntry, index: NodeIndex) -> str:

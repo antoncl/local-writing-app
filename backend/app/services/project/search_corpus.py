@@ -17,6 +17,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.services.project.metadata_text import MetadataPath
+
 
 @dataclass(frozen=True)
 class CorpusEntry:
@@ -27,7 +29,10 @@ class CorpusEntry:
     `body` is the file's body after the front-matter split, with `\\r\\n`
     normalised to `\\n`. `metadata_values` is the `(label, value)` pairs
     `_iter_metadata_search_values` already derives for display/search — a
-    reference field carries its resolved title, not a raw id. `revision` is
+    reference field carries its resolved title, not a raw id — minus the
+    free-text values, which ride in `text_slots` with their paths instead
+    (`metadata_text.py`, ADR-0085 Amendment 2), since those are anchored and
+    replaceable rather than find-only. `revision` is
     never re-derived: a plain `_revision` hash for a scene, the composite
     revision for an overridable lore/prompt entry — whichever the kind's own
     save compares against.
@@ -43,6 +48,7 @@ class CorpusEntry:
     body: str
     metadata_values: tuple[tuple[str, str], ...]
     revision: str
+    text_slots: tuple[tuple[MetadataPath, str], ...] = ()
 
 
 class SearchCorpus:

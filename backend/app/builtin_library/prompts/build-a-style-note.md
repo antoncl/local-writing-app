@@ -50,6 +50,10 @@ context_strategy:
   layer's departures. It ends by telling the author to set the note to Always include:
   only the author can set a context policy (ADR-0057, ADR-0059 §F).
 
+  It ends with a user turn of its own, so the author can press Send on an empty
+  composer and the model opens by saying what to paste. Pages typed into the
+  first message follow that turn, and the model reads them straight away.
+
   The prose harness's builder test runs this file (scripts/benchmark/prose/builder.py,
   measuring-prose-quality.md §4.3), so what is measured is what ships.
 #}
@@ -85,7 +89,7 @@ How each rule is written:
 - Never name the author or a book: describe the style itself.
 
 How you work:
-1. **Read the pages.** Ask the author to paste a chapter or a few pages, their own or a published book whose style they want. Read the rules off the page and present each one as inferred, with the one detail that shows it, or as needing their call.
+1. **Read the pages.** If the author hasn't pasted any yet, open by saying, in two or three sentences, what you need: a chapter or a few pages of prose (a few thousand words is plenty), their own or from a published book whose style they want, pasted straight into the chat. Read the rules off the page and present each one as inferred, with the one detail that shows it, or as needing their call.
 2. **Test taste by contrast.** Where the pages leave a rule open, or it is a matter of taste (Manner most of all), write two short versions of one moment that differ only on that point, and ask: "Which is closer?" Ask one contrast per message, and at most three in all. If the author has no preference, take what the pages show.
 3. **Build on what's inherited.** If style notes were picked as the ones this builds on, read them first and propose only what this layer changes. Each change says so in its own line, for example "Inner thought: italicised; this book departs from the series here." Restate nothing unchanged. If nothing differs, say so: no note is needed.
 4. **Propose the note** under the headings *Mechanics*, *Manner* and *Never*, and say it's ready to commit. A separate step takes it from this conversation when the author commits, and it can only use what is actually written here: a rule you describe but never write out has no text to commit. So keep the discussion in prose, and write the whole note out.
@@ -99,4 +103,7 @@ The note as it stands is provided to you as context.{% do use(e) %}
 The style notes this builds on are provided to you as context.{% do use(inputs.inherited) %}
 {% endif %}
 {% include "Project settings" %}
+{% endrole %}
+{% role "user" %}
+{% if e %}I'd like to revise the style note {{ e.title }}.{% else %}I'd like to build a style note.{% endif %}
 {% endrole %}

@@ -87,8 +87,9 @@ The built-in prompt **Build a style note** writes one with you.
    style, a book for what that book changes.
 2. In the Lore pane, open **+** and choose **✨ Draft Style note**.
 3. Paste a chapter or a few pages, your own or a published book whose style you
-   want. The builder reads the rules off the page and says which it inferred and
-   which need your call.
+   want, and send. Or press **Send** with the box empty, and the builder tells
+   you what to paste. It reads the rules off the page and says which it inferred
+   and which need your call.
 4. Where the pages leave something open, it shows you two short versions of one
    moment and asks which is closer.
 5. In a book, pick the inherited style notes under **Style notes this builds on**.

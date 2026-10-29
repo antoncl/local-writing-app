@@ -60,3 +60,44 @@ class StyleNoteTypeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuilderOpeningTests(unittest.TestCase):
+    """The builder ends with a user turn of its own, so Send works on an empty composer
+    and the model opens by saying what to paste."""
+
+    def setUp(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        from project_fixtures import open_test_project
+
+        self.temp_dir = TemporaryDirectory()
+        self.service = open_test_project(Path(self.temp_dir.name).resolve() / "project", "Builder Tests")
+        self.source = BUILDER.read_text(encoding="utf-8").split("---\n", 2)[2]
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _messages(self, inputs: dict) -> list[tuple[str, str]]:
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=self.source, target_scene_id="", session_id=None,
+                inputs=inputs, text_before="", text_after="", commit=False,
+            ),
+        )
+        return [(m.role, m.text.strip()) for m in rendered.messages if m.text.strip()]
+
+    def test_a_new_note_opens_on_a_user_turn(self) -> None:
+        messages = self._messages({"entry": "", "inherited": [], "entry_type": ""})
+        self.assertEqual(messages[-1], ("user", "I'd like to build a style note."))
+        self.assertIn("If the author hasn't pasted any yet, open by saying", messages[0][1])
+
+    def test_a_revision_names_the_note(self) -> None:
+        from app.models import CreateLoreEntryRequest
+
+        note = self.service.create_lore_entry(CreateLoreEntryRequest(title="House style", entry_type="lore:style_note"))
+        messages = self._messages({"entry": note.id, "inherited": [], "entry_type": ""})
+        self.assertEqual(messages[-1], ("user", "I'd like to revise the style note House style."))

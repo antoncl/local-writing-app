@@ -513,4 +513,4 @@ def test_the_server_lists_saves_atomically_and_hides_seeding(tmp_path):
         server.server_close()
     doc = yaml.safe_load((sheet / "answers.yaml").read_text(encoding="utf-8"))
     assert doc["items"][0]["answers"]["time_skip"] == "yes" and doc["items"][0]["note"] == "n"
-    assert [p.name for p in sheet.iterdir()] == ["answers.yaml", "sheet.md"]
+    assert sorted(p.name for p in sheet.iterdir()) == ["answers.yaml", "sheet.md"]

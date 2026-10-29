@@ -143,7 +143,9 @@ def compile_name_matcher(entries: Iterable[tuple[str, list[str]]]) -> CompiledNa
     fragments: list[str] = []
     for name, entry_id in refs:
         key = _norm(name)
-        if key in name_to_id:
+        # #2567: a separator-only name ("-") normalises to "" and would compile
+        # into an empty alternative that matches everywhere.
+        if not key or key in name_to_id:
             continue
         name_to_id[key] = entry_id
         fragments.append(_build_fragment(name))

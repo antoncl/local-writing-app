@@ -209,9 +209,14 @@ export function compileMatcher(
   const fragments: string[] = [];
   for (const r of refs) {
     const key = norm(r.name);
-    if (nameToId.has(key)) continue;
+    // #2567: a separator-only name ("-") normalises to "" and would compile
+    // into an empty alternative that matches everywhere.
+    if (!key || nameToId.has(key)) continue;
     nameToId.set(key, r.id);
     fragments.push(buildFragment(r.name));
+  }
+  if (fragments.length === 0) {
+    return { scan: () => [], lookup, isEmpty: true };
   }
   // ADR-0075 §3: explicit ASCII boundary (not \w, which is Unicode) with an
   // optional trailing possessive/enclitic consumed but excluded from the
@@ -234,6 +239,12 @@ export function compileMatcher(
       regex.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = regex.exec(scanText)) !== null) {
+        // A zero-length match never advances lastIndex; step past it so no
+        // pattern can spin this loop forever (#2567).
+        if (m[0].length === 0) {
+          regex.lastIndex++;
+          continue;
+        }
         const start = m.index;
         const end = start + m[1].length;
         const matched = text.slice(start, end);

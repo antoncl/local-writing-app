@@ -18,7 +18,7 @@ anyio==4.15.1
     #   openai
     #   starlette
     #   watchfiles
-certifi==2026.7.22
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
@@ -41,9 +41,9 @@ docstring-parser==0.18.0
     # via anthropic
 execnet==2.1.2
     # via pytest-xdist
-fastapi==0.143.3
+fastapi==0.162.0
     # via local-writing-service (pyproject.toml)
-filelock==4.2.0
+filelock==4.2.4
     # via
     #   python-discovery
     #   virtualenv
@@ -54,13 +54,13 @@ h11==0.16.0
     #   uvicorn
 httpcore==1.0.9
     # via httpx
-httpcore2==2.13.1 ; sys_platform != 'emscripten'
+httpcore2==2.16.0 ; sys_platform != 'emscripten'
     # via httpx2
 httptools==0.9.0
     # via uvicorn
 httpx==0.28.1
     # via local-writing-service (pyproject.toml)
-httpx2==2.13.1
+httpx2==2.16.0
     # via
     #   anthropic
     #   openai
@@ -88,7 +88,7 @@ jeepney==0.9.0 ; sys_platform == 'linux'
     #   secretstorage
 jinja2==3.1.6
     # via local-writing-service (pyproject.toml)
-jiter==0.17.0
+jiter==0.18.0
     # via
     #   anthropic
     #   openai
@@ -104,7 +104,7 @@ more-itertools==11.2.1
     #   jaraco-functools
 nodeenv==1.11.0
     # via pre-commit
-openai==3.31.0
+openai==3.41.0
     # via local-writing-service (pyproject.toml)
 opentelemetry-api==1.45.1
     # via
@@ -118,13 +118,13 @@ packaging==26.3
     #   virtualenv
 pefile==2024.8.26 ; sys_platform == 'win32'
     # via pyinstaller
-platformdirs==4.13.3
+platformdirs==4.14.0
     # via virtualenv
 pluggy==1.7.0
     # via pytest
 pre-commit==4.7.0
     # via local-writing-service (pyproject.toml)
-pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'
+pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'
     # via cffi
 pydantic==2.14.1
     # via
@@ -138,9 +138,9 @@ pygments==2.21.0
     # via pytest
 pyinstaller==6.22.3
     # via local-writing-service (pyproject.toml)
-pyinstaller-hooks-contrib==2026.8
+pyinstaller-hooks-contrib==2026.9
     # via pyinstaller
-pytest==9.1.1
+pytest==9.2.0
     # via
     #   local-writing-service (pyproject.toml)
     #   pytest-timeout
@@ -149,7 +149,7 @@ pytest-timeout==2.4.0
     # via local-writing-service (pyproject.toml)
 pytest-xdist==3.8.0
     # via local-writing-service (pyproject.toml)
-python-discovery==1.6.3
+python-discovery==1.6.7
     # via virtualenv
 python-dotenv==1.2.4
     # via uvicorn
@@ -166,17 +166,17 @@ regex==2026.9.29
     # via tiktoken
 requests==2.34.2
     # via tiktoken
-ruff==0.17.1
+ruff==0.17.3
     # via local-writing-service (pyproject.toml)
 secretstorage==3.5.0 ; sys_platform == 'linux'
     # via keyring
-setuptools==84.0.0
+setuptools==84.2.1
     # via pyinstaller
 sniffio==1.3.1
     # via
     #   anthropic
     #   openai
-starlette==1.8.0
+starlette==1.10.0
     # via
     #   local-writing-service (pyproject.toml)
     #   fastapi
@@ -206,9 +206,9 @@ uvicorn==0.54.0
     # via local-writing-service (pyproject.toml)
 uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
     # via uvicorn
-virtualenv==21.14.8
+virtualenv==21.15.1
     # via pre-commit
 watchfiles==1.3.0
     # via uvicorn
-websockets==17.2
+websockets==17.3
     # via uvicorn

@@ -31,8 +31,9 @@ def lore_names(project: ProjectService) -> tuple[dict[str, set[str]], dict[str, 
         if isinstance(aliases, list):
             names.extend(str(alias) for alias in aliases if alias)
         for name in names:
-            if name.strip():
-                ids_by_name.setdefault(normalise_name(name), set()).add(entry.id)
+            key = normalise_name(name)
+            if key:  # a separator-only name ("-") names nothing (#2567)
+                ids_by_name.setdefault(key, set()).add(entry.id)
     return ids_by_name, titles
 
 

@@ -181,6 +181,8 @@ def scan_name_matcher(matcher: CompiledNameMatcher, text: str) -> list[NameMatch
     hits: list[NameMatch] = []
     for m in matcher.regex.finditer(scan_text):
         start, end = m.start(1), m.end(1)
+        if start == end:  # an empty match is never a name (#2567)
+            continue
         matched = text[start:end]
         entry_id = matcher.name_to_id.get(_norm(matched))
         if not entry_id:

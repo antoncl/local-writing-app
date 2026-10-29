@@ -636,9 +636,9 @@ class ChangeCandidatesMixin:
                 names.extend(str(alias) for alias in aliases if alias)
             for name in names:
                 name = name.strip()
-                if not name:
-                    continue
                 key = normalise_name(name)
+                if not key:  # also a separator-only name ("-"), #2567
+                    continue
                 _representative, ids = by_name.setdefault(key, (name, []))
                 if entry.id not in ids:
                     ids.append(entry.id)

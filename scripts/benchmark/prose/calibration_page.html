@@ -192,7 +192,7 @@ async function open(id) {
   if (noteTimer && data) queueSave(); // a note still waiting on its debounce belongs to the item we leave
   let fresh;
   try {
-    fresh = await api("/api/items/" + id);
+    fresh = await api("/api/items/" + encodeURIComponent(id));
   } catch (err) {
     // Show why the item cannot open, in place of whatever was on screen (or "Loading…").
     cur = null; data = null;
@@ -296,14 +296,19 @@ async function start() {
   const listing = await api("/api/items");
   items = listing.items;
   renderList();
-  const wanted = location.hash.slice(1);
   const first = items.find((i) => i.status !== "done") || items[0];
-  const id = items.some((i) => i.id === wanted) ? wanted : first && first.id;
-  if (id) await open(id); else $("empty").textContent = "No drafts in this sheet.";
+  const item = itemFromHash() || first;
+  if (item) await open(item.id); else $("empty").textContent = "No drafts in this sheet.";
+}
+// The hash only selects among the listed items; the id opened is always the
+// listing's own, never the URL text.
+function itemFromHash() {
+  const wanted = location.hash.slice(1);
+  return items.find((i) => i.id === wanted);
 }
 window.addEventListener("hashchange", () => {
-  const id = location.hash.slice(1);
-  if (id !== cur && items.some((i) => i.id === id)) open(id);
+  const item = itemFromHash();
+  if (item && item.id !== cur) open(item.id);
 });
 start().catch((err) => { $("empty").textContent = "Could not load: " + err.message; });
 </script>

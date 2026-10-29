@@ -36,12 +36,12 @@
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/svelte": "^5.4.2",
     "@types/node": "^24.13.4",
-    "happy-dom": "^20.11.1",
+    "happy-dom": "^20.14.6",
     "prosemirror-schema-basic": "^1.2.4",
     "subset-font": "^2.5.0",
     "svelte-check": "^4.7.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   }
 }

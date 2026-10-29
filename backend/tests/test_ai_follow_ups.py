@@ -164,6 +164,15 @@ class ResolutionTests(FollowUpsFixture):
         self.assertEqual([f.entry_id for f in resolved], [self.marek] * 3)
         self.assertEqual({f.entry_name for f in resolved}, {"Marek Vell"})
 
+    def test_a_separator_only_alias_resolves_nothing(self) -> None:
+        """#2567: an alias of "-" normalises to "", so it must not make a blank
+        or dash-only follow-up name resolve to its entry."""
+        self._character("Dashed", aliases=["-"])
+        resolved, dropped = resolve_follow_ups(
+            self.service, [_item("-", "A"), _item("--", "B")], self.seren
+        )
+        self.assertEqual((resolved, dropped), ([], 2))
+
     def test_unknown_committed_ambiguous_and_duplicates_are_dropped(self) -> None:
         self._character("Twin")
         self._character("Twin")

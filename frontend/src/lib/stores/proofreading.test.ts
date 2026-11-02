@@ -110,7 +110,7 @@ describe("ProofreadingController", () => {
     const { lens } = setup();
     lens.toggle();
     await settle();
-    lens.setViewNames("view-1", ["Ashcombe"]);
+    lens.setViewNames("view-1", [["Ashcombe"]]);
     expect(await lens.lint("Ashcombe")).toEqual([]);
     lens.setViewNames("view-1", null);
     expect(await lens.lint("Ashcombe")).toHaveLength(1);

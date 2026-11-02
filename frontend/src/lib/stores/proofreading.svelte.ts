@@ -75,8 +75,9 @@ export class ProofreadingController implements ProofreadLens {
   private pending = new Map<string, Promise<Finding[]>>();
   private lore: LoreEntrySummary[] = [];
   private stopLore: (() => void) | null = null;
-  /** As-of-scene names per editor (a scene's mid-story renames, #61). */
-  private viewNames = new Map<string, string[]>();
+  /** As-of-scene name sets per editor (a scene's mid-story renames, #61),
+   *  each `[title, ...aliases]`. */
+  private viewNames = new Map<string, string[][]>();
   /** The word list the engine was last given, to skip a needless reload. */
   private loadedWords: string | null = null;
   /** Bumped by every word reload, so a lint that started before it is dropped. */
@@ -114,8 +115,8 @@ export class ProofreadingController implements ProofreadLens {
     void this.start();
   }
 
-  /** The as-of-scene names an editor's scene uses; null when it has none. */
-  setViewNames(viewKey: string, names: string[] | null): void {
+  /** The as-of-scene name sets an editor's scene uses; null when it has none. */
+  setViewNames(viewKey: string, names: string[][] | null): void {
     if (names && names.length > 0) this.viewNames.set(viewKey, names);
     else if (!this.viewNames.delete(viewKey)) return;
     this.refreshWords();
@@ -197,7 +198,7 @@ export class ProofreadingController implements ProofreadLens {
   private async reloadWords(): Promise<void> {
     const engine = this.engine;
     if (!engine) return;
-    const words = autoDictionary(this.lore, [...this.viewNames.values()].flat());
+    const words = autoDictionary(this.lore, [...this.viewNames.values()].flat(1));
     const key = words.join("\n");
     if (key === this.loadedWords) return this.currentLoad;
     this.loadedWords = key;
@@ -241,7 +242,7 @@ let viewCounter = 0;
 
 /** Call during a prose editor's init: while it lives, its scene's as-of-scene
  *  names (a mid-story rename, #61) are in the dictionary too. */
-export function trackProofreadNames(names: () => string[] | null, lens: ProofreadingController = proofreading): void {
+export function trackProofreadNames(names: () => string[][] | null, lens: ProofreadingController = proofreading): void {
   const key = `view-${++viewCounter}`;
   $effect(() => {
     const current = names();

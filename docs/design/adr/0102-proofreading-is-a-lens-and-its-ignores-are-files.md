@@ -428,7 +428,7 @@ Slices are sequential: 2 needs 1's engine, and 3 needs 2's files.
   their word lists live is decided in #2646.
 - **Languages other than English.** Harper is English only.
 
-## Amendment 1 — Harper's JS spans are UTF-16, the slim binary is enough, and lore names go in lower case too
+## Amendment 1 — Harper's JS spans are UTF-16, the slim binary is enough, and an alias is case-insensitive
 
 2026-11-02, from running slice 1 against the real engine in the browser. It changes three
 statements above and adds two facts. Nothing else changes.
@@ -448,7 +448,8 @@ statements above and adds two facts. Nothing else changes.
   `getLintDescriptions`, and `contextHash` with `ignoreLintHash`. It started in under a second.
 - **Case.** Harper accepts a dictionary word written with a capital only when the text has the
   capital too, while a lowercase word passes in either case. With only the lore title imported,
-  `skyglass` in prose was flagged for the entry *Skyglass*.
+  `skyglass` in prose was flagged for the entry *Skyglass*. Anton's rule for names settles which
+  is right: **an entity's name (its title) is case-sensitive, and an alias is not.**
 
 ### Decision
 
@@ -457,10 +458,11 @@ statements above and adds two facts. Nothing else changes.
    others listed under Consequences.
 2. **The adapter imports `harper.js/slimBinary`**, a 20.1 MB download on first switch-on instead
    of about 40 MB.
-3. **The auto-dictionary adds each word in lower case as well**, with its possessives. A lore name
-   then passes whatever its case in the prose, which is how the implicit-context matcher (case-
-   insensitive) already treats names. The accepted cost: a miscapitalized name (`kael`) is not
-   flagged.
+3. **A title's words go in as written; an alias's words go in lower case as well**, each with its
+   possessives. `kael` is still flagged for the entry *Kael*, and an alias passes in any case. The
+   as-of-scene names are read per entry, title first, as the effective-names endpoint returns them.
+   One edge is accepted: when a mutation blanks a title, that entry's set holds only aliases and its
+   first alias is taken as the title.
 4. **Two facts slice 1 found, now part of the design:**
    - Vite's dev-server dependency pre-bundling moves `harper.js` without its binary, so the dev
      server answers the binary's URL with `index.html`. `frontend/vite.config.js` excludes

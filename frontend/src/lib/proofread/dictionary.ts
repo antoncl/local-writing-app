@@ -31,22 +31,29 @@ export function withPossessives(word: string): string[] {
   return forms;
 }
 
-/** The engine's word list: every word of every lore name plus `extraNames`,
- *  with possessives, deduplicated and sorted. Each word also goes in lower
- *  case: Harper accepts a capitalized entry only capitalized, but a lowercase
- *  entry in either case — so "skyglass" in prose passes for the entry
- *  "Skyglass", as the implicit-context matcher (case-insensitive) already
- *  treats it. The cost is that a miscapitalized name is not flagged. */
-export function autoDictionary(entries: LoreEntrySummary[], extraNames: Iterable<string> = []): string[] {
+/** The engine's word list: every word of every lore name, plus the name sets
+ *  in `sceneNames` (each `[title, ...aliases]`, as the effective-names endpoint
+ *  returns them), with possessives, deduplicated and sorted.
+ *
+ *  A title is case-sensitive and an alias is not (Anton's rule for names). A
+ *  title's words go in as written: Harper accepts a capitalized entry only
+ *  capitalized, so "kael" is still flagged for the entry "Kael". An alias's
+ *  words go in lower case too, and Harper accepts a lowercase entry in either
+ *  case. */
+export function autoDictionary(entries: LoreEntrySummary[], sceneNames: Iterable<string[]> = []): string[] {
   const words = new Set<string>();
-  const add = (name: string) => {
+  const add = (name: string, anyCase: boolean) => {
     for (const word of nameWords(name)) {
       for (const form of withPossessives(word)) words.add(form);
       const lower = word.toLowerCase();
-      if (lower !== word) for (const form of withPossessives(lower)) words.add(form);
+      if (anyCase && lower !== word) for (const form of withPossessives(lower)) words.add(form);
     }
   };
-  for (const entry of entries) for (const name of loreEntryNames(entry)) add(name);
-  for (const name of extraNames) add(name);
+  const addNameSet = ([title, ...aliases]: string[]) => {
+    if (title) add(title, false);
+    for (const alias of aliases) add(alias, true);
+  };
+  for (const entry of entries) addNameSet(loreEntryNames(entry));
+  for (const nameSet of sceneNames) addNameSet(nameSet);
   return [...words].sort();
 }

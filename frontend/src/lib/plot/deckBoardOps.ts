@@ -5,7 +5,7 @@
 
 import type { PlaceTo } from "@/lib/api/plot";
 import type { PlotUndoRecorder } from "@/lib/plot/plotCommands";
-import { chatCascadeLine } from "@/lib/stores/chats";
+import { undoableChatCascadeLine } from "@/lib/stores/chats";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { deleteDeck } from "@/lib/stores/decks";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -59,7 +59,7 @@ export function deckBoardOps(
         void run();
         return;
       }
-      const chatLine = chatCascadeLine([id]); // #2347
+      const chatLine = undoableChatCascadeLine([id], "deck"); // #2347, #2536
       confirmService.request({
         title: "Delete deck",
         message: `Delete deck ${deck?.title ? `“${deck.title}”` : "this deck"}? ${

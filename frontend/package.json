@@ -22,6 +22,7 @@
     "@xyflow/svelte": "^1.6.1",
     "codemirror": "^6.0.1",
     "dompurify": "^3.4.11",
+    "harper.js": "3.0.0",
     "katex": "^0.19.0",
     "marked": "^15.0.6",
     "svelte": "^5.16.0",

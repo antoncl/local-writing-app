@@ -44,7 +44,9 @@ export function escapeRegex(s: string): string {
   return s.replace(RE_ESCAPE, "\\$&");
 }
 
-const SEPARATOR_RE = /[\s-]+/;
+/** Where a name splits into words — also how the proofreading dictionary
+ *  splits a lore name (ADR-0102 §5). */
+export const SEPARATOR_RE = /[\s-]+/;
 const SEPARATOR_RE_G = /[\s-]+/g;
 const CLITIC = "(?:'ll|'re|'ve|'s|'d|')?";
 const BOUNDARY_LEFT = "(?<![A-Za-z0-9_'])";
@@ -126,6 +128,14 @@ function readAliases(metadata: Record<string, unknown> | undefined): string[] {
     .map((s) => s.trim());
 }
 
+/** An entry's base names: its title, then its aliases. The one read of them,
+ *  shared by the matcher and the proofreading dictionary (ADR-0102 §5), so the
+ *  two cannot disagree about what an entry is called. */
+export function loreEntryNames(entry: Pick<LoreEntrySummary, "title" | "metadata">): string[] {
+  if (!entry.title) return [];
+  return [entry.title, ...readAliases(entry.metadata as Record<string, unknown>)];
+}
+
 function buildPreview(body: string, max = 120): string {
   if (!body) return "";
   const collapsed = body.replace(/\s+/g, " ").trim();
@@ -182,10 +192,7 @@ export function compileMatcher(
       }
       continue;
     }
-    refs.push({ name: entry.title, id: entry.id });
-    for (const alias of readAliases(entry.metadata as Record<string, unknown>)) {
-      refs.push({ name: alias, id: entry.id });
-    }
+    for (const name of loreEntryNames(entry)) refs.push({ name, id: entry.id });
   }
   if (refs.length === 0) {
     return {

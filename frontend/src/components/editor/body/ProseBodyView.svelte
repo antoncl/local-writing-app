@@ -47,6 +47,8 @@
   import { TodoAnchors } from "@/lib/editor-core/todoAnchors";
   import { ReadAloudHighlight } from "@/lib/editor-core/readAloudHighlight";
   import { readAloud, speechAvailable } from "@/lib/stores/readAloud.svelte";
+  import { ProofreadHighlight } from "@/lib/editor-core/proofreadHighlight";
+  import { proofreading, trackProofreadNames } from "@/lib/stores/proofreading.svelte";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import { editorCallback } from "@/lib/editor-core/editorCallback";
   import {
@@ -1133,6 +1135,7 @@
         SearchMatchHighlight,
         LineEditSuggestions,
         ReadAloudHighlight.configure({ input: readAloud }),
+        ProofreadHighlight.configure({ lens: proofreading, enabled: () => documentKind === "manuscript" }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",
@@ -1275,6 +1278,7 @@
     schema: () => metadataSchema,
     invalidateOn: () => implicitContextMatcher,
   });
+  trackProofreadNames(() => sceneMatcher.names);
   // Reactively poke the ImplicitContextHighlight extension when the effective
   // matcher reference changes (scene switch, lore added/edited at the App level).
   $effect.pre(() => {

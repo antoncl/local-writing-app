@@ -21,8 +21,12 @@ export function createSceneEffectiveMatcher(opts: {
   /** Called for its reactive reads only — recompute when it changes (e.g. the
    *  global matcher reference, which changes when lore is added/edited). */
   invalidateOn?: () => unknown;
-}): { readonly current: CompiledMatcher | null } {
+}): { readonly current: CompiledMatcher | null; readonly names: string[][] | null } {
   let matcher = $state<CompiledMatcher | null>(null);
+  // The scene's effective name sets, one `[title, ...aliases]` per entry — the
+  // proofreading dictionary takes them too, so a renamed character's
+  // as-of-scene name is not flagged, its title still case-sensitive (ADR-0102 §5).
+  let names = $state.raw<string[][] | null>(null);
   // #2352: read each input through a $derived, so the fetch re-runs only when a
   // VALUE it depends on changes. The accessors read reactive objects (`scene?.id`
   // subscribes to the whole scene), and a metadata keystroke (the summary field)
@@ -41,16 +45,21 @@ export function createSceneEffectiveMatcher(opts: {
     void mutationsVersion.value;
     if (!sceneId) {
       matcher = null;
+      names = null;
       return;
     }
     let cancelled = false;
     api
       .getSceneEffectiveNames(sceneId)
-      .then((names) => {
-        if (!cancelled) matcher = compileMatcher(entries, schema, names);
+      .then((effective) => {
+        if (cancelled) return;
+        matcher = compileMatcher(entries, schema, effective);
+        names = Object.values(effective);
       })
       .catch(() => {
-        if (!cancelled) matcher = null;
+        if (cancelled) return;
+        matcher = null;
+        names = null;
       });
     return () => {
       cancelled = true;
@@ -59,6 +68,9 @@ export function createSceneEffectiveMatcher(opts: {
   return {
     get current() {
       return matcher;
+    },
+    get names() {
+      return names;
     },
   };
 }

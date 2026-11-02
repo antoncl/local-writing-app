@@ -1,7 +1,8 @@
 # ADR-0102: Proofreading is a lens, and what the writer tells it to ignore is kept in files
 
-- **Status:** Proposed — 2026-11-02. Text by Claude from the design in epic #2653 and the four
-  decisions Anton recorded there on 2026-11-02. Nothing is built until Anton approves this ADR.
+- **Status:** Accepted — 2026-11-02, Anton Lauridsen (PR #2654). Text by Claude from the design in
+  epic #2653 and the four decisions Anton recorded there on 2026-11-02. Amendment 1 (slice 1,
+  same day) corrects the span unit and adds lowercase dictionary forms.
 - **Feature:** spelling and grammar feedback in the scene editor that works out of the box, stays
   on the machine, and doesn't drown a fiction writer in false positives. This ADR covers **step 1**:
   the Harper engine running in the browser. Step 2 (LanguageTool) gets its own ADR.
@@ -426,3 +427,50 @@ Slices are sequential: 2 needs 1's engine, and 3 needs 2's files.
 - **The story-aware checks of #2646.** They plug into §3 as engines. What they check and where
   their word lists live is decided in #2646.
 - **Languages other than English.** Harper is English only.
+
+## Amendment 1 — Harper's JS spans are UTF-16, the slim binary is enough, and an alias is case-insensitive
+
+2026-11-02, from running slice 1 against the real engine in the browser. It changes three
+statements above and adds two facts. Nothing else changes.
+
+### What prompted it
+
+- **Spans.** The Context says a lint's `span()` indexes Unicode scalar values, and §2 has the
+  adapter convert them to UTF-16. That came from the docs' Spans page, which describes the Rust
+  core. harper.js 3.0.0 reports **UTF-16 code units**. Measured in the browser: in `a 🙂 untill b`
+  and in `a 𝔸 untill b` the span of `untill` is 5–11, its UTF-16 slice; in `a é untill b` it is
+  4–10. The conversion shifted every finding after an emoji by one character.
+- **Binary.** §2 imports `harper.js/binary` and Rejected sets `slimBinary` aside as "an unknown
+  difference". The difference is now known. With the full flavour, harper.js loads the slim binary
+  as its base and the full binary on top, about 40 MB in all. The slim binary alone covers
+  everything this ADR uses, checked in the browser: lints by rule (`organizedLints`), `importWords`,
+  the default config (936 rules) and `setLintConfig`, `getStructuredLintConfig`,
+  `getLintDescriptions`, and `contextHash` with `ignoreLintHash`. It started in under a second.
+- **Case.** Harper accepts a dictionary word written with a capital only when the text has the
+  capital too, while a lowercase word passes in either case. With only the lore title imported,
+  `skyglass` in prose was flagged for the entry *Skyglass*. Anton's rule for names settles which
+  is right: **an entity's name (its title) is case-sensitive, and an alias is not.**
+
+### Decision
+
+1. **The adapter uses Harper's span as given**, as UTF-16 offsets into the block text. The
+   §2 "Offsets" bullet no longer applies. A Harper upgrade rechecks this fact along with the
+   others listed under Consequences.
+2. **The adapter imports `harper.js/slimBinary`**, a 20.1 MB download on first switch-on instead
+   of about 40 MB.
+3. **A title's words go in as written; an alias's words go in lower case as well**, each with its
+   possessives. `kael` is still flagged for the entry *Kael*, and an alias passes in any case. The
+   as-of-scene names are read per entry, title first, as the effective-names endpoint returns them.
+   One edge is accepted: when a mutation blanks a title, that entry's set holds only aliases and its
+   first alias is taken as the title.
+4. **Two facts slice 1 found, now part of the design:**
+   - Vite's dev-server dependency pre-bundling moves `harper.js` without its binary, so the dev
+     server answers the binary's URL with `index.html`. `frontend/vite.config.js` excludes
+     `harper.js` from `optimizeDeps`. The production build is unaffected.
+   - When the binary fails to load inside Harper's worker, `setup()` never settles. The lens
+     limits the engine start to 60 seconds and then reports the error on the toggle, rather than
+     saying "loading" forever.
+
+### Not changed
+
+The lens, the pipeline, the ignores and their storage, and the slices.

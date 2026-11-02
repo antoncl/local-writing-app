@@ -10,6 +10,10 @@ export interface ProofreadingLayer {
   /** The built-in Library: read-only; it carries the fiction default. */
   is_library: boolean;
   is_root: boolean;
+  /** What this layer's own file says (the merged result is on the setup). */
+  words: string[];
+  rules: Record<string, boolean>;
+  dialect: ProofreadingDialect | null;
 }
 
 /** The open project's merged proofreading setup. */

@@ -126,8 +126,21 @@ class ProofreadingMixin:
         rule_layers: dict[str, str] = {}
         dialect = "american"
         ignored: dict[str, list[str]] = {}
+        own: list[ProofreadingLayer] = []
         for layer in layers:
             data = self._read_yaml(layer.folder / PROOFREADING_FILENAME)
+            own.append(
+                ProofreadingLayer(
+                    id=layer.id,
+                    label=layer.label,
+                    is_machine=layer.is_machine,
+                    is_library=layer.is_library,
+                    is_root=layer.is_root,
+                    words=sorted(set(_words_of(data))),
+                    rules=_rules_of(data),
+                    dialect=data["dialect"] if data.get("dialect") in DIALECTS else None,
+                )
+            )
             for word in _words_of(data):
                 word_layers.setdefault(word, []).append(layer.id)
             for rule, enabled in _rules_of(data).items():
@@ -145,16 +158,7 @@ class ProofreadingMixin:
             rules=rules,
             rule_layers=rule_layers,
             dialect=dialect,
-            layers=[
-                ProofreadingLayer(
-                    id=layer.id,
-                    label=layer.label,
-                    is_machine=layer.is_machine,
-                    is_library=layer.is_library,
-                    is_root=layer.is_root,
-                )
-                for layer in layers
-            ],
+            layers=own,
             ignored=ignored,
         )
 

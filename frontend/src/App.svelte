@@ -1059,6 +1059,7 @@
     onSave={() => void projectSession.saveMachineSettings()}
     onApplyPolicy={(policy) => projectSession.saveAiPolicy(policy)}
     onSetWarnOnOrphaningDelete={(value) => projectSession.setWarnOnOrphaningDelete(value)}
+    projectOpen={isProjectOpen}
     health={{
       onCheck: () => void aiSettings.runHealthCheck(),
       result: aiSettings.healthResult,

@@ -8,10 +8,14 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { undo } from "@tiptap/pm/history";
 import { proseStarterKit } from "./proseStarterKit";
 import { TodoAnchor } from "./proseMarks";
-import { MARK_CLASS, ProofreadHighlight, applyFix, dictionaryWord, findingAt, proofreadFindings, ruleLabel } from "./proofreadHighlight";
+import { MARK_CLASS, ProofreadHighlight, applyFix, dictionaryWord, findingAt, proofreadFindings } from "./proofreadHighlight";
+import { ruleLabel } from "@/lib/proofread/ruleLabel";
 import type { Finding } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
 import type { ProofreadingSetup } from "@/lib/types";
+
+/** What a layer's own file says: nothing. */
+const own = { words: [] as string[], rules: {} as Record<string, boolean>, dialect: null };
 
 /** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix),
  *  both under rule `ruleId`. */
@@ -60,10 +64,10 @@ function fakeLens(ruleId = "Fake") {
       rule_layers: {},
       dialect: "american",
       layers: [
-        { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false },
-        { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false },
-        { id: "world", label: "Honorverse", is_machine: false, is_library: false, is_root: false },
-        { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true },
+        { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false, ...own },
+        { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false, ...own },
+        { id: "world", label: "Honorverse", is_machine: false, is_library: false, is_root: false, ...own },
+        { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true, ...own },
       ],
       ignored: {},
     } as ProofreadingSetup | null,
@@ -234,6 +238,18 @@ describe("ProofreadHighlight", () => {
     editor.view.dispatch(editor.state.tr.insertText("x", at + 1, at + 2));
     expect(applyFix(editor.view, deco, fix)).toBe(false);
     expect(editor.state.doc.textContent).toBe("I saw txh cat.");
+  });
+
+  it("never edits a read-only editor: no fix offered, none applied (ADR-0102 Amendment 3)", async () => {
+    const { editor } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    editor.setEditable(false);
+    const at = editor.state.doc.textContent.indexOf("teh") + 1;
+    const deco = findingAt(editor.state, at)!;
+    expect(applyFix(editor.view, deco, proofreadFindings(editor.state)[0].fixes[0])).toBe(false);
+    expect(editor.state.doc.textContent).toBe("I saw teh cat.");
+    // The ignores stay: they write files, not the text.
+    expect(sections(openPopover(editor, "teh"))[""]).toEqual(["Ignore here"]);
   });
 
   it("offers the three permanent ignores, the dictionary for a spelling finding only", async () => {

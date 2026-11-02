@@ -68,6 +68,8 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
+    /** A long_text field's owning node when it is proofread (ADR-0102 §3); null = unchecked. */
+    proofreadNodeId?: string | null;
     onNavigate?: (target: NavigateTarget) => void;
     // ADR-0082 §2/F2, tri-state as of round 2 (P5): forwarded to
     // ReferencePicker (and, for a list field's entity_ref/entity_ref_list
@@ -118,6 +120,7 @@
     researchStructure = null,
     implicitContextMatcher = null,
     excludeId = null,
+    proofreadNodeId = null,
     onNavigate,
     createLayerId = undefined,
     lockedKeys = undefined,
@@ -264,6 +267,7 @@
     ariaLabel={label}
     value={currentValue}
     matcher={implicitContextMatcher}
+    {proofreadNodeId}
     onChange={(next) => emit(next)}
   />
 {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}

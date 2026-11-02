@@ -14,6 +14,7 @@
 // marks at the position, like a keystroke). Harper's `applySuggestion` is not
 // used: it returns the whole text, and putting a whole block back would drop
 // its marks.
+import { ruleLabel } from "@/lib/proofread/ruleLabel";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
@@ -87,8 +88,12 @@ function liveBlock(state: EditorState, deco: Decoration): BlockText | null {
 }
 
 /** Apply `fix` of the finding decorated by `deco`. False, changing nothing,
- *  when the text under it moved or changed since the finding was made. */
+ *  when the editor is read-only or the text under it moved or changed since
+ *  the finding was made. */
 export function applyFix(view: EditorView, deco: Decoration, fix: FindingFix): boolean {
+  // A dispatch is not stopped by `editable: false`: a read-only body (an
+  // inherited lore entry, a parked snapshot) must not take an edit.
+  if (!view.editable) return false;
   const block = liveBlock(view.state, deco);
   if (!block) return false;
   const { from, to } = docRange(block, fix.from, fix.to);
@@ -114,12 +119,6 @@ function sameDecorations(a: Decoration[], b: Decoration[]): boolean {
   );
 }
 
-/** "OxfordComma" -> "Oxford comma": a Harper rule name as a writer reads it. */
-export function ruleLabel(rule: string): string {
-  const [first = "", ...rest] = rule.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
-  return [first, ...rest.map((w) => w.toLowerCase())].join(" ");
-}
-
 /** The dictionary word a spelling finding names: a possessive is dropped,
  *  since the dictionary adds possessives itself. */
 export function dictionaryWord(problem: string): string {
@@ -132,6 +131,8 @@ const SPELL_CHECK_RULE = "SpellCheck";
 type SectionContext = {
   lens: ProofreadLens;
   nodeId: string | null;
+  /** False in a read-only editor: its fixes are not offered. */
+  editable: boolean;
   fix: (fix: FindingFix) => void;
   ignoreHere: (nodeId: string) => Promise<void>;
 };
@@ -142,7 +143,7 @@ type SectionContext = {
  *  project, and ignore this one spot. */
 export function findingSections(finding: Finding, problem: string, ctx: SectionContext): PopoverSection[] {
   const sections: PopoverSection[] = [
-    { heading: "", choices: finding.fixes.map((fix) => ({ label: fix.label, run: () => ctx.fix(fix) })) },
+    { heading: "", choices: ctx.editable ? finding.fixes.map((fix) => ({ label: fix.label, run: () => ctx.fix(fix) })) : [] },
   ];
   const setup = ctx.lens.setup;
   if (!setup) return sections;
@@ -280,6 +281,7 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
             const sections = findingSections(finding, (deco.spec as FindingSpec).problem, {
               lens,
               nodeId: options.nodeId(),
+              editable: view.editable,
               fix,
               ignoreHere,
             });

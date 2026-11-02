@@ -5,7 +5,7 @@
 // ignores write through the backend and load its answer.
 import { describe, expect, it, vi } from "vitest";
 import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
-import type { LoreEntrySummary, ProofreadingSetup } from "@/lib/types";
+import type { LoreEntrySummary, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
 import { ProofreadingController, type ProofreadingBackend } from "./proofreading.svelte";
 
 const entry = (title: string) => ({ id: `lore_${title}`, title, metadata: {} }) as unknown as LoreEntrySummary;
@@ -43,6 +43,7 @@ function fakeEngine() {
       log.push("config");
     }),
     hashesOf: vi.fn(async (text: string, finding: Finding): Promise<string[]> => [hashFor(text, finding)]),
+    catalog: vi.fn(async () => [{ label: "Spelling", description: "", rules: [{ name: "Spell", label: "Spell", description: "", default: true }] }]),
   } satisfies ProofreadEngine;
   return { engine, log };
 }
@@ -52,17 +53,18 @@ function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
   const words: Record<string, string[]> = {};
   const rules: Record<string, boolean> = { ...(initial.rules ?? {}) };
   const ignored: Record<string, string[]> = { ...(initial.ignored ?? {}) };
+  let dialect = initial.dialect ?? null;
   for (const word of initial.words ?? []) words[word] = ["book"];
   const read = async (): Promise<ProofreadingSetup> => ({
     words: Object.keys(words).sort(),
     word_layers: { ...words },
     rules: { ...rules },
     rule_layers: {},
-    dialect: initial.dialect ?? "american",
+    dialect: dialect ?? "american",
     layers: [
-      { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false },
-      { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false },
-      { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true },
+      { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false, words: [], rules: {}, dialect: null },
+      { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false, words: [], rules: {}, dialect: null },
+      { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true, words: [], rules: {}, dialect },
     ],
     ignored: structuredClone(ignored),
   });
@@ -70,6 +72,14 @@ function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
     read: vi.fn(read),
     addWord: vi.fn(async (word: string, layerId: string) => {
       words[word] = [layerId];
+      return read();
+    }),
+    removeWord: vi.fn(async (word: string) => {
+      delete words[word];
+      return read();
+    }),
+    setDialect: vi.fn(async (next: ProofreadingDialect | null) => {
+      dialect = next;
       return read();
     }),
     setRule: vi.fn(async (rule: string, enabled: boolean | null) => {
@@ -316,6 +326,64 @@ describe("ProofreadingController", () => {
     await settle();
     expect(lens.setup?.words).toEqual(["Zorn"]);
     expect(await lens.lint("Zorn")).toEqual([]);
+  });
+
+  it("sets a rule, sets and clears a dialect, and removes a word, each through the backend", async () => {
+    const { lens, backend } = setup([], { words: ["Zorn"] });
+    lens.toggle();
+    await settle();
+    await lens.setRule("Spell", false, "book");
+    expect(backend.setRule).toHaveBeenCalledWith("Spell", false, "book");
+    expect(lens.setup?.rules).toEqual({ Spell: false });
+    await lens.setRule("Spell", null, "book");
+    expect(lens.setup?.rules).toEqual({});
+    await lens.setDialect("british", "book");
+    expect(backend.setDialect).toHaveBeenCalledWith("british", "book");
+    expect(lens.setup?.dialect).toBe("british");
+    await lens.setDialect(null, "book");
+    expect(lens.setup?.dialect).toBe("american");
+    await lens.removeWord("Zorn", "book");
+    expect(backend.removeWord).toHaveBeenCalledWith("Zorn", "book");
+    expect(lens.setup?.words).toEqual([]);
+  });
+
+  it("starts the engine for the rule catalog without switching the lens on", async () => {
+    const { lens, loadEngine, engine, backend } = setup();
+    const loading = lens.catalog();
+    // The lens shows nothing of a start it didn't ask for.
+    expect(lens.status).toBe("off");
+    const groups = await loading;
+    expect(groups.map((g) => g.label)).toEqual(["Spelling"]);
+    // The start's own read is the setup read: one request, not two.
+    expect(backend.read).toHaveBeenCalledTimes(1);
+    // A later open reads it fresh.
+    await lens.catalog();
+    expect(backend.read).toHaveBeenCalledTimes(2);
+    expect(engine.catalog).toHaveBeenCalled();
+    expect(loadEngine).toHaveBeenCalledTimes(1);
+    expect(lens.on).toBe(false);
+    expect(lens.status).toBe("ready");
+    expect(lens.active).toBe(false);
+    expect(lens.setup).not.toBeNull();
+    // Switching on later reuses the engine.
+    lens.toggle();
+    expect(lens.active).toBe(true);
+    expect(loadEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects the catalog when the engine cannot start", async () => {
+    const lens = new ProofreadingController({
+      loadEngine: async () => {
+        throw new Error("no binary");
+      },
+      subscribeLore: () => () => undefined,
+      backend: fakeBackend(),
+      projectRoot: () => null,
+      startTimeoutMs: 1000,
+    });
+    await expect(lens.catalog()).rejects.toThrow("no binary");
+    // It fails in the settings tab, not on the lens's button.
+    expect(lens.status).toBe("off");
   });
 
   it("reports a start that never finishes instead of loading forever", async () => {

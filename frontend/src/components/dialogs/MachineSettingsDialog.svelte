@@ -21,6 +21,7 @@
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
   import MachineAssistantsSection from "@/components/widgets/MachineAssistantsSection.svelte";
+  import ProofreadingSection from "@/components/widgets/ProofreadingSection.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 
   // Live-preview the display prefs as the user edits — the master text scaler is
@@ -69,6 +70,8 @@
     // The host owns the gate — the ping needs an open project with AI access, so
     // `disabledReason` is non-null (and shown) when it can't run.
     health = null,
+    // Whether a project is open: proofreading's levels are the open project's chain.
+    projectOpen = false,
   }: {
     open?: boolean;
     settings?: MachineSettingsView | null;
@@ -83,6 +86,7 @@
       checking: boolean;
       disabledReason: string | null;
     } | null;
+    projectOpen?: boolean;
   } = $props();
 
   // Typed as the draft superset so it can bind the shared PolicyRadioGroup, but
@@ -245,11 +249,12 @@
   // (prose display), Palette (reusable colours), Storage (the projects root).
   // Writing and Palette are separate tabs so neither runs tall — the palette
   // alone can be dozens of swatches.
-  type SettingsTab = "ai" | "assistants" | "writing" | "palette" | "storage" | "updates";
+  type SettingsTab = "ai" | "assistants" | "writing" | "proofreading" | "palette" | "storage" | "updates";
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "ai", label: "AI" },
     { key: "assistants", label: "Assistants" },
     { key: "writing", label: "Writing" },
+    { key: "proofreading", label: "Proofreading" },
     { key: "palette", label: "Palette" },
     { key: "storage", label: "Storage" },
     { key: "updates", label: "Updates" },
@@ -414,6 +419,8 @@
           </section>
         {:else if activeTab === "assistants"}
           <MachineAssistantsSection policy={settings?.ai_policy ?? "off"} />
+        {:else if activeTab === "proofreading"}
+          <ProofreadingSection {projectOpen} />
         {:else if activeTab === "writing"}
           <section class="writing-surface">
             <h3>Writing surface</h3>

@@ -8,6 +8,8 @@
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { SearchMatchHighlight } from "@/lib/editor-core/searchMatchHighlight";
+  import { ProofreadHighlight } from "@/lib/editor-core/proofreadHighlight";
+  import { proofreading } from "@/lib/stores/proofreading.svelte";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { AppClipboardMarker } from "@/lib/editor-core/appClipboard";
   import { tableExtensions } from "@/lib/editor-core/alignedTable";
@@ -38,6 +40,10 @@
     // unregister it for the keyboard bridge + the rail's "Go to …" jump.
     // Unused outside a section.
     onEditorReady = () => {},
+    // The node that owns this field (ADR-0102 §3): the field is proofread and
+    // "Ignore here" is saved against it. Null = not proofread (e.g. the
+    // create-project wizard, where no node exists yet).
+    proofreadNodeId = null,
   }: {
     value?: string;
     ariaLabel?: string;
@@ -45,6 +51,7 @@
     onChange?: (value: string) => void;
     neighbours?: (() => SectionNeighbours) | null;
     onEditorReady?: (editor: Editor, phase: "ready" | "destroy") => void;
+    proofreadNodeId?: string | null;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
@@ -174,6 +181,12 @@
         ...tableExtensions,
         ImplicitContextHighlight.configure({ matcher }),
         SearchMatchHighlight,
+        // The getters read the prop at call time, so a node switch is seen.
+        ProofreadHighlight.configure({
+          lens: proofreading,
+          enabled: () => proofreadNodeId !== null,
+          nodeId: () => proofreadNodeId,
+        }),
       ],
       content: "",
       editorProps: {

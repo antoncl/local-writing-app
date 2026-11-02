@@ -32,6 +32,11 @@ class ProofreadingLayer(BaseModel):
     # The built-in Library: read-only; it carries the shipped fiction default.
     is_library: bool = False
     is_root: bool = False
+    # What this layer's own file says, for the settings view (ADR-0102 slice 3);
+    # the merged result is on the setup.
+    words: list[str] = Field(default_factory=list)
+    rules: dict[str, bool] = Field(default_factory=dict)
+    dialect: Dialect | None = None
 
 
 class ProofreadingSetup(BaseModel):

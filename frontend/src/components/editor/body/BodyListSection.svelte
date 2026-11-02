@@ -11,6 +11,7 @@
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import FieldValue from "@/components/widgets/FieldValue.svelte";
   import BodyItemRows from "@/components/editor/body/BodyItemRows.svelte";
+  import { proofreadable } from "@/lib/proofread/surfaces";
   import { listItemEditorId, type BodyListSection } from "@/lib/editor-core/bodySections";
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
@@ -64,6 +65,9 @@
 
   let { model, deps, on }: Props = $props();
 
+  // Proofread against the owning node (ADR-0102 §3) — but not on the plot
+  // canvas ("compact"): plot cards stay unchecked.
+  const proofreadNodeId = $derived(model.density !== "compact" && proofreadable(model.documentKind) ? deps.excludeId : null);
   const items = $derived(model.items);
   const n = $derived(items.length);
 
@@ -311,6 +315,7 @@
                 ariaLabel={`${model.section.label} ${index + 1} ${member.name}`}
                 value={text}
                 matcher={deps.implicitContextMatcher}
+                {proofreadNodeId}
                 onChange={(v) => writeMember(index, member.key, v)}
                 onEditorReady={(editor, phase) => on.editorReady(listItemEditorId(model.section.id, index, member.key), editor, phase)}
                 neighbours={() => deps.register.neighboursFor(deps.sectionIndex(listItemEditorId(model.section.id, index, member.key)))}

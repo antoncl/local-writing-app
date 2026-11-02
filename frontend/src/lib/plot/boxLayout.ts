@@ -18,6 +18,7 @@ import {
   DECK_SYNOPSIS_MAX_LINES,
   CARD_STEP_X,
   CARDS_PER_ROW,
+  boardTextScale,
   estCardHeight,
   layoutGrid,
   type Box,
@@ -57,7 +58,6 @@ export function deckSynopsisLines(synopsis: string): string[] {
     .slice(0, DECK_SYNOPSIS_MAX_LINES);
 }
 
-const cardHeight = (card: PlotBoardCard): number => estCardHeight(card.title, card.synopsis, card.beats.length);
 
 // A container box's order (ADR-0097 §6): a written card sits at its scene, a planned card
 // half a step after the scene it follows; ties (planned cards after the same scene) by story time.
@@ -74,6 +74,11 @@ const byStory = (a: PlotBoardCard, b: PlotBoardCard): number => a.story_order - 
  *  planned in, or — its scene at the root — the loose box; an unwritten card to its home
  *  deck, else the loose box. */
 export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
+  // A box's header and a deck's synopsis are text, sized by --ui-scale like the cards
+  // (#2362): read the scale once and size both from it.
+  const scale = boardTextScale();
+  const cardHeight = (card: PlotBoardCard): number => estCardHeight(card.title, card.synopsis, card.beats.length, scale);
+  const headerH = (synopsisLines = 0) => Math.ceil((CONTAINER_HEADER + synopsisLines * DECK_SYNOPSIS_LINE_H) * scale);
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
   const deckById = new Map(projection.decks.map((d) => [d.id, d]));
   // A realized deck (ADR-0097 §7) draws no box: its container's box stands for it.
@@ -116,7 +121,7 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
     nodeId: deckNodeId(id),
     kind: "deck",
     ref: id,
-    header: CONTAINER_HEADER + deckSynopsisLines(deckById.get(id)!.synopsis).length * DECK_SYNOPSIS_LINE_H,
+    header: headerH(deckSynopsisLines(deckById.get(id)!.synopsis).length),
     cards: boxCards(inDeck.get(id), byStory),
     children: (childDecks.get(id) ?? []).map(deckBox),
   });
@@ -124,7 +129,7 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
     nodeId: containerNodeId(id),
     kind: "container",
     ref: id,
-    header: CONTAINER_HEADER,
+    header: headerH(),
     cards: boxCards(inContainer.get(id), byContainerOrder),
     children: [...(childContainers.get(id) ?? []).map(containerBox), ...(containerDecks.get(id) ?? []).map(deckBox)],
   });
@@ -134,7 +139,7 @@ export function boardBoxes(projection: PlotBoardProjection): BoxSpec[] {
   // card is unwritten (a planned card can be taken out of its chapter, #2399). It must
   // already be there when a drag starts — never added mid-gesture (#1100).
   if (loose.length > 0 || projection.decks.length > 0 || projection.cards.some((c) => c.scene == null)) {
-    roots.push({ nodeId: LOOSE_NODE_ID, kind: "loose", ref: "", header: CONTAINER_HEADER, cards: boxCards(loose, byStory), children: [] });
+    roots.push({ nodeId: LOOSE_NODE_ID, kind: "loose", ref: "", header: headerH(), cards: boxCards(loose, byStory), children: [] });
   }
   return roots;
 }

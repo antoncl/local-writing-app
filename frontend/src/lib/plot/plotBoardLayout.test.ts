@@ -26,6 +26,7 @@ import {
   CARD_SYNOPSIS_LINE_H,
   CARD_SYNOPSIS_CHARS_PER_LINE,
   CARD_PILL_ROW_H,
+  boardTextScale,
   estCardHeight,
   pageStatusOf,
   CONTAINER_PAD,
@@ -996,10 +997,27 @@ describe("per-card height (#2354)", () => {
     expect(capped).toBe(atMax);
   });
 
-  it("beats add a foot band, growing with the pill rows", () => {
+  it("beats add a foot band, one pill row per beat (#2362)", () => {
     expect(estCardHeight("t", "s", 1)).toBeGreaterThanOrEqual(estCardHeight("t", "s", 0));
     expect(estCardHeight("t", "s", 6)).toBeGreaterThan(estCardHeight("t", "s", 2));
-    expect(estCardHeight("t", "s", 4) - estCardHeight("t", "s", 2)).toBe(CARD_PILL_ROW_H);
+    // An interactive pill is ~150px beside the foot's marks: only one fits a row.
+    expect(estCardHeight("t", "s", 2) - estCardHeight("t", "s", 1)).toBe(CARD_PILL_ROW_H);
+  });
+
+  describe("the text scale (#2362)", () => {
+    it("a scaled synopsis wraps sooner and each line is taller", () => {
+      // The issue's case: at ui_scale 1.2 a 300-char synopsis renders ~230px of text.
+      const synopsis = "x".repeat(300);
+      const at1 = estCardHeight("t", synopsis, 0, 1);
+      const at12 = estCardHeight("t", synopsis, 0, 1.2);
+      expect(at12 - at1).toBeGreaterThanOrEqual(230 - 8 * CARD_SYNOPSIS_LINE_H);
+    });
+
+    it("scale 1 is the unscaled estimate, the default without a DOM (boardGeometry.test.ts reads a root)", () => {
+      expect(estCardHeight("", "", 0, 1)).toBe(CARD_HEIGHT);
+      expect(boardTextScale()).toBe(1);
+      expect(estCardHeight("t", "s", 2)).toBe(estCardHeight("t", "s", 2, 1));
+    });
   });
 
   it("seeds each card node's size + measured from its own estimate", () => {

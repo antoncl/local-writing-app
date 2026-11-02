@@ -26,24 +26,41 @@ export const CARD_SYNOPSIS_MAX_LINES = 14;
 export const CARD_SECTION_GAP = 6; // between head / synopsis / foot
 export const CARD_FOOT_MIN_H = 22; // the foot row: status dots, plus at least one pill row
 export const CARD_PILL_ROW_H = 22; // one wrapped row of beat pills
-export const CARD_PILLS_PER_ROW = 2; // a conservative pills-per-row (over-estimates)
-export function estCardHeight(title: string, synopsis: string, beatCount: number): number {
-  const titleLines = Math.min(CARD_TITLE_MAX_LINES, Math.max(1, Math.ceil(title.length / CARD_TITLE_CHARS_PER_LINE)));
-  const head = Math.max(CARD_HEAD_MIN_H, titleLines * CARD_TITLE_LINE_H);
+// One pill per row (#2362): an interactive pill (grip + label + number + ×) is ~150px and
+// shares the foot with the right-aligned marks, so with a status label showing only one
+// fits. Two per row under-sized the card, squeezing the synopsis and clipping lower pills.
+export const CARD_PILLS_PER_ROW = 1;
+// The line heights and chars-per-line above are at --ui-scale 1. The card's text is sized
+// by `--ui-scale` (every --fs-* token multiplies through it), so a scaled line is taller
+// and holds fewer characters; the paddings and gaps are plain px and don't scale (#2362).
+export function estCardHeight(title: string, synopsis: string, beatCount: number, scale = boardTextScale()): number {
+  const lines = (text: string, charsPerLine: number) =>
+    Math.max(1, Math.ceil(text.length / Math.max(1, Math.floor(charsPerLine / scale))));
+  const titleLines = Math.min(CARD_TITLE_MAX_LINES, lines(title, CARD_TITLE_CHARS_PER_LINE));
+  const head = Math.max(CARD_HEAD_MIN_H, titleLines * CARD_TITLE_LINE_H) * scale;
   const synopsisLines = Math.min(
     CARD_SYNOPSIS_MAX_LINES,
     // Trimmed: the projection's synopsis is the raw body, stored with a trailing newline.
     synopsis
       .trim()
       .split("\n")
-      .reduce((n, para) => n + Math.max(1, Math.ceil(para.length / CARD_SYNOPSIS_CHARS_PER_LINE)), 0),
+      .reduce((n, para) => n + lines(para, CARD_SYNOPSIS_CHARS_PER_LINE), 0),
   );
   const pillRows = beatCount > 0 ? Math.ceil(beatCount / CARD_PILLS_PER_ROW) : 0;
-  const foot = pillRows > 0 ? pillRows * CARD_PILL_ROW_H : CARD_FOOT_MIN_H;
-  return CARD_PAD_Y + head + CARD_SECTION_GAP + synopsisLines * CARD_SYNOPSIS_LINE_H + CARD_SECTION_GAP + foot;
+  const foot = (pillRows > 0 ? pillRows * CARD_PILL_ROW_H : CARD_FOOT_MIN_H) * scale;
+  const synopsisH = synopsisLines * CARD_SYNOPSIS_LINE_H * scale;
+  return Math.ceil(CARD_PAD_Y + head + CARD_SECTION_GAP + synopsisH + CARD_SECTION_GAP + foot);
 }
-// The minimum / default card height: what an empty, beat-less card measures.
-export const CARD_HEIGHT = estCardHeight("", "", 0);
+// The text scale the card renders at: the `--ui-scale` that applyProsePresentation sets on
+// the document root (#127). Read, not measured: it is the same value the card's CSS uses.
+// 1 where it isn't set (tests, before machine settings load).
+export function boardTextScale(): number {
+  if (typeof document === "undefined") return 1;
+  const scale = Number.parseFloat(document.documentElement.style.getPropertyValue("--ui-scale"));
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+// The minimum / default card height: what an empty, beat-less card measures at scale 1.
+export const CARD_HEIGHT = estCardHeight("", "", 0, 1);
 export const CARD_GAP_X = 64; // between cards in a row — room for the links between neighbours (#2411)
 export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
 // A plot holder node (plotline or arc) is variable-height — SvelteFlow sizes it to its
@@ -54,8 +71,9 @@ export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a ca
 // a small extra gap is harmless, an overlap is not.
 export const PLOT_NODE_HEADER_H = 64; // header band above the collapsed beat roster
 export const PLOT_NODE_BEAT_ROW_H = 24; // one beat row in that roster
-export function estPlotNodeHeight(beatCount: number): number {
-  return PLOT_NODE_HEADER_H + beatCount * PLOT_NODE_BEAT_ROW_H;
+// Like a card, the node's text is sized by --ui-scale (#2362), so the estimate scales with it.
+export function estPlotNodeHeight(beatCount: number, scale = boardTextScale()): number {
+  return Math.ceil((PLOT_NODE_HEADER_H + beatCount * PLOT_NODE_BEAT_ROW_H) * scale);
 }
 export const CONTAINER_PAD = 20; // inner padding between a box edge and its content
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box

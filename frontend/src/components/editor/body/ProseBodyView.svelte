@@ -48,6 +48,7 @@
   import { ReadAloudHighlight } from "@/lib/editor-core/readAloudHighlight";
   import { readAloud, speechAvailable } from "@/lib/stores/readAloud.svelte";
   import { ProofreadHighlight } from "@/lib/editor-core/proofreadHighlight";
+  import { proofreadable } from "@/lib/proofread/surfaces";
   import { proofreading, trackProofreadNames } from "@/lib/stores/proofreading.svelte";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import { editorCallback } from "@/lib/editor-core/editorCallback";
@@ -1137,7 +1138,7 @@
         ReadAloudHighlight.configure({ input: readAloud }),
         ProofreadHighlight.configure({
           lens: proofreading,
-          enabled: () => documentKind === "manuscript",
+          enabled: () => proofreadable(documentKind),
           nodeId: () => scene?.id ?? null,
         }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),

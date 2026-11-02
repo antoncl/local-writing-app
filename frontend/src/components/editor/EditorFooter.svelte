@@ -9,6 +9,7 @@
   import LineNoteReviewBar from "@/components/editor/body/LineNoteReviewBar.svelte";
   import ReadAloudBar from "@/components/editor/body/ReadAloudBar.svelte";
   import ProofreadToggle from "@/components/editor/ProofreadToggle.svelte";
+  import { proofreadable } from "@/lib/proofread/surfaces";
   import { readAloud } from "@/lib/stores/readAloud.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -97,8 +98,8 @@
       No scene open
     {/if}
   </span>
-  <!-- Proofreading (ADR-0102 §1): step 1 checks scene prose only. -->
-  {#if sceneTitle !== null && documentKind === "manuscript"}
+  <!-- Proofreading (ADR-0102 §1): any node with prose or a long-text field; not code or chat. -->
+  {#if sceneTitle !== null && proofreadable(documentKind)}
     <ProofreadToggle />
   {/if}
 </footer>

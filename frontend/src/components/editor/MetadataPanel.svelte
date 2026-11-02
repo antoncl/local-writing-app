@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { isRequiredSelect } from "@/lib/metadataTypes";
+  import { proofreadable } from "@/lib/proofread/surfaces";
   import { leavesRow } from "@/components/editor/RailScalarCell.svelte";
   import RailFieldRow, { type RailRowCallbacks, type RailRowDeps } from "@/components/editor/RailFieldRow.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
@@ -615,6 +616,7 @@
     researchStructure,
     implicitContextMatcher,
     excludeId,
+    proofreadNodeId: proofreadable(documentKind) ? excludeId : null,
   });
 
   // The panel's write-back callbacks (#2022 split) — a row never touches panel

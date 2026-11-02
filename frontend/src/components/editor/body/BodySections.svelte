@@ -16,6 +16,7 @@
   import FieldValue from "@/components/widgets/FieldValue.svelte";
   import BodyListSection from "@/components/editor/body/BodyListSection.svelte";
   import { buildBodySections, buildBodyListSections, listItemEditorId, listItemsOf } from "@/lib/editor-core/bodySections";
+  import { proofreadable } from "@/lib/proofread/surfaces";
   import { createSectionEditorRoster } from "@/lib/editor-core/sectionEditorRoster.svelte";
   import type { SectionRegistry } from "@/lib/editor-core/sectionKeyboardBridge";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
@@ -77,6 +78,8 @@
     onNavigate = () => {},
   }: Props = $props();
 
+  // The node that owns these fields, when it is proofread (ADR-0102 §3).
+  const proofreadNodeId = $derived(proofreadable(documentKind) ? excludeId : null);
   const groups = $derived(buildBodySections(schema, entryType));
   const listSections = $derived(buildBodyListSections(schema, entryType));
   const listItems = (listId: string) => listItemsOf(metadata, listId);
@@ -123,6 +126,7 @@
             ariaLabel={field.label}
             value={stringValue(field.id)}
             matcher={implicitContextMatcher}
+            {proofreadNodeId}
             onChange={(v) => writeField(field.id, v)}
             onEditorReady={(editor, phase) => roster.editorReady(field.id, editor, phase)}
             neighbours={() => register.neighboursFor(roster.sectionIndex(field.id))}
@@ -144,6 +148,7 @@
                 ariaLabel={field.label}
                 value={stringValue(field.id)}
                 matcher={implicitContextMatcher}
+                {proofreadNodeId}
                 onChange={(v) => writeField(field.id, v)}
                 onEditorReady={(editor, phase) => roster.editorReady(field.id, editor, phase)}
                 neighbours={() => register.neighboursFor(roster.sectionIndex(field.id))}

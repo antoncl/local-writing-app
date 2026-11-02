@@ -114,6 +114,22 @@ class ProofreadingTests(unittest.TestCase):
         )
         self.assertEqual(self._file(self.root)["rules"], {"Hedging": True, "RetiredRule": False})
 
+    def test_each_layer_reports_its_own_file(self) -> None:
+        world = self._layer(folder=self.world)
+        self.service.add_proofreading_word(ProofreadingWordRequest(word="skyglass", layer_id=world))
+        self.service.set_proofreading_rule(ProofreadingRuleRequest(rule="OxfordComma", enabled=True, layer_id=world))
+        self.service.set_proofreading_dialect(ProofreadingDialectRequest(dialect="british", layer_id=world))
+        setup = self.service.read_proofreading()
+        by_id = {x.id: x for x in setup.layers}
+        self.assertEqual(by_id[world].words, ["skyglass"])
+        self.assertEqual(by_id[world].rules, {"OxfordComma": True})
+        self.assertEqual(by_id[world].dialect, "british")
+        # The book says nothing itself; the Library's own rules are its file's.
+        book = by_id[self._layer(folder=self.root)]
+        self.assertEqual((book.words, book.rules, book.dialect), ([], {}, None))
+        library = next(x for x in setup.layers if x.is_library)
+        self.assertIs(library.rules["OxfordComma"], False)
+
     # ---------- the machine layer ----------
 
     def test_a_machine_word_makes_the_machine_a_layer_of_the_walk(self) -> None:

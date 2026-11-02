@@ -41,11 +41,16 @@ describe("EditorFooter", () => {
     expect(status()).toBe("No scene open");
   });
 
-  it("offers the proofreading lens on a scene only (ADR-0102 §1)", async () => {
+  it("offers the proofreading lens on a node with prose, not on code or chat (ADR-0102 §1)", async () => {
     const { rerender } = render(EditorFooter, { props: props() });
     expect(screen.getByTestId("proofread-toggle").getAttribute("aria-pressed")).toBe("false");
     await rerender(props({ documentKind: "lore" }));
+    expect(screen.getByTestId("proofread-toggle")).toBeInTheDocument();
+    await rerender(props({ documentKind: "prompt" }));
     expect(screen.queryByTestId("proofread-toggle")).toBeNull();
+    await rerender(props({ documentKind: "chat" }));
+    expect(screen.queryByTestId("proofread-toggle")).toBeNull();
+    await rerender(props({ documentKind: "manuscript" }));
     await rerender(props({ sceneTitle: null }));
     expect(screen.queryByTestId("proofread-toggle")).toBeNull();
   });

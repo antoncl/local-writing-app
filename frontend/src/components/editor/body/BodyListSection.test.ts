@@ -58,7 +58,13 @@ const ITEMS: MetadataValue[] = [
 
 const registerFocus = vi.fn();
 
-function mount(items: MetadataValue[] = ITEMS, readOnly = false, density?: "prose" | "compact", section: BodyListSectionType = SECTION) {
+function mount(
+  items: MetadataValue[] = ITEMS,
+  readOnly = false,
+  density?: "prose" | "compact",
+  section: BodyListSectionType = SECTION,
+  excludeId: string | null = null,
+) {
   const onChange = vi.fn();
   const onEditorReady = vi.fn();
   const onNavigate = vi.fn();
@@ -73,7 +79,7 @@ function mount(items: MetadataValue[] = ITEMS, readOnly = false, density?: "pros
         promptEntries: [],
         structure: null,
         researchStructure: null,
-        excludeId: null,
+        excludeId,
         createLayerId: null,
         tagTitleById: new Map(),
       },
@@ -205,6 +211,20 @@ describe("BodyListSection", () => {
     const root = container.querySelector(".bs-block")!;
     expect(root.classList.contains("compact")).toBe(true);
     expect(root.id).toBe("");
+  });
+
+  it("proofreads its prose members against the owning node (ADR-0102 §3)", () => {
+    mount(ITEMS, false, "prose", SECTION, "plot_1");
+    const nodes = screen.getAllByTestId("mock-long-text").map((e) => e.getAttribute("data-proofread-node"));
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes.every((n) => n === "plot_1")).toBe(true);
+  });
+
+  it("does not proofread on the plot canvas (compact density, ADR-0102 Amendment 3)", () => {
+    mount(ITEMS, false, "compact", SECTION, "plot_1");
+    const nodes = screen.getAllByTestId("mock-long-text").map((e) => e.getAttribute("data-proofread-node"));
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes.every((n) => n === "")).toBe(true);
   });
 
   it("default (prose) density keeps the section-{id} anchor", () => {

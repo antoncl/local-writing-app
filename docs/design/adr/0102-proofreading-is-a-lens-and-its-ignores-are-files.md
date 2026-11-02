@@ -498,3 +498,37 @@ The lens, the pipeline, the ignores and their storage, and the slices.
    the Library and the machine included. When the walk has no machine layer yet, the service adds
    it, after the Library. The first machine write creates the file, and from then on the walk
    yields the layer by itself (§6).
+
+## Amendment 3 — Every prose surface of a node is checked, and the settings live in the Settings dialog
+
+2026-11-02, from building slice 3. Anton approved the shape before it was built. Nothing else changes.
+
+### What prompted it
+
+- Slice 3 names long-text fields as the next surface. A lore entry's prose body is the same kind
+  of text as its long-text fields, and leaving it unchecked while its fields are checked would be
+  an arbitrary line.
+- §4 sends rule settings at other layers, the dialect and word removal to "the settings UI", but
+  no section says where that lives. The app has one settings view, and no project-settings view.
+- To show what one level says, the settings view needs each layer's own words, rules and dialect.
+  The read in §7 returns only the merged result.
+
+### Decision
+
+1. **One predicate says where proofreading applies**: every node kind except chat, prompts,
+   snippets, assistants and views (code, templates and chat are not prose). It gates the prose
+   body, the long-text fields and the footer's Proofread control alike. Plot cards on the zoomed
+   canvas stay unchecked (#2647); a plot node opened in its editor is checked. Titles and ids
+   remain unchecked.
+2. **The settings are a Proofreading tab of the Settings dialog.** A level picker chooses the
+   Library (read-only), the machine or a project of the chain. Each level shows its dialect, every
+   Harper rule in Harper's own groups (search and "changed only" filters; Inherit, On or Off, with
+   the inherited value and who set it) and its own dictionary words, each removable. Changes write
+   at once, as the Assistants tab does. With no project open the tab says so. Rules and words are
+   not nodes, so these rows are plain rows, not `NodeRow`.
+3. **The read gives each layer its own file's `words`, `rules` and `dialect`** alongside the merged
+   setup.
+4. **Opening the tab starts Harper without switching the lens on**, because the rule catalog
+   (`getStructuredLintConfig`, `getLintDescriptions`) comes from the engine. A rule offered as one
+   of several exclusive choices (Harper's `OneOfMany`, e.g. Oxford comma or no Oxford comma) is
+   listed as its own rule.

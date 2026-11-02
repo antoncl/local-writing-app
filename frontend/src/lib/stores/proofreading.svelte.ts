@@ -21,8 +21,8 @@ import { api } from "@/lib/api";
 import { scopeHeaders } from "@/lib/api/core";
 import { loreEntriesStore } from "@/lib/stores/lore";
 import { autoDictionary, withPossessives } from "@/lib/proofread/dictionary";
-import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
-import type { LoreEntrySummary, ProofreadingSetup } from "@/lib/types";
+import type { EngineConfig, Finding, ProofreadEngine, RuleGroup } from "@/lib/proofread/findings";
+import type { LoreEntrySummary, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
 
 const CACHE_LIMIT = 4000;
 
@@ -51,7 +51,9 @@ export interface ProofreadLens {
 export interface ProofreadingBackend {
   read(): Promise<ProofreadingSetup>;
   addWord(word: string, layerId: string): Promise<ProofreadingSetup>;
+  removeWord(word: string, layerId: string): Promise<ProofreadingSetup>;
   setRule(rule: string, enabled: boolean | null, layerId: string): Promise<ProofreadingSetup>;
+  setDialect(dialect: ProofreadingDialect | null, layerId: string): Promise<ProofreadingSetup>;
   ignore(nodeId: string, hashes: string[]): Promise<ProofreadingSetup>;
 }
 
@@ -72,7 +74,9 @@ const defaultDeps: ProofreadingDeps = {
   backend: {
     read: () => api.getProofreading(),
     addWord: (word, layerId) => api.addProofreadingWord(word, layerId),
+    removeWord: (word, layerId) => api.removeProofreadingWord(word, layerId),
     setRule: (rule, enabled, layerId) => api.setProofreadingRule(rule, enabled, layerId),
+    setDialect: (dialect, layerId) => api.setProofreadingDialect(dialect, layerId),
     ignore: (nodeId, hashes) => api.ignoreProofreadingSpot(nodeId, hashes),
   },
   projectRoot: () => scopeHeaders()["X-Project-Root"] ?? null,
@@ -245,7 +249,35 @@ export class ProofreadingController implements ProofreadLens {
   }
 
   async disableRule(rule: string, layerId: string): Promise<void> {
-    await this.load(() => this.deps.backend.setRule(rule, false, layerId));
+    await this.setRule(rule, false, layerId);
+  }
+
+  /** Settings tab: `enabled` null sets the rule back to "as inherited". */
+  async setRule(rule: string, enabled: boolean | null, layerId: string): Promise<void> {
+    await this.load(() => this.deps.backend.setRule(rule, enabled, layerId));
+  }
+
+  /** Settings tab: `dialect` null sets the dialect back to "as inherited". */
+  async setDialect(dialect: ProofreadingDialect | null, layerId: string): Promise<void> {
+    await this.load(() => this.deps.backend.setDialect(dialect, layerId));
+  }
+
+  async removeWord(word: string, layerId: string): Promise<void> {
+    await this.load(() => this.deps.backend.removeWord(word, layerId));
+  }
+
+  /** Settings tab: read the open project's setup again. */
+  async refreshSetup(): Promise<void> {
+    await this.refresh();
+  }
+
+  /** Settings tab: Harper's rules in its groups. Starts the engine if need be,
+   *  without switching the lens on. */
+  async catalog(): Promise<RuleGroup[]> {
+    await this.start();
+    const engine = this.engine;
+    if (!engine) throw new Error(this.error ?? "the checker is not running");
+    return engine.catalog();
   }
 
   async ignoreHere(nodeId: string, text: string, finding: Finding): Promise<void> {
@@ -259,6 +291,7 @@ export class ProofreadingController implements ProofreadLens {
   }
 
   private start(): Promise<void> {
+    if (this.engine) return Promise.resolve();
     if (this.loading) return this.loading;
     this.status = "loading";
     this.error = null;
@@ -277,6 +310,8 @@ export class ProofreadingController implements ProofreadLens {
         });
         starting = false;
         await this.refresh();
+        // Started for the settings tab alone, the lens stays off ("ready" is
+        // what a switched-off lens with an engine reads, as in `setOn`).
         this.status = "ready";
       } catch (err) {
         // Undo the whole start, so switching on again starts from nothing

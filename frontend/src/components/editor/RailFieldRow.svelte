@@ -22,6 +22,8 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
+    // The node whose long_text fields are proofread (ADR-0102 §3); null = none.
+    proofreadNodeId?: string | null;
     // #2215: a reference row's picker empty-state copy — every RailFieldRow
     // host is a field surface (never a prompt input), so this defaults to
     // the field wording (below) when the host passes nothing; a group-member
@@ -300,6 +302,7 @@
         researchStructure={deps.researchStructure}
         implicitContextMatcher={deps.implicitContextMatcher}
         excludeId={deps.excludeId}
+        proofreadNodeId={deps.proofreadNodeId}
         createLayerId={deps.createLayerId}
         onChange={(v) => on.write(model.fieldId, v)}
         onNavigate={(payload) => on.navigate(payload)}

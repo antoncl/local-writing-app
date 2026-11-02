@@ -8,9 +8,19 @@
 // slim one AND a second 20 MB binary on top, and the slim one alone does all
 // the lens needs (lints by rule, words, rule config, ignores by hash — checked
 // in the browser, ADR-0102 Amendment 1).
-import { Dialect, SuggestionKind, WorkerLinter, type Lint, type LintConfig, type Linter, type Suggestion } from "harper.js";
+import {
+  Dialect,
+  SuggestionKind,
+  WorkerLinter,
+  type Lint,
+  type LintConfig,
+  type Linter,
+  type StructuredLintSetting,
+  type Suggestion,
+} from "harper.js";
 import { slimBinary } from "harper.js/slimBinary";
-import type { Finding, FindingFix, ProofreadEngine } from "@/lib/proofread/findings";
+import type { Finding, FindingFix, ProofreadEngine, RuleGroup, RuleInfo } from "@/lib/proofread/findings";
+import { ruleLabel } from "@/lib/proofread/ruleLabel";
 import type { ProofreadingDialect } from "@/lib/types";
 
 const ENGINE_ID = "harper";
@@ -91,11 +101,54 @@ type LinterLike = Pick<
   | "clearIgnoredLints"
   | "ignoreLintHash"
   | "contextHash"
+  | "getStructuredLintConfig"
+  | "getLintDescriptions"
 >;
+
+const OTHER_GROUP = "Other";
+
+/** Every rule a structured setting holds, nested groups flattened in: a Bool is
+ *  one rule, a OneOfMany contributes each of its names as its own. */
+function settingRules(setting: StructuredLintSetting, info: (name: string, label: string) => RuleInfo): RuleInfo[] {
+  if ("Bool" in setting) {
+    const { name } = setting.Bool as { name: string };
+    return [info(name, ruleLabel(name))];
+  }
+  if ("OneOfMany" in setting) {
+    const { names, labels } = setting.OneOfMany;
+    return names.map((name, i) => info(name, labels?.[i] || ruleLabel(name)));
+  }
+  if ("Group" in setting) return setting.Group.child.settings.flatMap((s) => settingRules(s, info));
+  return [];
+}
+
+/** Harper's rules in Harper's groups; rules within a group by label. A rule
+ *  outside any group goes into "Other", last. */
+async function buildCatalog(linter: LinterLike, defaults: LintConfig): Promise<RuleGroup[]> {
+  const [structured, descriptions] = await Promise.all([linter.getStructuredLintConfig(), linter.getLintDescriptions()]);
+  const info = (name: string, label: string): RuleInfo => ({
+    name,
+    label,
+    description: descriptions[name] ?? "",
+    default: defaults[name] ?? false,
+  });
+  const byLabel = (a: RuleInfo, b: RuleInfo) => a.label.localeCompare(b.label);
+  const groups: RuleGroup[] = [];
+  const loose: RuleInfo[] = [];
+  for (const setting of structured.settings) {
+    if ("Group" in setting) {
+      const { label, description } = setting.Group;
+      groups.push({ label, description, rules: settingRules(setting, info).sort(byLabel) });
+    } else loose.push(...settingRules(setting, info));
+  }
+  if (loose.length > 0) groups.push({ label: OTHER_GROUP, description: "", rules: loose.sort(byLabel) });
+  return groups;
+}
 
 /** The engine over an already-constructed linter and its default rule config
  *  (tests pass fakes). */
 export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): ProofreadEngine {
+  let catalog: Promise<RuleGroup[]> | null = null;
   return {
     id: ENGINE_ID,
     async lint(text) {
@@ -126,6 +179,13 @@ export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): 
         return span.start === finding.from && span.end === finding.to;
       });
       return Promise.all(here.map(async (lint) => String(await linter.contextHash(text, lint))));
+    },
+    catalog() {
+      catalog ??= buildCatalog(linter, defaults).catch((err: unknown) => {
+        catalog = null;
+        throw err;
+      });
+      return catalog;
     },
   };
 }

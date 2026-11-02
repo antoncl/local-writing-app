@@ -65,6 +65,8 @@ function fakeLinter() {
     clearIgnoredLints: vi.fn(async () => undefined),
     ignoreLintHash: vi.fn(async () => undefined),
     contextHash: vi.fn(async () => 18446744073709551615n),
+    getStructuredLintConfig: vi.fn(async (): Promise<unknown> => ({ settings: [] })),
+    getLintDescriptions: vi.fn(async (): Promise<Record<string, string>> => ({})),
   };
 }
 
@@ -124,5 +126,52 @@ describe("harperEngineFor", () => {
     await engine.setWords(["Kael", "Kael's"]);
     await engine.setWords([]);
     expect(calls).toEqual(["clear", "import Kael,Kael's", "clear"]);
+  });
+
+  it("builds the rule catalog: groups in Harper's order, a OneOfMany flattened, rules by label", async () => {
+    const linter = fakeLinter();
+    linter.getStructuredLintConfig.mockResolvedValue({
+      settings: [
+        {
+          Group: {
+            label: "Style",
+            description: "Style rules",
+            child: {
+              settings: [
+                { Bool: { name: "Hedging", state: true } },
+                { Bool: { name: "AvoidCurses", state: false } },
+                { OneOfMany: { names: ["ZetaForm", "AlphaForm"], name: null, labels: ["Zeta form", "Alpha form"] } },
+                { Group: { label: "Nested", description: "", child: { settings: [{ Bool: { name: "Deep", state: true } }] } } },
+              ],
+            },
+          },
+        },
+        { Group: { label: "Spelling", description: "", child: { settings: [{ Bool: { name: "SpellCheck", state: true } }] } } },
+        { Bool: { name: "Loose", state: true } },
+      ],
+    });
+    linter.getLintDescriptions.mockResolvedValue({ Hedging: "Avoid hedging.", SpellCheck: "Misspellings." });
+    const engine = harperEngineFor(linter as never, { Hedging: true, SpellCheck: true, AvoidCurses: false });
+    const catalog = await engine.catalog();
+    expect(catalog.map((g) => g.label)).toEqual(["Style", "Spelling", "Other"]);
+    expect(catalog[0].description).toBe("Style rules");
+    expect(catalog[0].rules.map((r) => [r.name, r.label])).toEqual([
+      ["AlphaForm", "Alpha form"],
+      ["AvoidCurses", "Avoid curses"],
+      ["Deep", "Deep"],
+      ["Hedging", "Hedging"],
+      ["ZetaForm", "Zeta form"],
+    ]);
+    expect(catalog[0].rules.find((r) => r.name === "Hedging")).toEqual({
+      name: "Hedging",
+      label: "Hedging",
+      description: "Avoid hedging.",
+      default: true,
+    });
+    // A rule absent from the defaults is off; one without a description has "".
+    expect(catalog[0].rules.find((r) => r.name === "AlphaForm")).toMatchObject({ description: "", default: false });
+    expect(catalog[2].rules.map((r) => r.name)).toEqual(["Loose"]);
+    await engine.catalog();
+    expect(linter.getStructuredLintConfig).toHaveBeenCalledTimes(1);
   });
 });

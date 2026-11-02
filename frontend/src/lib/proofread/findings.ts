@@ -31,6 +31,12 @@ export type EngineConfig = {
   ignored: string[];
 };
 
+/** One rule an engine can switch (Harper's rule catalog, ADR-0102 §4). */
+export type RuleInfo = { name: string; label: string; description: string; default: boolean };
+
+/** The engine's own grouping of its rules. */
+export type RuleGroup = { label: string; description: string; rules: RuleInfo[] };
+
 /** An engine as the lens drives it: lint a block's text, and take the words,
  *  rules and ignores it must honour. */
 export interface ProofreadEngine {
@@ -42,6 +48,8 @@ export interface ProofreadEngine {
    *  it was found in: one per finding there, the ones the engine hid behind it
    *  included. Empty when the engine finds nothing there. */
   hashesOf(text: string, finding: Finding): Promise<string[]>;
+  /** Every rule the engine has, in its groups, for the settings tab. */
+  catalog(): Promise<RuleGroup[]>;
 }
 
 /** Whether a finding draws as a spelling mark or as any other kind. */

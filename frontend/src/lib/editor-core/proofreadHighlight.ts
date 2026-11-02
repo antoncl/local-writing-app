@@ -14,6 +14,7 @@
 // marks at the position, like a keystroke). Harper's `applySuggestion` is not
 // used: it returns the whole text, and putting a whole block back would drop
 // its marks.
+import { ruleLabel } from "@/lib/proofread/ruleLabel";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
@@ -112,12 +113,6 @@ function sameDecorations(a: Decoration[], b: Decoration[]): boolean {
   return sa.every(
     (d, i) => d.from === sb[i].from && d.to === sb[i].to && d.spec.proofread === sb[i].spec.proofread && d.spec.problem === sb[i].spec.problem,
   );
-}
-
-/** "OxfordComma" -> "Oxford comma": a Harper rule name as a writer reads it. */
-export function ruleLabel(rule: string): string {
-  const [first = "", ...rest] = rule.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
-  return [first, ...rest.map((w) => w.toLowerCase())].join(" ");
 }
 
 /** The dictionary word a spelling finding names: a possessive is dropped,

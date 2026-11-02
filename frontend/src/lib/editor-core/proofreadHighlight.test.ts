@@ -8,10 +8,14 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { undo } from "@tiptap/pm/history";
 import { proseStarterKit } from "./proseStarterKit";
 import { TodoAnchor } from "./proseMarks";
-import { MARK_CLASS, ProofreadHighlight, applyFix, dictionaryWord, findingAt, proofreadFindings, ruleLabel } from "./proofreadHighlight";
+import { MARK_CLASS, ProofreadHighlight, applyFix, dictionaryWord, findingAt, proofreadFindings } from "./proofreadHighlight";
+import { ruleLabel } from "@/lib/proofread/ruleLabel";
 import type { Finding } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
 import type { ProofreadingSetup } from "@/lib/types";
+
+/** What a layer's own file says: nothing. */
+const own = { words: [] as string[], rules: {} as Record<string, boolean>, dialect: null };
 
 /** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix),
  *  both under rule `ruleId`. */
@@ -60,10 +64,10 @@ function fakeLens(ruleId = "Fake") {
       rule_layers: {},
       dialect: "american",
       layers: [
-        { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false },
-        { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false },
-        { id: "world", label: "Honorverse", is_machine: false, is_library: false, is_root: false },
-        { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true },
+        { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false, ...own },
+        { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false, ...own },
+        { id: "world", label: "Honorverse", is_machine: false, is_library: false, is_root: false, ...own },
+        { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true, ...own },
       ],
       ignored: {},
     } as ProofreadingSetup | null,

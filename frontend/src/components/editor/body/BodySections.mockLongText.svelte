@@ -13,9 +13,10 @@
     onChange?: (value: string) => void;
     neighbours?: (() => unknown) | null;
     onEditorReady?: (editor: unknown, phase: "ready" | "destroy") => void;
+    proofreadNodeId?: string | null;
   }
-  let { value = "", ariaLabel = "", onChange }: Props = $props();
+  let { value = "", ariaLabel = "", onChange, proofreadNodeId = null }: Props = $props();
 </script>
 
-<div class="mock-long-text" data-testid="mock-long-text" aria-label={ariaLabel}>{value}</div>
+<div class="mock-long-text" data-testid="mock-long-text" aria-label={ariaLabel} data-proofread-node={proofreadNodeId ?? ""}>{value}</div>
 <button type="button" hidden data-testid="mock-long-text-emit" aria-label="Emit edit" onclick={() => onChange?.("edited")}></button>

@@ -464,6 +464,39 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     expect(screen.queryByPlaceholderText("Add a synopsis…")).not.toBeInTheDocument();
   });
 
+  it("saves on a blur to outside the page (another window) but keeps the box open, and saves once", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "old" }, acts, "card_x4");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "typed then alt-tab" } });
+    await fireEvent.focusOut(box, { relatedTarget: null });
+    expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x4", "typed then alt-tab");
+    expect(screen.getByPlaceholderText("Add a synopsis…")).toBe(box);
+    await leave();
+    expect(acts.onEditSynopsis).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends the edit when focus moves into one of the app's own portaled popovers", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "old" }, acts, "card_x5");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "into a picker" } });
+    const popover = document.createElement("div");
+    popover.setAttribute("data-app-portal", "");
+    const field = document.createElement("input");
+    popover.append(field);
+    document.body.append(popover);
+    try {
+      await fireEvent.focusOut(box, { relatedTarget: field });
+      expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x5", "into a picker");
+      expect(screen.queryByPlaceholderText("Add a synopsis…")).not.toBeInTheDocument();
+    } finally {
+      popover.remove();
+    }
+  });
+
   it("saves a synopsis still being edited when the card unmounts", async () => {
     const acts = actions();
     const { unmount } = renderWithActions({ synopsis: "old" }, acts, "card_x3");

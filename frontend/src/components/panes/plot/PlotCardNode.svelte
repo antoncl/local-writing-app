@@ -234,22 +234,31 @@
     }
   }
 
+  // What this edit last stored, so a repeated save signal (a blur, then the leave)
+  // sends nothing new. TRIMMED: the projection's synopsis is the raw card body, which
+  // the backend stores with a trailing newline, so a plain `!==` would treat every
+  // no-op open/close as a change and re-save forever.
+  let savedSynopsis = "";
   async function startEdit() {
     if (!actions) return;
     draft = data.synopsis;
+    savedSynopsis = data.synopsis.trim();
     editing = true;
     await tick();
     textarea?.focus();
   }
-  function commitEdit() {
-    editing = false;
+  function saveEdit() {
     // Read the box itself: a writing assistant may set its value without the
     // `input` event `bind:value` follows (#2647).
     const next = (textarea?.value ?? draft).trim();
-    // Compare against the TRIMMED body: the projection's synopsis is the raw card
-    // body, which the backend stores with a trailing newline, so a plain `!==` would
-    // treat every no-op open/close as a change and re-save forever.
-    if (actions && id && next !== data.synopsis.trim()) actions.onEditSynopsis(id, next);
+    if (!actions || !id || next === savedSynopsis) return;
+    savedSynopsis = next;
+    actions.onEditSynopsis(id, next);
+  }
+  function commitEdit() {
+    if (!editing) return;
+    saveEdit();
+    editing = false;
   }
   // Escape cancels: reset the draft to the saved body and leave edit mode, so
   // nothing commits.
@@ -263,20 +272,28 @@
   let titleEditing = $state(false);
   let titleDraft = $state("");
   let titleInput = $state<HTMLInputElement | null>(null);
+  let savedTitle = "";
 
   async function startTitleEdit() {
     if (!actions) return;
     titleDraft = data.title;
+    savedTitle = data.title;
     titleEditing = true;
     await tick();
     titleInput?.select();
   }
-  function commitTitle() {
-    titleEditing = false;
+  function saveTitle() {
     const next = (titleInput?.value ?? titleDraft).trim();
     // A card title must be non-empty (the backend rejects ""), so an emptied name
     // reverts to the saved title; otherwise save only a real change.
-    if (actions && id && next && next !== data.title) actions.onEditTitle(id, next);
+    if (!actions || !id || !next || next === savedTitle) return;
+    savedTitle = next;
+    actions.onEditTitle(id, next);
+  }
+  function commitTitle() {
+    if (!titleEditing) return;
+    saveTitle();
+    titleEditing = false;
   }
   // Escape cancels: reset the draft and leave edit mode, so nothing commits.
   function cancelTitle() {
@@ -286,8 +303,8 @@
   // An edit only ends when the writer leaves for the app's own UI (leaveOnAppExit),
   // so a card unmounted mid-edit (pane closed, board re-rendered) saves what's typed.
   onDestroy(() => {
-    if (editing) commitEdit();
-    if (titleEditing) commitTitle();
+    commitEdit();
+    commitTitle();
   });
 </script>
 
@@ -329,7 +346,7 @@
           bind:value={titleDraft}
           class="card-title-edit nodrag nopan"
           placeholder="Card name"
-          use:leaveOnAppExit={commitTitle}
+          use:leaveOnAppExit={{ save: saveTitle, leave: commitTitle }}
           onkeydown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -366,7 +383,7 @@
         bind:value={draft}
         class="card-synopsis-edit nodrag nopan"
         placeholder={data.attached ? "No summary yet" : "Add a synopsis…"}
-        use:leaveOnAppExit={commitEdit}
+        use:leaveOnAppExit={{ save: saveEdit, leave: commitEdit }}
         onkeydown={(e) => {
           if (e.key === "Escape") cancelEdit();
         }}

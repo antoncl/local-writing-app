@@ -27,6 +27,17 @@ describe("isAppTarget (#2647)", () => {
     expect(isAppTarget(option, [option, host, document.body])).toBe(false);
   });
 
+  it("counts the app's own popover portaled to <body>, outside the mount root", () => {
+    const app = document.createElement("div");
+    app.id = "app";
+    const popover = document.createElement("div");
+    popover.setAttribute("data-app-portal", "");
+    const option = document.createElement("button");
+    popover.append(option);
+    document.body.append(app, popover);
+    expect(isAppTarget(option)).toBe(true);
+  });
+
   it("does not count a missing target", () => {
     expect(isAppTarget(null)).toBe(false);
   });

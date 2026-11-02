@@ -14,7 +14,12 @@
 // outside-click handler must locate it by reference or class (it no longer lives
 // under the trigger's anchor). Svelte tracks DOM by reference, so reparenting is
 // safe; `destroy` runs on `{#if}`-close or component unmount.
+/** Marks a portaled node as the app's own UI, though it sits outside `#app`
+ *  (read by inlineEdit.ts's `isAppTarget`). */
+export const APP_PORTAL_ATTR = "data-app-portal";
+
 export function portalToBody(node: HTMLElement) {
+  node.setAttribute(APP_PORTAL_ATTR, "");
   document.body.appendChild(node);
   return { destroy: () => node.remove() };
 }

@@ -40,8 +40,7 @@
     if (!projectOpen) return;
     void (async () => {
       try {
-        const [catalog] = await Promise.all([proofreading.catalog(), proofreading.refreshSetup()]);
-        groups = catalog;
+        groups = await proofreading.catalog();
       } catch (err) {
         loadError = err instanceof Error ? err.message : String(err);
       }
@@ -71,9 +70,13 @@
 
   function onDialect(event: Event): void {
     if (!layer) return;
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    const dialect = value === "" ? null : (value as ProofreadingDialect);
-    void write("dialect", () => proofreading.setDialect(dialect, layer.id));
+    const select = event.currentTarget as HTMLSelectElement;
+    const dialect = select.value === "" ? null : (select.value as ProofreadingDialect);
+    // The select is not bound: after the write it shows what the file holds,
+    // so a failed write doesn't leave the unsaved choice on screen.
+    void write("dialect", () => proofreading.setDialect(dialect, layer.id)).then(() => {
+      select.value = layer?.dialect ?? "";
+    });
   }
 </script>
 

@@ -51,7 +51,7 @@
 {#each groups as group (group.label)}
   {@const open = forceOpen || opened.has(group.label)}
   <div class="group">
-    <button type="button" class="group-head" aria-expanded={open} onclick={() => toggle(group.label)}>
+    <button type="button" class="group-head" aria-expanded={open} disabled={forceOpen} onclick={() => toggle(group.label)}>
       <span class="caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
       <span class="group-label">{group.label}</span>
       <span class="count">{group.rules.length}</span>
@@ -100,6 +100,11 @@
     color: var(--text-1);
     text-align: left;
     padding: 6px 2px;
+  }
+  /* While filtering every group with matches is open: the head is a label. */
+  .group-head:disabled {
+    cursor: default;
+    color: var(--text-1);
   }
 
   .group-label {

@@ -202,6 +202,10 @@ export class ProofreadingController implements ProofreadLens {
       this.notify();
       return;
     }
+    // Set here, not in `start`: a start the settings tab made while the lens
+    // was off shows nothing on the lens.
+    this.status = "loading";
+    this.error = null;
     void this.start();
   }
 
@@ -266,15 +270,12 @@ export class ProofreadingController implements ProofreadLens {
     await this.load(() => this.deps.backend.removeWord(word, layerId));
   }
 
-  /** Settings tab: read the open project's setup again. */
-  async refreshSetup(): Promise<void> {
-    await this.refresh();
-  }
-
-  /** Settings tab: Harper's rules in its groups. Starts the engine if need be,
-   *  without switching the lens on. */
+  /** Settings tab: Harper's rules in its groups, with the setup read fresh.
+   *  Starts the engine if need be (that start reads the setup), without
+   *  switching the lens on. */
   async catalog(): Promise<RuleGroup[]> {
-    await this.start();
+    if (this.engine) await this.refresh();
+    else await this.start();
     const engine = this.engine;
     if (!engine) throw new Error(this.error ?? "the checker is not running");
     return engine.catalog();
@@ -293,8 +294,6 @@ export class ProofreadingController implements ProofreadLens {
   private start(): Promise<void> {
     if (this.engine) return Promise.resolve();
     if (this.loading) return this.loading;
-    this.status = "loading";
-    this.error = null;
     this.loading = (async () => {
       try {
         this.engine = await withTimeout(this.deps.loadEngine(), this.deps.startTimeoutMs);
@@ -321,7 +320,8 @@ export class ProofreadingController implements ProofreadLens {
         this.words.reset();
         this.config.reset();
         this.engine = null;
-        this.status = "error";
+        // A start for the settings tab alone fails there, not on the lens.
+        this.status = this.on ? "error" : "off";
         this.error = err instanceof Error ? err.message : String(err);
         this.on = false;
       } finally {

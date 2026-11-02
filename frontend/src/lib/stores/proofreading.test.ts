@@ -348,9 +348,17 @@ describe("ProofreadingController", () => {
   });
 
   it("starts the engine for the rule catalog without switching the lens on", async () => {
-    const { lens, loadEngine, engine } = setup();
-    const groups = await lens.catalog();
+    const { lens, loadEngine, engine, backend } = setup();
+    const loading = lens.catalog();
+    // The lens shows nothing of a start it didn't ask for.
+    expect(lens.status).toBe("off");
+    const groups = await loading;
     expect(groups.map((g) => g.label)).toEqual(["Spelling"]);
+    // The start's own read is the setup read: one request, not two.
+    expect(backend.read).toHaveBeenCalledTimes(1);
+    // A later open reads it fresh.
+    await lens.catalog();
+    expect(backend.read).toHaveBeenCalledTimes(2);
     expect(engine.catalog).toHaveBeenCalled();
     expect(loadEngine).toHaveBeenCalledTimes(1);
     expect(lens.on).toBe(false);
@@ -374,7 +382,8 @@ describe("ProofreadingController", () => {
       startTimeoutMs: 1000,
     });
     await expect(lens.catalog()).rejects.toThrow("no binary");
-    expect(lens.status).toBe("error");
+    // It fails in the settings tab, not on the lens's button.
+    expect(lens.status).toBe("off");
   });
 
   it("reports a start that never finishes instead of loading forever", async () => {

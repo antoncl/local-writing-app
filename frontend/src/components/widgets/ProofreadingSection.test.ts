@@ -21,7 +21,6 @@ const mock = vi.hoisted(() => ({
   proofreading: {
     setup: null as unknown,
     catalog: vi.fn(),
-    refreshSetup: vi.fn(),
     setRule: vi.fn(),
     setDialect: vi.fn(),
     removeWord: vi.fn(),
@@ -49,7 +48,6 @@ beforeEach(() => {
   mock.proofreading.catalog.mockResolvedValue([
     { label: "Style", description: "", rules: [{ name: "Hedging", label: "Hedging", description: "Avoid hedges.", default: true }] },
   ]);
-  mock.proofreading.refreshSetup.mockResolvedValue(undefined);
   mock.proofreading.removeWord.mockResolvedValue(undefined);
 });
 
@@ -81,6 +79,27 @@ describe("ProofreadingSection", () => {
     render(ProofreadingSection, { props: { projectOpen: true } });
     await fireEvent.click(await screen.findByRole("button", { name: "Remove Zorn" }));
     expect(mock.proofreading.removeWord).toHaveBeenCalledWith("Zorn", "book");
+  });
+
+  it("shows the saved dialect again after a write fails", async () => {
+    mock.proofreading.setDialect.mockRejectedValue(new Error("disk full"));
+    render(ProofreadingSection, { props: { projectOpen: true } });
+    const dialect = (await screen.findByLabelText("Dialect")) as HTMLSelectElement;
+    await fireEvent.change(dialect, { target: { value: "british" } });
+    expect(await screen.findByText("disk full")).toBeInTheDocument();
+    expect(dialect.value).toBe("");
+  });
+
+  it("opens every matching group while searching, with heads that don't toggle", async () => {
+    render(ProofreadingSection, { props: { projectOpen: true } });
+    const head = await screen.findByRole("button", { name: /Style/ });
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.input(screen.getByLabelText("Search rules"), { target: { value: "hedg" } });
+    const open = screen.getByRole("button", { name: /Style/ });
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+    expect(open).toBeDisabled();
+    await fireEvent.input(screen.getByLabelText("Search rules"), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: /Style/ }).getAttribute("aria-expanded")).toBe("false");
   });
 
   it("shows a failed write inline", async () => {

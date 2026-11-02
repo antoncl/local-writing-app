@@ -88,8 +88,12 @@ function liveBlock(state: EditorState, deco: Decoration): BlockText | null {
 }
 
 /** Apply `fix` of the finding decorated by `deco`. False, changing nothing,
- *  when the text under it moved or changed since the finding was made. */
+ *  when the editor is read-only or the text under it moved or changed since
+ *  the finding was made. */
 export function applyFix(view: EditorView, deco: Decoration, fix: FindingFix): boolean {
+  // A dispatch is not stopped by `editable: false`: a read-only body (an
+  // inherited lore entry, a parked snapshot) must not take an edit.
+  if (!view.editable) return false;
   const block = liveBlock(view.state, deco);
   if (!block) return false;
   const { from, to } = docRange(block, fix.from, fix.to);
@@ -127,6 +131,8 @@ const SPELL_CHECK_RULE = "SpellCheck";
 type SectionContext = {
   lens: ProofreadLens;
   nodeId: string | null;
+  /** False in a read-only editor: its fixes are not offered. */
+  editable: boolean;
   fix: (fix: FindingFix) => void;
   ignoreHere: (nodeId: string) => Promise<void>;
 };
@@ -137,7 +143,7 @@ type SectionContext = {
  *  project, and ignore this one spot. */
 export function findingSections(finding: Finding, problem: string, ctx: SectionContext): PopoverSection[] {
   const sections: PopoverSection[] = [
-    { heading: "", choices: finding.fixes.map((fix) => ({ label: fix.label, run: () => ctx.fix(fix) })) },
+    { heading: "", choices: ctx.editable ? finding.fixes.map((fix) => ({ label: fix.label, run: () => ctx.fix(fix) })) : [] },
   ];
   const setup = ctx.lens.setup;
   if (!setup) return sections;
@@ -275,6 +281,7 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
             const sections = findingSections(finding, (deco.spec as FindingSpec).problem, {
               lens,
               nodeId: options.nodeId(),
+              editable: view.editable,
               fix,
               ignoreHere,
             });

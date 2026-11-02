@@ -49,6 +49,7 @@
   import { readAloud, speechAvailable } from "@/lib/stores/readAloud.svelte";
   import { ProofreadHighlight } from "@/lib/editor-core/proofreadHighlight";
   import { proofreadable } from "@/lib/proofread/surfaces";
+  import { readOnlyInPlace } from "@/lib/utils/provenance";
   import { proofreading, trackProofreadNames } from "@/lib/stores/proofreading.svelte";
   import { handleSectionArrow } from "@/lib/editor-core/sectionKeyboardBridge";
   import { editorCallback } from "@/lib/editor-core/editorCallback";
@@ -1139,7 +1140,9 @@
         ProofreadHighlight.configure({
           lens: proofreading,
           enabled: () => proofreadable(documentKind),
-          nodeId: () => scene?.id ?? null,
+          // A Library document (a built-in plot template) is not in a project,
+          // so it can't keep an ignore-here (ADR-0102 §4).
+          nodeId: () => (readOnlyInPlace(scene) ? null : (scene?.id ?? null)),
         }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],

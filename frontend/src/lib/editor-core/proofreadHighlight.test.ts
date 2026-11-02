@@ -240,6 +240,18 @@ describe("ProofreadHighlight", () => {
     expect(editor.state.doc.textContent).toBe("I saw txh cat.");
   });
 
+  it("never edits a read-only editor: no fix offered, none applied (ADR-0102 Amendment 3)", async () => {
+    const { editor } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    editor.setEditable(false);
+    const at = editor.state.doc.textContent.indexOf("teh") + 1;
+    const deco = findingAt(editor.state, at)!;
+    expect(applyFix(editor.view, deco, proofreadFindings(editor.state)[0].fixes[0])).toBe(false);
+    expect(editor.state.doc.textContent).toBe("I saw teh cat.");
+    // The ignores stay: they write files, not the text.
+    expect(sections(openPopover(editor, "teh"))[""]).toEqual(["Ignore here"]);
+  });
+
   it("offers the three permanent ignores, the dictionary for a spelling finding only", async () => {
     const { editor } = setup([text("I saw teh cat."), text("You recieve it.")]);
     await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh", "recieve"]));

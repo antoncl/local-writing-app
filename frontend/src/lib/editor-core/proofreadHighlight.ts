@@ -126,6 +126,9 @@ export function dictionaryWord(problem: string): string {
   return problem.replace(/['’]s?$/u, "") || problem;
 }
 
+/** Harper's spelling rule: never switched off from a single finding. */
+const SPELL_CHECK_RULE = "SpellCheck";
+
 type SectionContext = {
   lens: ProofreadLens;
   nodeId: string | null;
@@ -154,16 +157,20 @@ export function findingSections(finding: Finding, problem: string, ctx: SectionC
       })),
     });
   }
-  const scopes = [
-    { layer: writable.find((layer) => layer.is_machine), label: "On this machine" },
-    { layer: writable.find((layer) => layer.is_root), label: "In this project" },
-  ];
-  sections.push({
-    heading: `Stop checking “${ruleLabel(finding.ruleId)}”`,
-    choices: scopes.flatMap(({ layer, label }) =>
-      layer ? [{ label, run: () => ctx.lens.disableRule(finding.ruleId, layer.id) }] : [],
-    ),
-  });
+  // Not for spell checking itself: one click beside "Add to dictionary"
+  // would switch all spelling off. That stays a settings decision (slice 3).
+  if (finding.ruleId !== SPELL_CHECK_RULE) {
+    const scopes = [
+      { layer: writable.find((layer) => layer.is_machine), label: "On this machine" },
+      { layer: writable.find((layer) => layer.is_root), label: "In this project" },
+    ];
+    sections.push({
+      heading: `Stop checking “${ruleLabel(finding.ruleId)}”`,
+      choices: scopes.flatMap(({ layer, label }) =>
+        layer ? [{ label, run: () => ctx.lens.disableRule(finding.ruleId, layer.id) }] : [],
+      ),
+    });
+  }
   const nodeId = ctx.nodeId;
   if (nodeId) sections.push({ heading: "", choices: [{ label: "Ignore here", run: () => ctx.ignoreHere(nodeId) }] });
   return sections;

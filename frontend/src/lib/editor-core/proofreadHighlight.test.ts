@@ -13,8 +13,9 @@ import type { Finding } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
 import type { ProofreadingSetup } from "@/lib/types";
 
-/** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix). */
-function fakeLens() {
+/** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix),
+ *  both under rule `ruleId`. */
+function fakeLens(ruleId = "Fake") {
   const listeners = new Set<() => void>();
   const cache = new Map<string, Finding[]>();
   let accepted = new Set<string>();
@@ -29,7 +30,7 @@ function fakeLens() {
         from,
         to,
         kind: m[0] === "teh" ? "Spelling" : "Grammar",
-        ruleId: "Fake",
+        ruleId,
         message: `Check “${m[0]}”.`,
         fixes: m[0] === "teh" ? [{ label: "the", from, to, insert: "the" }] : [],
       });
@@ -272,6 +273,14 @@ describe("ProofreadHighlight", () => {
     await vi.waitFor(() => expect(popover.querySelector(".proofread-popover-error")?.textContent).toContain("disk full"));
     expect(popover.isConnected).toBe(true);
     expect(Array.from(popover.querySelectorAll("button")).every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("never offers to switch spell checking itself off from one finding", async () => {
+    const { editor } = setup([text("I saw teh cat.")], fakeLens("SpellCheck"));
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    const offered = sections(openPopover(editor, "teh"));
+    expect(Object.keys(offered).some((h) => h.startsWith("Stop checking"))).toBe(false);
+    expect(Object.keys(offered).some((h) => h.startsWith("Add"))).toBe(true);
   });
 
   it("offers no ignore-here without an open node, and no ignores without a setup", async () => {

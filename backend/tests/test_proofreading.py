@@ -126,6 +126,16 @@ class ProofreadingTests(unittest.TestCase):
         # The node index reads that machine layer as empty, not as an error.
         self.service._build_node_index(self.root)
 
+    def test_a_write_that_changes_nothing_creates_no_file(self) -> None:
+        machine_dir = ms_service.assistants_dir().parent
+        machine = self._layer(machine=True)
+        self.service.set_proofreading_rule(ProofreadingRuleRequest(rule="OxfordComma", enabled=None, layer_id=machine))
+        self.service.remove_proofreading_word(ProofreadingWordRequest(word="Absent", layer_id=machine))
+        self.service.set_proofreading_dialect(ProofreadingDialectRequest(dialect=None, layer_id=self._layer(folder=self.root)))
+        self.assertFalse((machine_dir / "proofreading.yaml").exists())
+        self.assertFalse((self.root / "proofreading.yaml").exists())
+        self.assertIsNone(self.service.machine_layer())
+
     # ---------- refusals ----------
 
     def test_the_library_is_read_only(self) -> None:
@@ -148,14 +158,16 @@ class ProofreadingTests(unittest.TestCase):
     def test_ignore_here_is_saved_by_node_and_drops_deleted_nodes(self) -> None:
         scene = self.service.create_scene(CreateSceneRequest(title="Opening"))
         (self.root / "proofreading.ignored.yaml").write_text(
-            "ignored:\n  manuscript_gone:\n    - '1'\n", encoding="utf-8"
+            "note: kept\nignored:\n  manuscript_gone:\n    - '1'\n", encoding="utf-8"
         )
         setup = self.service.ignore_proofreading_spot(
             ProofreadingIgnoreRequest(node_id=scene.id, hashes=["18446744073709551615", "7"])
         )
         self.assertEqual(setup.ignored, {scene.id: ["18446744073709551615", "7"]})
+        # The other key stays as written; the deleted node's entry goes.
         self.assertEqual(
-            self._file(self.root, "proofreading.ignored.yaml"), {"ignored": {scene.id: ["18446744073709551615", "7"]}}
+            self._file(self.root, "proofreading.ignored.yaml"),
+            {"note": "kept", "ignored": {scene.id: ["18446744073709551615", "7"]}},
         )
         # The same spot twice is one entry per hash.
         setup = self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id=scene.id, hashes=["7", "7"]))

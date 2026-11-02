@@ -25,6 +25,7 @@ resolve through the MRO.
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -162,7 +163,13 @@ class ProofreadingMixin:
     def _update_proofreading_file(self, layer: IndexLayer, change) -> None:
         path = layer.folder / PROOFREADING_FILENAME
         data = self._read_yaml(path)
+        before = copy.deepcopy(data)
         change(data)
+        # Nothing changed (an absent word removed, a rule already as asked):
+        # write nothing, so no layer gains an empty file — a machine file,
+        # even an empty one, makes the machine dir a layer of every walk.
+        if data == before:
+            return
         self._write_yaml(path, data)
 
     def add_proofreading_word(self, request: ProofreadingWordRequest) -> ProofreadingSetup:
@@ -240,11 +247,14 @@ class ProofreadingMixin:
             raise ProjectServiceError("Only a node in a project can have an ignore-here.", 409)
         folder = layer.folder if layer is not None else root
         path = folder / PROOFREADING_IGNORED_FILENAME
-        ignored = _ignored_of(self._read_yaml(path))
+        data = self._read_yaml(path)
+        ignored = _ignored_of(data)
         hashes = ignored.setdefault(request.node_id, [])
         hashes.extend(h for h in dict.fromkeys(request.hashes) if h not in hashes)
         # A deleted node's hashes go with the next write here, instead of a
         # hook on every delete path (§6).
         ignored = {node_id: h for node_id, h in ignored.items() if node_id in index.by_id}
-        self._write_yaml(path, {"ignored": ignored})
+        # Every other key in the file is kept as written.
+        data["ignored"] = ignored
+        self._write_yaml(path, data)
         return self.read_proofreading()

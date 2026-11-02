@@ -88,6 +88,7 @@ function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
 function setup(lore: LoreEntrySummary[] = [], files: Partial<ProofreadingSetup> = {}) {
   const { engine, log } = fakeEngine();
   const backend = fakeBackend(files);
+  const project = { root: "D:/writing/book01" as string | null };
   let pushLore: (entries: LoreEntrySummary[]) => void = () => undefined;
   const loadEngine = vi.fn(async () => engine);
   const lens = new ProofreadingController({
@@ -98,9 +99,10 @@ function setup(lore: LoreEntrySummary[] = [], files: Partial<ProofreadingSetup> 
       return () => undefined;
     },
     backend,
+    projectRoot: () => project.root,
     startTimeoutMs: 1000,
   });
-  return { lens, engine, log, backend, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
+  return { lens, engine, log, backend, project, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
 }
 
 // Generous: the fake engine waits per step, and Windows timers round up to ~15 ms.
@@ -177,6 +179,7 @@ describe("ProofreadingController", () => {
       },
       subscribeLore: () => () => undefined,
       backend: fakeBackend(),
+      projectRoot: () => null,
       startTimeoutMs: 1000,
     });
     lens.toggle();
@@ -212,6 +215,7 @@ describe("ProofreadingController", () => {
         return () => subscriptions--;
       },
       backend: fakeBackend(),
+      projectRoot: () => null,
       startTimeoutMs: 1000,
     });
     lens.toggle();
@@ -282,14 +286,36 @@ describe("ProofreadingController", () => {
     expect(backend.ignore).not.toHaveBeenCalled();
   });
 
-  it("reads the setup again when the lore roster changes, as on a project switch", async () => {
-    const { lens, backend, pushLore } = setup();
+  it("reads the setup again on a project switch, not on a lore edit", async () => {
+    const { lens, backend, project, pushLore } = setup();
     lens.toggle();
     await settle();
     expect(backend.read).toHaveBeenCalledTimes(1);
     pushLore([entry("Kael")]);
     await settle();
+    expect(backend.read).toHaveBeenCalledTimes(1);
+    project.root = "D:/writing/book02";
+    pushLore([]);
+    await settle();
     expect(backend.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("never lets an older setup answer undo a newer one", async () => {
+    const { lens, backend, project, pushLore } = setup();
+    lens.toggle();
+    await settle();
+    // A read is sent (a project switch), and answers only after a write.
+    let answerRead: (setup: ProofreadingSetup) => void = () => undefined;
+    const stale = await backend.read();
+    backend.read.mockImplementationOnce(() => new Promise((resolve) => (answerRead = resolve)));
+    project.root = "D:/writing/book02";
+    pushLore([]);
+    await lens.addWord("Zorn", "book");
+    expect(lens.setup?.words).toEqual(["Zorn"]);
+    answerRead(stale);
+    await settle();
+    expect(lens.setup?.words).toEqual(["Zorn"]);
+    expect(await lens.lint("Zorn")).toEqual([]);
   });
 
   it("reports a start that never finishes instead of loading forever", async () => {
@@ -297,6 +323,7 @@ describe("ProofreadingController", () => {
       loadEngine: () => new Promise<never>(() => undefined),
       subscribeLore: () => () => undefined,
       backend: fakeBackend(),
+      projectRoot: () => null,
       startTimeoutMs: 10,
     });
     lens.toggle();

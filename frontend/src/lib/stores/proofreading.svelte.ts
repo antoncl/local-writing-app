@@ -18,6 +18,7 @@
 // cached by text and dropped whenever the words or the config change.
 import { untrack } from "svelte";
 import { api } from "@/lib/api";
+import { scopeHeaders } from "@/lib/api/core";
 import { loreEntriesStore } from "@/lib/stores/lore";
 import { autoDictionary, withPossessives } from "@/lib/proofread/dictionary";
 import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
@@ -59,6 +60,8 @@ export interface ProofreadingDeps {
   /** Subscribe to the lore roster; returns the unsubscribe. */
   subscribeLore: (run: (entries: LoreEntrySummary[]) => void) => () => void;
   backend: ProofreadingBackend;
+  /** The open project's root, to tell a project switch from a lore edit. */
+  projectRoot: () => string | null;
   /** How long the engine may take to start before the lens reports an error. */
   startTimeoutMs: number;
 }
@@ -72,6 +75,7 @@ const defaultDeps: ProofreadingDeps = {
     setRule: (rule, enabled, layerId) => api.setProofreadingRule(rule, enabled, layerId),
     ignore: (nodeId, hashes) => api.ignoreProofreadingSpot(nodeId, hashes),
   },
+  projectRoot: () => scopeHeaders()["X-Project-Root"] ?? null,
   // A binary that fails to load inside Harper's worker never rejects its setup
   // promise: without a limit the lens would say "loading" forever.
   startTimeoutMs: 60_000,
@@ -159,6 +163,12 @@ export class ProofreadingController implements ProofreadLens {
   /** The engine's queue: words and config are each two or more engine calls,
    *  and no lint may run between them. Never rejects. */
   private engineWork: Promise<void> = Promise.resolve();
+  /** Setup requests are numbered when sent; an answer older than one already
+   *  applied is dropped, so a read sent before a write can't undo it. */
+  private setupSent = 0;
+  private setupApplied = 0;
+  /** The project the loaded setup belongs to. */
+  private setupRoot: string | null = null;
 
   constructor(private deps: ProofreadingDeps = defaultDeps) {
     const queue = (step: () => Promise<void>) => this.queue(step);
@@ -231,17 +241,17 @@ export class ProofreadingController implements ProofreadLens {
   }
 
   async addWord(word: string, layerId: string): Promise<void> {
-    await this.apply(await this.deps.backend.addWord(word, layerId));
+    await this.load(() => this.deps.backend.addWord(word, layerId));
   }
 
   async disableRule(rule: string, layerId: string): Promise<void> {
-    await this.apply(await this.deps.backend.setRule(rule, false, layerId));
+    await this.load(() => this.deps.backend.setRule(rule, false, layerId));
   }
 
   async ignoreHere(nodeId: string, text: string, finding: Finding): Promise<void> {
     const hashes = (await this.engine?.hashesOf(text, finding)) ?? [];
     if (hashes.length === 0) throw new Error("This finding can't be ignored here.");
-    await this.apply(await this.deps.backend.ignore(nodeId, hashes));
+    await this.load(() => this.deps.backend.ignore(nodeId, hashes));
   }
 
   private notify(): void {
@@ -262,7 +272,8 @@ export class ProofreadingController implements ProofreadLens {
           // The new names are known now: load them before anything else lints.
           this.reloadWords().catch(() => undefined);
           // A project switch replaces the roster: read that project's setup.
-          this.refresh().catch(() => undefined);
+          // A lore edit within the project doesn't change it.
+          if (this.deps.projectRoot() !== this.setupRoot) this.refresh().catch(() => undefined);
         });
         starting = false;
         await this.refresh();
@@ -288,10 +299,17 @@ export class ProofreadingController implements ProofreadLens {
 
   /** Read the open project's setup and load it. */
   private async refresh(): Promise<void> {
-    await this.apply(await this.deps.backend.read());
+    this.setupRoot = this.deps.projectRoot();
+    await this.load(() => this.deps.backend.read());
   }
 
-  private async apply(setup: ProofreadingSetup): Promise<void> {
+  /** Send a setup request and load its answer, unless an answer to a later
+   *  request was loaded first. */
+  private async load(request: () => Promise<ProofreadingSetup>): Promise<void> {
+    const sent = ++this.setupSent;
+    const setup = await request();
+    if (sent < this.setupApplied) return;
+    this.setupApplied = sent;
     this.setup = setup;
     await Promise.all([this.reloadConfig(), this.reloadWords()]);
   }
@@ -342,6 +360,9 @@ export class ProofreadingController implements ProofreadLens {
     this.config.reset();
     this.engineWork = Promise.resolve();
     this.setup = null;
+    this.setupSent = 0;
+    this.setupApplied = 0;
+    this.setupRoot = null;
     this.on = false;
     this.status = "off";
     this.error = null;

@@ -345,6 +345,9 @@
           bind:this={titleInput}
           bind:value={titleDraft}
           class="card-title-edit nodrag nopan"
+          data-gramm="false"
+          data-gramm_editor="false"
+          data-enable-grammarly="false"
           placeholder="Card name"
           use:leaveOnAppExit={{ save: saveTitle, leave: commitTitle }}
           onkeydown={(e) => {
@@ -378,10 +381,16 @@
     </div>
 
     {#if editing}
+      <!-- Writing assistants (ProWritingAid, Grammarly) are told to stay out of the
+           card's edit boxes (#2647): on the zoomed canvas their underlines land in the
+           wrong place and Rephrase does nothing. Checking works in the card's editor. -->
       <textarea
         bind:this={textarea}
         bind:value={draft}
         class="card-synopsis-edit nodrag nopan"
+        data-gramm="false"
+        data-gramm_editor="false"
+        data-enable-grammarly="false"
         placeholder={data.attached ? "No summary yet" : "Add a synopsis…"}
         use:leaveOnAppExit={{ save: saveEdit, leave: commitEdit }}
         onkeydown={(e) => {

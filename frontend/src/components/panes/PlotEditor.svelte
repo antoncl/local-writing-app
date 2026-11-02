@@ -67,7 +67,7 @@
   import { deckBoardOps, newCardTarget } from "@/lib/plot/deckBoardOps";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
-  import { chatCascadeLine } from "@/lib/stores/chats";
+  import { undoableChatCascadeLine } from "@/lib/stores/chats";
   import {
     plotlineEntriesStore,
     deletePlotline,
@@ -553,9 +553,10 @@
     if (healed.revealedCardId !== revealedCardId) revealedCardId = healed.revealedCardId;
   });
 
-  // #2347: a delete cascades to the chats about the node — say so in its confirm.
-  function chatLineFor(id: string): string {
-    const line = chatCascadeLine([id]);
+  // #2347: a delete cascades to the chats about the node — say so in its confirm, and
+  // that undo won't bring them back (#2536).
+  function chatLineFor(id: string, what: string): string {
+    const line = undoableChatCascadeLine([id], what);
     return line ? `\n\n${line}` : "";
   }
 
@@ -566,7 +567,7 @@
     const card = projection?.cards.find((c) => c.id === id);
     confirmService.request({
       title: "Delete card",
-      message: `Delete ${card?.title ? `“${card.title}”` : "this card"}? This removes the card from the project. Its scene, if any, is left untouched.${chatLineFor(id)}`,
+      message: `Delete ${card?.title ? `“${card.title}”` : "this card"}? This removes the card from the project. Its scene, if any, is left untouched.${chatLineFor(id, "card")}`,
       confirmLabel: "Delete card",
       destructive: true,
       onConfirm: async () => {
@@ -726,7 +727,7 @@
     const line = plotlines.find((p) => p.id === id);
     confirmService.request({
       title: "Remove plotline",
-      message: `Remove ${line?.title ? `“${line.title}”` : "this plotline"}? Cards on it become Unassigned (their tint clears); their prose is untouched.${chatLineFor(id)}`,
+      message: `Remove ${line?.title ? `“${line.title}”` : "this plotline"}? Cards on it become Unassigned (their tint clears); their prose is untouched.${chatLineFor(id, "plotline")}`,
       confirmLabel: "Remove plotline",
       destructive: true,
       onConfirm: async () => {
@@ -756,7 +757,7 @@
     const arc = projection?.arcs.find((a) => a.id === id);
     confirmService.request({
       title: "Remove character arc",
-      message: `Remove ${arc?.title ? `“${arc.title}”` : "this character arc"}? Cards that fulfilled one of its change-beats lose that link; their prose is untouched.${chatLineFor(id)}`,
+      message: `Remove ${arc?.title ? `“${arc.title}”` : "this character arc"}? Cards that fulfilled one of its change-beats lose that link; their prose is untouched.${chatLineFor(id, "character arc")}`,
       confirmLabel: "Remove character arc",
       destructive: true,
       onConfirm: async () => {

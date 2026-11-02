@@ -6,9 +6,11 @@ vi.mock("@/lib/api", () => ({ api: { listAssistantEntries: vi.fn() } }));
 import { api } from "@/lib/api";
 import {
   assistantEntriesStore,
+  assistantLocalOrderStore,
+  clearAssistants,
   defaultAssistantIdStore,
   refreshAssistantEntries,
-  setAssistantEntries,
+  setAssistantRoster,
 } from "@/lib/stores/assistants";
 
 const A = (id: string, listed: string): AssistantEntrySummary =>
@@ -88,10 +90,33 @@ describe("refreshAssistantEntries stale guard", () => {
     );
 
     const inFlight = refreshAssistantEntries();
-    setAssistantEntries([A("second", "listed"), A("first", "listed")]); // the reorder's response
+    setAssistantRoster({ entries: [A("second", "listed"), A("first", "listed")] }); // the reorder's response
     resolveRefresh({ entries: [A("first", "listed"), A("second", "listed")] }); // the older order
     await inFlight;
 
     expect(get(assistantEntriesStore).map((entry) => entry.id)).toEqual(["second", "first"]);
+  });
+});
+
+// #375: the pane offers "Reset to inherited order" only while the project keeps its
+// own order, so the flag has to travel with every roster that reaches the store.
+describe("assistantLocalOrderStore", () => {
+  it("follows the roster's local_order on a refresh and on a write-through", async () => {
+    vi.mocked(api.listAssistantEntries).mockResolvedValueOnce({ entries: [A("a", "listed")], local_order: true });
+    await refreshAssistantEntries();
+    expect(get(assistantLocalOrderStore)).toBe(true);
+
+    setAssistantRoster({ entries: [A("a", "listed")], local_order: false }); // the reset's response
+    expect(get(assistantLocalOrderStore)).toBe(false);
+
+    setAssistantRoster({ entries: [A("a", "listed")], local_order: true });
+    setAssistantRoster({ entries: [A("a", "listed")] }); // an older backend omits it
+    expect(get(assistantLocalOrderStore)).toBe(false);
+  });
+
+  it("clears with the roster", () => {
+    setAssistantRoster({ entries: [A("a", "listed")], local_order: true });
+    clearAssistants();
+    expect(get(assistantLocalOrderStore)).toBe(false);
   });
 });

@@ -71,9 +71,10 @@
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
+    assistantLocalOrderStore,
     defaultAssistantIdStore,
     refreshAssistantEntries as storeRefreshAssistantEntries,
-    setAssistantEntries,
+    setAssistantRoster,
   } from "@/lib/stores/assistants";
   import {
     hireMachineAssistant,
@@ -528,13 +529,31 @@
   // neither takes a layer id and the pane does no layer arithmetic.
   async function setAssistantOrder(orderedIds: string[]) {
     await run(async () => {
-      setAssistantEntries((await api.reorderAssistants(orderedIds)).entries);
+      setAssistantRoster(await api.reorderAssistants(orderedIds));
     });
   }
 
   async function unlistAssistant(entryId: string) {
     await run(async () => {
-      setAssistantEntries((await api.unlistAssistant(entryId)).entries);
+      setAssistantRoster(await api.unlistAssistant(entryId));
+    });
+  }
+
+  // #375: a drag makes the project's order its own, after which ancestor reorders
+  // never reach it. This is the way back: the project follows its ancestors again.
+  // Confirmed: the project's own order is discarded, and there is no undo for it.
+  function resetAssistantOrder() {
+    confirmService.request({
+      title: "Reset to inherited order",
+      message:
+        "This project's own assistant order is discarded, and it follows the order of its parent folders again. Assistants you un-listed here stay un-listed.",
+      confirmLabel: "Reset order",
+      destructive: true,
+      cannotBeUndone: true,
+      // confirmService runs this through `run()` (its injected onRun).
+      onConfirm: async () => {
+        setAssistantRoster(await api.resetAssistantOrder());
+      },
     });
   }
 
@@ -919,6 +938,9 @@
   {/snippet}
 
   {#snippet assistantsActions()}
+      {#if $assistantLocalOrderStore}
+        <button class="pin-button" type="button" title="Reset to inherited order (this project follows its parent folders' assistant order again)" aria-label="Reset to inherited order" onmousedown={(event) => event.stopPropagation()} onclick={resetAssistantOrder}><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
+      {/if}
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
   {/snippet}
   {#snippet assistantsBody(viewSpec: ViewSpec | undefined)}

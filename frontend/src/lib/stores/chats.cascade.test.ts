@@ -4,7 +4,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
-import { chatCascadeLine, chatSessionsStore, reconcileCascadedChats, withChatCascade } from "@/lib/stores/chats";
+import {
+  chatCascadeLine,
+  chatSessionsStore,
+  reconcileCascadedChats,
+  undoableChatCascadeLine,
+  withChatCascade,
+} from "@/lib/stores/chats";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { deleteCard } from "@/lib/stores/plotBoard";
 import { createEmptyEditorPane, type EditorPaneState, type DocumentRef } from "@/lib/editor-core/editorPaneModel";
@@ -93,6 +99,22 @@ describe("chatCascadeLine", () => {
     const line = chatCascadeLine(["node_1", "node_2"]);
     expect(line).toContain("This also deletes 2 chats about it");
     expect(line).toContain('"Revise it", "chat_b"');
+  });
+});
+
+describe("undoableChatCascadeLine (#2536)", () => {
+  it("adds that undo brings back the node but not its chats", () => {
+    expect(undoableChatCascadeLine(["node_1"], "card")).toBe(
+      'This also deletes 1 chat about it ("Revise it") — the conversation is removed with it. ' +
+        "Undo brings back the card, but not the chat.",
+    );
+    expect(undoableChatCascadeLine(["node_1", "node_2"], "plotline")).toContain(
+      "Undo brings back the plotline, but not the chats.",
+    );
+  });
+
+  it("is null when no chat is about the subjects, so the confirm stays as it was", () => {
+    expect(undoableChatCascadeLine(["node_unrelated"], "card")).toBeNull();
   });
 });
 

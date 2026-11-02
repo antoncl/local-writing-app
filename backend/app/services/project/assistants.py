@@ -179,7 +179,11 @@ class _AssistantOrderMerger(LayerVisitor):
 
 class AssistantEntriesMixin:
     def list_assistant_entries(self) -> AssistantEntryList:
-        return self._assistant_roster(self._build_assistant_index(), self.merged_assistant_order())
+        roster = self._assistant_roster(self._build_assistant_index(), self.merged_assistant_order())
+        roster.local_order = self.root_path is not None and bool(
+            self._read_assistants_order(self._assistant_layer_folder_for_id(None)).ids
+        )
+        return roster
 
     def list_machine_assistant_entries(self) -> AssistantEntryList:
         """The machine layer's own roster (#2444), whether or not a project is open.
@@ -330,6 +334,24 @@ class AssistantEntriesMixin:
         # at this same layer — otherwise the drop would silently do nothing.
         order.excluded = [eid for eid in order.excluded if eid not in seen]
         self._write_assistants_order(folder, order)
+        return self.list_assistant_entries()
+
+    def reset_assistant_order(self) -> AssistantEntryList:
+        """Drop the open project's own ordering, so it follows its ancestors' again (#375).
+
+        The way back from a drag: `reorder_assistant_entries` writes the whole merged
+        sequence into the project's file, after which ancestor reorders never reach it.
+        Clearing `ids` restores "no opinion": `_read_assistants_order` reads empty
+        lists exactly as it reads a missing file. `excluded` stays: un-listing is a
+        separate choice about what shows, not about order.
+        """
+        if self.root_path is None:
+            raise ProjectServiceError("No project is open; there is no inherited order to reset to.", 409)
+        folder = self._assistant_layer_folder_for_id(None)
+        order = self._read_assistants_order(folder)
+        if order.ids:
+            order.ids = []
+            self._write_assistants_order(folder, order)
         return self.list_assistant_entries()
 
     def unlist_assistant_entry(self, request: UnlistAssistantRequest) -> AssistantEntryList:

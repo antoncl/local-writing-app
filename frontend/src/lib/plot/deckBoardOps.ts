@@ -5,7 +5,7 @@
 
 import type { PlaceTo } from "@/lib/api/plot";
 import type { PlotUndoRecorder } from "@/lib/plot/plotCommands";
-import { chatCascadeLine } from "@/lib/stores/chats";
+import { undoableChatCascadeLine } from "@/lib/stores/chats";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { deleteDeck } from "@/lib/stores/decks";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -42,7 +42,7 @@ export function deckBoardOps(
     detach: (id: string): Promise<void> => attempt(() => recorder.detachDeck(id), "Could not detach the deck."),
 
     // Delete a deck — only the deck: its cards go loose and its child decks to the top level (a
-    // realized deck's container stays in the manuscript). Confirmed when it holds anything;
+    // realized deck's container stays in the manuscript). Confirmed when it holds anything or a chat is about it;
     // recorded, so Ctrl+Z recreates it and puts them back.
     remove(id: string): void {
       const projection = getProjection();
@@ -55,11 +55,13 @@ export function deckBoardOps(
         const openPane = editorPanes.panes.find((p) => p.document?.id === id);
         if (openPane) editorPanes.tearDown(openPane.id);
       };
-      if (!holdsSomething && !deck?.realized_container) {
+      // An empty deck deletes without asking, unless chats about it go with it: those are
+      // gone for good (#2347, #2536), so the confirm is never skipped while there are any.
+      const chatLine = undoableChatCascadeLine([id], "deck");
+      if (!holdsSomething && !deck?.realized_container && !chatLine) {
         void run();
         return;
       }
-      const chatLine = chatCascadeLine([id]); // #2347
       confirmService.request({
         title: "Delete deck",
         message: `Delete deck ${deck?.title ? `“${deck.title}”` : "this deck"}? ${

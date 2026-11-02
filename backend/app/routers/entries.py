@@ -135,6 +135,12 @@ def reorder_assistant_entries(project: CurrentProject, request: ReorderAssistant
         return project.reorder_assistant_entries(request)
 
 
+@router.post("/api/assistants/order/reset", response_model=AssistantEntryList)
+def reset_assistant_order(project: CurrentProject) -> AssistantEntryList:
+    with translate_errors():
+        return project.reset_assistant_order()
+
+
 @router.post("/api/assistants/unlist", response_model=AssistantEntryList)
 def unlist_assistant_entry(project: CurrentProject, request: UnlistAssistantRequest) -> AssistantEntryList:
     with translate_errors():

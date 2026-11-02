@@ -36,13 +36,30 @@ export async function refreshChatSessions(): Promise<void> {
 // The sentence a cascading delete's confirm appends: how many roster chats are
 // about ANY of `subjectIds`. Null when none (the confirm stays as it was).
 export function chatCascadeLine(subjectIds: readonly string[]): string | null {
+  return cascadeSentence(chatsAbout(subjectIds));
+}
+
+// The same sentence for a delete that undo can reverse (the plot board's, plotCommands).
+// Undo recreates `what`, but the cascaded chats are gone for good (#2536), so the
+// confirm says so rather than letting undo look complete.
+export function undoableChatCascadeLine(subjectIds: readonly string[], what: string): string | null {
+  const chats = chatsAbout(subjectIds);
+  const line = cascadeSentence(chats);
+  return line && `${line} Undo brings back the ${what}, but not the ${chatNoun(chats.length)}.`;
+}
+
+function chatsAbout(subjectIds: readonly string[]): ChatSessionSummary[] {
   const subjects = new Set(subjectIds);
-  const chats = get(chatSessionsStore).filter((session) => session.subject && subjects.has(session.subject));
+  return get(chatSessionsStore).filter((session) => session.subject && subjects.has(session.subject));
+}
+
+function cascadeSentence(chats: ChatSessionSummary[]): string | null {
   if (chats.length === 0) return null;
   const names = chats.map((chat) => `"${chat.title || "Untitled chat"}"`).join(", ");
-  const noun = chats.length === 1 ? "chat" : "chats";
-  return `This also deletes ${chats.length} ${noun} about it (${names}) — the conversation is removed with it.`;
+  return `This also deletes ${chats.length} ${chatNoun(chats.length)} about it (${names}) — the conversation is removed with it.`;
 }
+
+const chatNoun = (count: number) => (count === 1 ? "chat" : "chats");
 
 // Re-fetch the roster and close the tabs of chats that vanished from it. A FAILED
 // fetch changes nothing and returns [] — diffing against an empty roster would

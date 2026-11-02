@@ -6,9 +6,12 @@
 import { derived, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { activeAssistants } from "@/lib/chat/assistantScope";
-import type { AssistantEntrySummary } from "@/lib/types";
+import type { AssistantEntryList, AssistantEntrySummary } from "@/lib/types";
 
 export const assistantEntriesStore = writable<AssistantEntrySummary[]>([]);
+// The open project holds its own assistant order (#375): the pane then offers
+// "Reset to inherited order". Set with the roster it came with.
+export const assistantLocalOrderStore = writable(false);
 
 // Whether an assistant is in the active roster (vs. un-listed). `listed` is a
 // computed field stamped by the layer traversal (#332/#333); this predicate is
@@ -43,9 +46,10 @@ let latest = 0;
 export async function refreshAssistantEntries(): Promise<void> {
   const seq = ++latest;
   try {
-    const entries = (await api.listAssistantEntries()).entries;
+    const list = await api.listAssistantEntries();
     if (seq !== latest) return; // superseded by a later refresh
-    assistantEntriesStore.set(entries);
+    assistantEntriesStore.set(list.entries);
+    assistantLocalOrderStore.set(list.local_order ?? false);
   } catch {
     // Leave previous list in place.
   }
@@ -58,12 +62,15 @@ export async function refreshAssistantEntries(): Promise<void> {
 // answer over it — e.g. open the Assistants pane (fires a refresh) and reorder
 // at once: without the bump the earlier GET resolved last and reverted the
 // order on screen (review of #1879).
-export function setAssistantEntries(entries: AssistantEntrySummary[]): void {
+// It takes the whole response so `local_order` (#375) can never be dropped on the way.
+export function setAssistantRoster(list: AssistantEntryList): void {
   latest += 1;
-  assistantEntriesStore.set(entries);
+  assistantEntriesStore.set(list.entries);
+  assistantLocalOrderStore.set(list.local_order ?? false);
 }
 
 export function clearAssistants(): void {
   latest += 1;
   assistantEntriesStore.set([]);
+  assistantLocalOrderStore.set(false);
 }

@@ -48,6 +48,10 @@ export const assistantsApi = {
       body: JSON.stringify({ layer_id: layerId ?? null, ordered_ids: orderedIds }),
     });
   },
+  // Drop the open project's own order so it follows its ancestors' again (#375).
+  resetAssistantOrder() {
+    return request<AssistantEntryList>("/assistants/order/reset", { method: "POST" });
+  },
   unlistAssistant(entryId: string, layerId?: string) {
     return request<AssistantEntryList>("/assistants/unlist", {
       method: "POST",

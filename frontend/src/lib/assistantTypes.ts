@@ -36,4 +36,7 @@ export type AssistantEntry = {
 
 export type AssistantEntryList = {
   entries: AssistantEntrySummary[];
+  // The open project holds its own assistant order (#375), so "Reset to inherited
+  // order" has something to undo. Absent from older backends, so read it as optional.
+  local_order?: boolean;
 };

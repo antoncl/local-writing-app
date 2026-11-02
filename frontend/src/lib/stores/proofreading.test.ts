@@ -1,26 +1,33 @@
-// Proofreading (ADR-0102 §1, §5): the lens controller. Off at start; the
-// engine loads once, on the first switch-on; lore names reach the engine
-// before any lint runs; a word change drops what was linted before it.
+// Proofreading (ADR-0102 §1, §4–§5): the lens controller. Off at start; the
+// engine loads once, on the first switch-on; the lore names and the writer's
+// setup (words, rules, dialect, ignores) reach the engine before any lint runs;
+// a change to either drops what was linted before it; the three permanent
+// ignores write through the backend and load its answer.
 import { describe, expect, it, vi } from "vitest";
-import type { Finding, ProofreadEngine } from "@/lib/proofread/findings";
-import type { LoreEntrySummary } from "@/lib/types";
-import { ProofreadingController } from "./proofreading.svelte";
+import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
+import type { LoreEntrySummary, ProofreadingSetup } from "@/lib/types";
+import { ProofreadingController, type ProofreadingBackend } from "./proofreading.svelte";
 
 const entry = (title: string) => ({ id: `lore_${title}`, title, metadata: {} }) as unknown as LoreEntrySummary;
 
-/** An engine that flags every word not in its dictionary, logging its calls. */
+/** The hash the fake engine gives a finding: its text and position. */
+const hashFor = (text: string, finding: Finding) => String(text.length * 1000 + finding.from);
+
+/** An engine that flags every word not in its dictionary (rule "Spell"),
+ *  honouring rule switches and ignore hashes, and logging its calls. */
 function fakeEngine() {
   let words = new Set<string>();
+  let config: EngineConfig = { rules: {}, dialect: "american", ignored: [] };
   const log: string[] = [];
-  const engine: ProofreadEngine = {
+  const engine = {
     id: "fake",
     lint: vi.fn(async (text: string): Promise<Finding[]> => {
       log.push(`lint ${text}`);
+      if (config.rules.Spell === false) return [];
       const findings: Finding[] = [];
       for (const m of text.matchAll(/\S+/g)) {
-        if (!words.has(m[0])) {
-          findings.push({ engine: "fake", from: m.index, to: m.index + m[0].length, kind: "Spelling", ruleId: "Spell", message: "?", fixes: [] });
-        }
+        const finding: Finding = { engine: "fake", from: m.index, to: m.index + m[0].length, kind: "Spelling", ruleId: "Spell", message: "?", fixes: [] };
+        if (!words.has(m[0]) && !config.ignored.includes(hashFor(text, finding))) findings.push(finding);
       }
       return findings;
     }),
@@ -30,12 +37,57 @@ function fakeEngine() {
       words = new Set(next);
       log.push("words");
     }),
-  };
+    configure: vi.fn(async (next: EngineConfig) => {
+      await new Promise((r) => setTimeout(r, 5));
+      config = next;
+      log.push("config");
+    }),
+    hashOf: vi.fn(async (text: string, finding: Finding): Promise<string | null> => hashFor(text, finding)),
+  } satisfies ProofreadEngine;
   return { engine, log };
 }
 
-function setup(lore: LoreEntrySummary[] = []) {
+/** A backend holding one project's files in memory: Library, machine, book. */
+function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
+  const words: Record<string, string[]> = {};
+  const rules: Record<string, boolean> = { ...(initial.rules ?? {}) };
+  const ignored: Record<string, string[]> = { ...(initial.ignored ?? {}) };
+  for (const word of initial.words ?? []) words[word] = ["book"];
+  const read = async (): Promise<ProofreadingSetup> => ({
+    words: Object.keys(words).sort(),
+    word_layers: { ...words },
+    rules: { ...rules },
+    rule_layers: {},
+    dialect: initial.dialect ?? "american",
+    layers: [
+      { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false },
+      { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false },
+      { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true },
+    ],
+    ignored: structuredClone(ignored),
+  });
+  const backend = {
+    read: vi.fn(read),
+    addWord: vi.fn(async (word: string, layerId: string) => {
+      words[word] = [layerId];
+      return read();
+    }),
+    setRule: vi.fn(async (rule: string, enabled: boolean | null) => {
+      if (enabled === null) delete rules[rule];
+      else rules[rule] = enabled;
+      return read();
+    }),
+    ignore: vi.fn(async (nodeId: string, hash: string) => {
+      (ignored[nodeId] ??= []).push(hash);
+      return read();
+    }),
+  } satisfies ProofreadingBackend;
+  return backend;
+}
+
+function setup(lore: LoreEntrySummary[] = [], files: Partial<ProofreadingSetup> = {}) {
   const { engine, log } = fakeEngine();
+  const backend = fakeBackend(files);
   let pushLore: (entries: LoreEntrySummary[]) => void = () => undefined;
   const loadEngine = vi.fn(async () => engine);
   const lens = new ProofreadingController({
@@ -45,12 +97,14 @@ function setup(lore: LoreEntrySummary[] = []) {
       run(lore);
       return () => undefined;
     },
+    backend,
     startTimeoutMs: 1000,
   });
-  return { lens, engine, log, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
+  return { lens, engine, log, backend, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 20));
+// Generous: the fake engine waits per step, and Windows timers round up to ~15 ms.
+const settle = () => new Promise((r) => setTimeout(r, 80));
 
 describe("ProofreadingController", () => {
   it("starts off and loads nothing until switched on", () => {
@@ -122,6 +176,7 @@ describe("ProofreadingController", () => {
         throw new Error("no wasm");
       },
       subscribeLore: () => () => undefined,
+      backend: fakeBackend(),
       startTimeoutMs: 1000,
     });
     lens.toggle();
@@ -156,6 +211,7 @@ describe("ProofreadingController", () => {
         run([]);
         return () => subscriptions--;
       },
+      backend: fakeBackend(),
       startTimeoutMs: 1000,
     });
     lens.toggle();
@@ -168,10 +224,79 @@ describe("ProofreadingController", () => {
     expect(subscriptions).toBe(1);
   });
 
+  it("loads the writer's words, possessives included, and rules before the first lint", async () => {
+    const { lens, engine } = setup([], { words: ["Vashti"], dialect: "british", rules: { Hedging: false } });
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("Vashti's")).toEqual([]);
+    expect(engine.configure).toHaveBeenLastCalledWith({ rules: { Hedging: false }, dialect: "british", ignored: [] });
+    expect(lens.setup?.words).toEqual(["Vashti"]);
+  });
+
+  it("honours a rule switched off in the files", async () => {
+    const { lens } = setup([], { rules: { Spell: false } });
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("xyzzy")).toEqual([]);
+  });
+
+  it("adds a word through the backend, and the word stops being flagged", async () => {
+    const { lens, backend } = setup();
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("Zorn")).toHaveLength(1);
+    await lens.addWord("Zorn", "book");
+    expect(backend.addWord).toHaveBeenCalledWith("Zorn", "book");
+    expect(lens.cached("Zorn")).toBeUndefined();
+    expect(await lens.lint("Zorn")).toEqual([]);
+  });
+
+  it("stops checking a rule through the backend", async () => {
+    const { lens, backend } = setup();
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("xyzzy")).toHaveLength(1);
+    await lens.disableRule("Spell", "machine");
+    expect(backend.setRule).toHaveBeenCalledWith("Spell", false, "machine");
+    expect(await lens.lint("xyzzy")).toEqual([]);
+  });
+
+  it("ignores one spot by its hash, and only that spot", async () => {
+    const { lens, backend, engine } = setup();
+    lens.toggle();
+    await settle();
+    const [first, second] = await lens.lint("ab cd");
+    await lens.ignoreHere("manuscript_1", "ab cd", second);
+    expect(engine.hashOf).toHaveBeenCalledWith("ab cd", second);
+    expect(backend.ignore).toHaveBeenCalledWith("manuscript_1", "5003");
+    expect(await lens.lint("ab cd")).toEqual([first]);
+  });
+
+  it("refuses to ignore a finding the engine can't hash", async () => {
+    const { lens, backend, engine } = setup();
+    lens.toggle();
+    await settle();
+    const [finding] = await lens.lint("ab");
+    engine.hashOf.mockResolvedValueOnce(null);
+    await expect(lens.ignoreHere("manuscript_1", "ab", finding)).rejects.toThrow(/can't be ignored/);
+    expect(backend.ignore).not.toHaveBeenCalled();
+  });
+
+  it("reads the setup again when the lore roster changes, as on a project switch", async () => {
+    const { lens, backend, pushLore } = setup();
+    lens.toggle();
+    await settle();
+    expect(backend.read).toHaveBeenCalledTimes(1);
+    pushLore([entry("Kael")]);
+    await settle();
+    expect(backend.read).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a start that never finishes instead of loading forever", async () => {
     const lens = new ProofreadingController({
       loadEngine: () => new Promise<never>(() => undefined),
       subscribeLore: () => () => undefined,
+      backend: fakeBackend(),
       startTimeoutMs: 10,
     });
     lens.toggle();

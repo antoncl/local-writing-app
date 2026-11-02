@@ -260,6 +260,14 @@ from app.models.project import (
     UpdateCheck,
     UpdateProjectSettingsRequest,
 )
+from app.models.proofreading import (
+    ProofreadingDialectRequest,
+    ProofreadingIgnoreRequest,
+    ProofreadingLayer,
+    ProofreadingRuleRequest,
+    ProofreadingSetup,
+    ProofreadingWordRequest,
+)
 from app.models.schema import (
     LIST_ITEM_GROUP_MEMBER_TYPES,
     LIST_ITEM_SCALAR_TYPES,
@@ -601,6 +609,12 @@ __all__ = [
     "Swatch",
     "TagEntry",
     "TagEntryList",
+    "ProofreadingDialectRequest",
+    "ProofreadingIgnoreRequest",
+    "ProofreadingLayer",
+    "ProofreadingRuleRequest",
+    "ProofreadingSetup",
+    "ProofreadingWordRequest",
     "TodoDocument",
     "TodoItem",
     "TodoSource",

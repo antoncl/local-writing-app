@@ -8,9 +8,10 @@
 // slim one AND a second 20 MB binary on top, and the slim one alone does all
 // the lens needs (lints by rule, words, rule config, ignores by hash — checked
 // in the browser, ADR-0102 Amendment 1).
-import { Dialect, SuggestionKind, WorkerLinter, type Lint, type Linter, type Suggestion } from "harper.js";
+import { Dialect, SuggestionKind, WorkerLinter, type Lint, type LintConfig, type Linter, type Suggestion } from "harper.js";
 import { slimBinary } from "harper.js/slimBinary";
 import type { Finding, FindingFix, ProofreadEngine } from "@/lib/proofread/findings";
+import type { ProofreadingDialect } from "@/lib/types";
 
 const ENGINE_ID = "harper";
 // Harper's default is markdown, which would read the prose's own asterisks and
@@ -53,29 +54,74 @@ export function toFinding(ruleId: string, lint: LintLike): Finding {
   };
 }
 
-/** The lints `organizedLints` returns, keyed by rule, as findings. */
-export function toFindings(byRule: Record<string, LintLike[]>): Finding[] {
+/** The lints `organizedLints` returns, keyed by rule, as findings; `keep`
+ *  hears each finding with the lint it came from. */
+export function toFindings(
+  byRule: Record<string, LintLike[]>,
+  keep: (finding: Finding, lint: LintLike) => void = () => undefined,
+): Finding[] {
   const findings: Finding[] = [];
   for (const [ruleId, lints] of Object.entries(byRule)) {
-    for (const lint of lints) findings.push(toFinding(ruleId, lint));
+    for (const lint of lints) {
+      const finding = toFinding(ruleId, lint);
+      keep(finding, lint);
+      findings.push(finding);
+    }
   }
   return findings.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
-/** The engine over an already-constructed linter (tests pass a fake). */
-export function harperEngineFor(linter: Pick<Linter, "organizedLints" | "clearWords" | "importWords">): ProofreadEngine {
+const DIALECTS: Record<ProofreadingDialect, Dialect> = {
+  american: Dialect.American,
+  british: Dialect.British,
+  australian: Dialect.Australian,
+  canadian: Dialect.Canadian,
+  indian: Dialect.Indian,
+};
+
+/** Harper's full rule config: its defaults with the writer's switches on top.
+ *  A switch for a rule this version lacks is skipped, not sent: rule names
+ *  change between versions (ADR-0102 §5), and the file keeps the name. */
+export function mergedRules(defaults: LintConfig, rules: Record<string, boolean>): LintConfig {
+  const merged: LintConfig = { ...defaults };
+  for (const [rule, enabled] of Object.entries(rules)) if (rule in defaults) merged[rule] = enabled;
+  return merged;
+}
+
+type LinterLike = Pick<
+  Linter,
+  "organizedLints" | "clearWords" | "importWords" | "setLintConfig" | "setDialect" | "clearIgnoredLints" | "ignoreLintHash" | "contextHash"
+>;
+
+/** The engine over an already-constructed linter and its default rule config
+ *  (tests pass fakes). */
+export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): ProofreadEngine {
+  // The lint each finding came from: `contextHash` needs Harper's own object.
+  // Weak, so a finding dropped from the lens's cache frees its lint.
+  const lints = new WeakMap<Finding, LintLike>();
   return {
     id: ENGINE_ID,
     async lint(text) {
       if (!text.trim()) return [];
       // `organizedLints` rather than `lint`: only it says which rule produced a
-      // lint, which "stop checking this rule" (slice 2) needs.
+      // lint, which "stop checking this rule" needs.
       const byRule = await linter.organizedLints(text, LINT_OPTIONS);
-      return toFindings(byRule);
+      return toFindings(byRule, (finding, lint) => lints.set(finding, lint));
     },
     async setWords(words) {
       await linter.clearWords();
       if (words.length > 0) await linter.importWords(words);
+    },
+    async configure({ rules, dialect, ignored }) {
+      await linter.setLintConfig(mergedRules(defaults, rules));
+      await linter.setDialect(DIALECTS[dialect]);
+      await linter.clearIgnoredLints();
+      for (const hash of ignored) await linter.ignoreLintHash(BigInt(hash));
+    },
+    async hashOf(text, finding) {
+      const lint = lints.get(finding);
+      if (!lint) return null;
+      return String(await linter.contextHash(text, lint as Lint));
     },
   };
 }
@@ -86,6 +132,7 @@ export async function createHarperEngine(): Promise<ProofreadEngine> {
   await linter.setup();
   // harper #3490: a WorkerLinter's default-on rules stay inactive until the
   // default config is read once after setup; setting it arms them as well.
-  await linter.setLintConfig(await linter.getDefaultLintConfig());
-  return harperEngineFor(linter);
+  const defaults = await linter.getDefaultLintConfig();
+  await linter.setLintConfig(defaults);
+  return harperEngineFor(linter, defaults);
 }

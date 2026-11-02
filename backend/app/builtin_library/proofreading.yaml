@@ -1,0 +1,10 @@
+# The fiction default for the proofreading lens (ADR-0102 §5): rules that fight
+# fiction, switched off for every project. This file ships with the app and is
+# read-only; set a rule back on for your machine or a project from the lens.
+# BoringWords and AvoidContractions are already off in Harper's own defaults;
+# they are listed so the intent stays visible if those defaults change.
+rules:
+  AvoidContractions: false
+  BoringWords: false
+  Hedging: false
+  OxfordComma: false

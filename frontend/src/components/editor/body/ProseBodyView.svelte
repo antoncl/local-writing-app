@@ -1135,7 +1135,11 @@
         SearchMatchHighlight,
         LineEditSuggestions,
         ReadAloudHighlight.configure({ input: readAloud }),
-        ProofreadHighlight.configure({ lens: proofreading, enabled: () => documentKind === "manuscript" }),
+        ProofreadHighlight.configure({
+          lens: proofreading,
+          enabled: () => documentKind === "manuscript",
+          nodeId: () => scene?.id ?? null,
+        }),
         InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",

@@ -154,6 +154,7 @@ export * from "./promotionTypes";
 export * from "./promptTypes";
 export * from "./assistantTypes";
 export * from "./tagTypes";
+export * from "./proofreadingTypes";
 export * from "./metadataTypes";
 export * from "./entryPatchTypes";
 export * from "./schemaTypes";

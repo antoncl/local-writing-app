@@ -17,14 +17,13 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { anchoredPopover } from "@/lib/actions/anchoredPopover";
 import { blockText, docRange, textBlocks, type BlockText } from "@/lib/proofread/blockText";
 import { isSpelling, type Finding, type FindingFix } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
+import { createFindingPopover, type PopoverSection } from "@/lib/editor-core/proofreadPopover";
 import "@/lib/editor-core/proofreadHighlight.css";
 
 export const MARK_CLASS = "proofread-mark";
-const POPOVER_CLASS = "proofread-popover";
 /** Quiet after typing before the changed blocks are linted. */
 export const EDIT_DEBOUNCE_MS = 600;
 /** Coalesce a burst of landing lints into one redraw. */
@@ -34,6 +33,8 @@ export type ProofreadOptions = {
   lens: ProofreadLens | null;
   /** Whether this editor proofreads at all (step 1: scene prose only). */
   enabled: () => boolean;
+  /** The open node, for "Ignore here" (none offered without one). */
+  nodeId: () => string | null;
 };
 
 const pluginKey = new PluginKey<DecorationSet>("proofreadHighlight");
@@ -113,89 +114,65 @@ function sameDecorations(a: Decoration[], b: Decoration[]): boolean {
   );
 }
 
-type FindingPopover = {
-  readonly target: HTMLElement | null;
-  show(target: HTMLElement, finding: Finding, onFix: (fix: FindingFix) => void): void;
-  hide(): void;
+/** "OxfordComma" -> "Oxford comma": a Harper rule name as a writer reads it. */
+export function ruleLabel(rule: string): string {
+  const [first = "", ...rest] = rule.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
+  return [first, ...rest.map((w) => w.toLowerCase())].join(" ");
+}
+
+/** The dictionary word a spelling finding names: a possessive is dropped,
+ *  since the dictionary adds possessives itself. */
+export function dictionaryWord(problem: string): string {
+  return problem.replace(/['’]s?$/u, "") || problem;
+}
+
+type SectionContext = {
+  lens: ProofreadLens;
+  nodeId: string | null;
+  fix: (fix: FindingFix) => void;
+  ignoreHere: (nodeId: string) => Promise<void>;
 };
 
-function createFindingPopover(): FindingPopover {
-  const el = document.createElement("div");
-  el.className = POPOVER_CLASS;
-  el.setAttribute("role", "dialog");
-  el.setAttribute("aria-label", "Proofreading");
-  let target: HTMLElement | null = null;
-  let placement: ReturnType<typeof anchoredPopover> | null = null;
-
-  function hide() {
-    if (!target) return;
-    target = null;
-    placement?.destroy();
-    placement = null;
-    document.removeEventListener("keydown", onKeydown, true);
-    document.removeEventListener("pointerdown", onPointerDown, true);
+/** What the popover offers for `finding` (ADR-0102 §4): its fixes, then the
+ *  three permanent ignores — add to the dictionary of any writable layer (a
+ *  spelling finding only), stop checking the rule on this machine or in this
+ *  project, and ignore this one spot. */
+export function findingSections(finding: Finding, problem: string, ctx: SectionContext): PopoverSection[] {
+  const sections: PopoverSection[] = [
+    { heading: "", choices: finding.fixes.map((fix) => ({ label: fix.label, run: () => ctx.fix(fix) })) },
+  ];
+  const setup = ctx.lens.setup;
+  if (!setup) return sections;
+  const writable = setup.layers.filter((layer) => !layer.is_library);
+  if (isSpelling(finding)) {
+    const word = dictionaryWord(problem);
+    sections.push({
+      heading: `Add “${word}” to the dictionary of`,
+      choices: writable.map((layer) => ({
+        label: layer.is_machine ? "This machine" : layer.label,
+        run: () => ctx.lens.addWord(word, layer.id),
+      })),
+    });
   }
-  // Escape is consumed: the keypress that closes the popover must not also
-  // close the dialog or menu the editor sits in.
-  function onKeydown(event: KeyboardEvent) {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    hide();
-  }
-  function onPointerDown(event: Event) {
-    const node = event.target;
-    if (!(node instanceof Node) || (!el.contains(node) && !target?.contains(node))) hide();
-  }
-
-  function render(finding: Finding, onFix: (fix: FindingFix) => void) {
-    el.replaceChildren();
-    const message = document.createElement("p");
-    message.className = `${POPOVER_CLASS}-message`;
-    message.textContent = finding.message;
-    el.appendChild(message);
-    if (finding.fixes.length === 0) return;
-    const fixes = document.createElement("div");
-    fixes.className = `${POPOVER_CLASS}-fixes`;
-    for (const fix of finding.fixes) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `${POPOVER_CLASS}-fix`;
-      button.textContent = fix.label;
-      // Keep the editor's focus and selection: the fix is an edit in it.
-      button.addEventListener("mousedown", (event) => event.preventDefault());
-      button.addEventListener("click", () => {
-        hide();
-        onFix(fix);
-      });
-      fixes.appendChild(button);
-    }
-    el.appendChild(fixes);
-  }
-
-  return {
-    get target() {
-      return target;
-    },
-    show(next, finding, onFix) {
-      target = next;
-      render(finding, onFix);
-      if (placement) {
-        placement.update({ anchor: next });
-        return;
-      }
-      placement = anchoredPopover(el, { anchor: next });
-      document.addEventListener("keydown", onKeydown, true);
-      document.addEventListener("pointerdown", onPointerDown, true);
-    },
-    hide,
-  };
+  const scopes = [
+    { layer: writable.find((layer) => layer.is_machine), label: "On this machine" },
+    { layer: writable.find((layer) => layer.is_root), label: "In this project" },
+  ];
+  sections.push({
+    heading: `Stop checking “${ruleLabel(finding.ruleId)}”`,
+    choices: scopes.flatMap(({ layer, label }) =>
+      layer ? [{ label, run: () => ctx.lens.disableRule(finding.ruleId, layer.id) }] : [],
+    ),
+  });
+  const nodeId = ctx.nodeId;
+  if (nodeId) sections.push({ heading: "", choices: [{ label: "Ignore here", run: () => ctx.ignoreHere(nodeId) }] });
+  return sections;
 }
 
 export const ProofreadHighlight = Extension.create<ProofreadOptions>({
   name: "proofreadHighlight",
   addOptions() {
-    return { lens: null, enabled: () => false };
+    return { lens: null, enabled: () => false, nodeId: () => null };
   },
   addProseMirrorPlugins() {
     const options = this.options;
@@ -275,17 +252,31 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
           const openAt = (target: HTMLElement) => {
             const pos = view.posAtDOM(target, 0);
             const deco = findingAt(view.state, pos);
-            if (!deco) return;
-            const finding = findingOf(deco);
-            popover.show(target, finding, (fix) => {
-              // Resolve the decoration again from the underline the popover
-              // hangs from: positions captured at click time are stale after an
-              // edit. A redraw with another finding replaces the span, so a
-              // connected span is still this finding's.
-              const live = target.isConnected ? findingAt(view.state, view.posAtDOM(target, 0)) : null;
-              if (!live || !applyFix(view, live, fix)) schedule(0);
+            if (!deco || !lens) return;
+            // Resolve the decoration again from the underline the popover hangs
+            // from: positions captured at click time are stale after an edit.
+            // A redraw with another finding replaces the span, so a connected
+            // span is still this finding's.
+            const live = () => (target.isConnected ? findingAt(view.state, view.posAtDOM(target, 0)) : null);
+            const fix = (choice: FindingFix) => {
+              const now = live();
+              if (!now || !applyFix(view, now, choice)) schedule(0);
               view.focus();
+            };
+            const ignoreHere = async (nodeId: string) => {
+              const now = live();
+              const block = now ? liveBlock(view.state, now) : null;
+              if (!now || !block) throw new Error("the text changed; try again once it is checked");
+              await lens.ignoreHere(nodeId, block.text, findingOf(now));
+            };
+            const finding = findingOf(deco);
+            const sections = findingSections(finding, (deco.spec as FindingSpec).problem, {
+              lens,
+              nodeId: options.nodeId(),
+              fix,
+              ignoreHere,
             });
+            popover.show(target, finding.message, sections);
           };
           // The plugin's props can't reach this view's popover, so the click
           // listener lives here.

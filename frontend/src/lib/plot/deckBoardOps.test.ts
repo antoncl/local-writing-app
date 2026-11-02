@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { deckBoardOps, newCardTarget } from "./deckBoardOps";
 import type { PlotUndoRecorder } from "./plotCommands";
-import type { PlotBoardProjection } from "@/lib/types";
+import { chatSessionsStore } from "@/lib/stores/chats";
+import type { ChatSessionSummary, PlotBoardProjection } from "@/lib/types";
 
 const projection = (decks: PlotBoardProjection["decks"]): PlotBoardProjection => ({
   board_id: "b",
@@ -49,5 +50,28 @@ describe("deckBoardOps", () => {
     const ops = deckBoardOps({} as PlotUndoRecorder, () => projection([deck("d2", "ch")]), vi.fn());
     ops.remove("d2");
     expect(confirmService.active?.message).toContain("The chapter stays in the manuscript");
+  });
+
+  // #2536: an empty deck deletes without asking, but never while chats about it would go
+  // with it: those can't come back, not even by undo.
+  it("confirms deleting an empty deck that chats are about, saying undo won't bring them back", () => {
+    const deleteDeck = vi.fn();
+    const ops = deckBoardOps({ deleteDeck } as unknown as PlotUndoRecorder, () => projection([deck("d1")]), vi.fn());
+    chatSessionsStore.set([{ id: "chat_1", title: "Plan it", subject: "d1" } as ChatSessionSummary]);
+    try {
+      ops.remove("d1");
+      expect(deleteDeck).not.toHaveBeenCalled();
+      expect(confirmService.active?.message).toContain("Undo brings back the deck, but not the chat.");
+    } finally {
+      chatSessionsStore.set([]);
+    }
+  });
+
+  it("deletes an empty deck no chat is about without asking", () => {
+    const deleteDeck = vi.fn().mockResolvedValue(undefined);
+    const ops = deckBoardOps({ deleteDeck } as unknown as PlotUndoRecorder, () => projection([deck("d1")]), vi.fn());
+    ops.remove("d1");
+    expect(confirmService.active).toBeFalsy();
+    expect(deleteDeck).toHaveBeenCalled();
   });
 });

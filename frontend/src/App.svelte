@@ -541,9 +541,19 @@
 
   // #375: a drag makes the project's order its own, after which ancestor reorders
   // never reach it. This is the way back: the project follows its ancestors again.
-  async function resetAssistantOrder() {
-    await run(async () => {
-      setAssistantRoster(await api.resetAssistantOrder());
+  // Confirmed: the project's own order is discarded, and there is no undo for it.
+  function resetAssistantOrder() {
+    confirmService.request({
+      title: "Reset to inherited order",
+      message:
+        "This project's own assistant order is discarded, and it follows the order of its parent folders again. Assistants you un-listed here stay un-listed.",
+      confirmLabel: "Reset order",
+      destructive: true,
+      cannotBeUndone: true,
+      // confirmService runs this through `run()` (its injected onRun).
+      onConfirm: async () => {
+        setAssistantRoster(await api.resetAssistantOrder());
+      },
     });
   }
 

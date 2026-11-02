@@ -10,7 +10,6 @@ import {
   clearAssistants,
   defaultAssistantIdStore,
   refreshAssistantEntries,
-  setAssistantEntries,
   setAssistantRoster,
 } from "@/lib/stores/assistants";
 
@@ -91,7 +90,7 @@ describe("refreshAssistantEntries stale guard", () => {
     );
 
     const inFlight = refreshAssistantEntries();
-    setAssistantEntries([A("second", "listed"), A("first", "listed")]); // the reorder's response
+    setAssistantRoster({ entries: [A("second", "listed"), A("first", "listed")] }); // the reorder's response
     resolveRefresh({ entries: [A("first", "listed"), A("second", "listed")] }); // the older order
     await inFlight;
 

@@ -17,6 +17,7 @@ from layer_fixtures import declare_full_chain
 
 from app.models import ReorderAssistantsRequest, UnlistAssistantRequest
 from app.services.project.assistants import AssistantsOrder
+from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project_service import ProjectService
 
@@ -550,6 +551,13 @@ class AssistantOrderMergeTests(unittest.TestCase):
         self.assertFalse(listed.local_order)
         self.assertEqual(self._roster(), ["outer_a", "outer_b"])
         self.assertEqual(self.service._read_assistants_order(self.root / "assistants").ids, [])
+
+    def test_reset_order_refuses_with_no_project_open(self) -> None:
+        # With no project the local layer IS the machine layer: a reset there would
+        # wipe the machine-wide order, so it is refused rather than degenerating.
+        with self.assertRaises(ProjectServiceError) as raised:
+            ProjectService().reset_assistant_order()  # no scope bound: no project open
+        self.assertEqual(raised.exception.status_code, 409)
 
     def test_reset_order_keeps_the_projects_unlisted_assistants_unlisted(self) -> None:
         self._write_assistant(self.base, "outer_a", "Outer A")

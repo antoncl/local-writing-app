@@ -62,14 +62,10 @@ export async function refreshAssistantEntries(): Promise<void> {
 // answer over it — e.g. open the Assistants pane (fires a refresh) and reorder
 // at once: without the bump the earlier GET resolved last and reverted the
 // order on screen (review of #1879).
-export function setAssistantEntries(entries: AssistantEntrySummary[]): void {
-  latest += 1;
-  assistantEntriesStore.set(entries);
-}
-
-// The same write-through for a whole roster response, carrying `local_order` with it.
+// It takes the whole response so `local_order` (#375) can never be dropped on the way.
 export function setAssistantRoster(list: AssistantEntryList): void {
-  setAssistantEntries(list.entries);
+  latest += 1;
+  assistantEntriesStore.set(list.entries);
   assistantLocalOrderStore.set(list.local_order ?? false);
 }
 

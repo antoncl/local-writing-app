@@ -38,9 +38,10 @@ export interface ProofreadEngine {
   lint(text: string): Promise<Finding[]>;
   setWords(words: string[]): Promise<void>;
   configure(config: EngineConfig): Promise<void>;
-  /** The ignore-here hash of `finding`, made from `text`, the block it was
-   *  found in — null for a finding this engine did not make. */
-  hashOf(text: string, finding: Finding): Promise<string | null>;
+  /** The ignore-here hashes of the spot `finding` covers in `text`, the block
+   *  it was found in: one per finding there, the ones the engine hid behind it
+   *  included. Empty when the engine finds nothing there. */
+  hashesOf(text: string, finding: Finding): Promise<string[]>;
 }
 
 /** Whether a finding draws as a spelling mark or as any other kind. */

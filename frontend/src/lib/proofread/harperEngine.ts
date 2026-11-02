@@ -54,19 +54,11 @@ export function toFinding(ruleId: string, lint: LintLike): Finding {
   };
 }
 
-/** The lints `organizedLints` returns, keyed by rule, as findings; `keep`
- *  hears each finding with the lint it came from. */
-export function toFindings(
-  byRule: Record<string, LintLike[]>,
-  keep: (finding: Finding, lint: LintLike) => void = () => undefined,
-): Finding[] {
+/** The lints `organizedLints` returns, keyed by rule, as findings. */
+export function toFindings(byRule: Record<string, LintLike[]>): Finding[] {
   const findings: Finding[] = [];
   for (const [ruleId, lints] of Object.entries(byRule)) {
-    for (const lint of lints) {
-      const finding = toFinding(ruleId, lint);
-      keep(finding, lint);
-      findings.push(finding);
-    }
+    for (const lint of lints) findings.push(toFinding(ruleId, lint));
   }
   return findings.sort((a, b) => a.from - b.from || a.to - b.to);
 }
@@ -90,15 +82,20 @@ export function mergedRules(defaults: LintConfig, rules: Record<string, boolean>
 
 type LinterLike = Pick<
   Linter,
-  "organizedLints" | "clearWords" | "importWords" | "setLintConfig" | "setDialect" | "clearIgnoredLints" | "ignoreLintHash" | "contextHash"
+  | "lint"
+  | "organizedLints"
+  | "clearWords"
+  | "importWords"
+  | "setLintConfig"
+  | "setDialect"
+  | "clearIgnoredLints"
+  | "ignoreLintHash"
+  | "contextHash"
 >;
 
 /** The engine over an already-constructed linter and its default rule config
  *  (tests pass fakes). */
 export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): ProofreadEngine {
-  // The lint each finding came from: `contextHash` needs Harper's own object.
-  // Weak, so a finding dropped from the lens's cache frees its lint.
-  const lints = new WeakMap<Finding, LintLike>();
   return {
     id: ENGINE_ID,
     async lint(text) {
@@ -106,7 +103,7 @@ export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): 
       // `organizedLints` rather than `lint`: only it says which rule produced a
       // lint, which "stop checking this rule" needs.
       const byRule = await linter.organizedLints(text, LINT_OPTIONS);
-      return toFindings(byRule, (finding, lint) => lints.set(finding, lint));
+      return toFindings(byRule);
     },
     async setWords(words) {
       await linter.clearWords();
@@ -118,10 +115,17 @@ export function harperEngineFor(linter: LinterLike, defaults: LintConfig = {}): 
       await linter.clearIgnoredLints();
       for (const hash of ignored) await linter.ignoreLintHash(BigInt(hash));
     },
-    async hashOf(text, finding) {
-      const lint = lints.get(finding);
-      if (!lint) return null;
-      return String(await linter.contextHash(text, lint as Lint));
+    async hashesOf(text, finding) {
+      // With overlap removal off: where two rules flag the same words, Harper
+      // shows one and hides the other, and ignoring only the shown one would
+      // uncover the hidden one (measured on 3.0.0: "untill" is flagged by
+      // both SpellCheck and WrongNegative).
+      const all = await linter.lint(text, { ...LINT_OPTIONS, dedup: false });
+      const here = all.filter((lint) => {
+        const span = lint.span();
+        return span.start === finding.from && span.end === finding.to;
+      });
+      return Promise.all(here.map(async (lint) => String(await linter.contextHash(text, lint))));
     },
   };
 }

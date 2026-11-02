@@ -23,7 +23,8 @@ export const proofreadingApi = {
   setProofreadingDialect(dialect: ProofreadingDialect | null, layerId: string) {
     return write("/proofreading/dialect", "PUT", { dialect, layer_id: layerId });
   },
-  ignoreProofreadingSpot(nodeId: string, hash: string) {
-    return write("/proofreading/ignores", "POST", { node_id: nodeId, hash });
+  /** Every hash of the spot: one per lint there (`hashesOf`). */
+  ignoreProofreadingSpot(nodeId: string, hashes: string[]) {
+    return write("/proofreading/ignores", "POST", { node_id: nodeId, hashes });
   },
 };

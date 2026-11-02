@@ -42,7 +42,7 @@ function fakeEngine() {
       config = next;
       log.push("config");
     }),
-    hashOf: vi.fn(async (text: string, finding: Finding): Promise<string | null> => hashFor(text, finding)),
+    hashesOf: vi.fn(async (text: string, finding: Finding): Promise<string[]> => [hashFor(text, finding)]),
   } satisfies ProofreadEngine;
   return { engine, log };
 }
@@ -77,8 +77,8 @@ function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
       else rules[rule] = enabled;
       return read();
     }),
-    ignore: vi.fn(async (nodeId: string, hash: string) => {
-      (ignored[nodeId] ??= []).push(hash);
+    ignore: vi.fn(async (nodeId: string, hashes: string[]) => {
+      (ignored[nodeId] ??= []).push(...hashes);
       return read();
     }),
   } satisfies ProofreadingBackend;
@@ -267,8 +267,8 @@ describe("ProofreadingController", () => {
     await settle();
     const [first, second] = await lens.lint("ab cd");
     await lens.ignoreHere("manuscript_1", "ab cd", second);
-    expect(engine.hashOf).toHaveBeenCalledWith("ab cd", second);
-    expect(backend.ignore).toHaveBeenCalledWith("manuscript_1", "5003");
+    expect(engine.hashesOf).toHaveBeenCalledWith("ab cd", second);
+    expect(backend.ignore).toHaveBeenCalledWith("manuscript_1", ["5003"]);
     expect(await lens.lint("ab cd")).toEqual([first]);
   });
 
@@ -277,7 +277,7 @@ describe("ProofreadingController", () => {
     lens.toggle();
     await settle();
     const [finding] = await lens.lint("ab");
-    engine.hashOf.mockResolvedValueOnce(null);
+    engine.hashesOf.mockResolvedValueOnce([]);
     await expect(lens.ignoreHere("manuscript_1", "ab", finding)).rejects.toThrow(/can't be ignored/);
     expect(backend.ignore).not.toHaveBeenCalled();
   });

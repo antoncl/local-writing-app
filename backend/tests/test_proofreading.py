@@ -150,20 +150,27 @@ class ProofreadingTests(unittest.TestCase):
         (self.root / "proofreading.ignored.yaml").write_text(
             "ignored:\n  manuscript_gone:\n    - '1'\n", encoding="utf-8"
         )
-        setup = self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id=scene.id, hash="18446744073709551615"))
-        self.assertEqual(setup.ignored, {scene.id: ["18446744073709551615"]})
-        self.assertEqual(self._file(self.root, "proofreading.ignored.yaml"), {"ignored": {scene.id: ["18446744073709551615"]}})
-        # The same spot twice is one entry.
-        setup = self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id=scene.id, hash="18446744073709551615"))
-        self.assertEqual(setup.ignored[scene.id], ["18446744073709551615"])
+        setup = self.service.ignore_proofreading_spot(
+            ProofreadingIgnoreRequest(node_id=scene.id, hashes=["18446744073709551615", "7"])
+        )
+        self.assertEqual(setup.ignored, {scene.id: ["18446744073709551615", "7"]})
+        self.assertEqual(
+            self._file(self.root, "proofreading.ignored.yaml"), {"ignored": {scene.id: ["18446744073709551615", "7"]}}
+        )
+        # The same spot twice is one entry per hash.
+        setup = self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id=scene.id, hashes=["7", "7"]))
+        self.assertEqual(setup.ignored[scene.id], ["18446744073709551615", "7"])
+        self.assertEqual(self._file(self.root, "proofreading.ignored.yaml")["ignored"][scene.id], ["18446744073709551615", "7"])
 
     def test_ignore_here_refuses_an_unknown_node_and_an_oversized_hash(self) -> None:
         scene = self.service.create_scene(CreateSceneRequest(title="Opening"))
         with self.assertRaises(ProjectServiceError) as caught:
-            self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id="manuscript_nope", hash="1"))
+            self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id="manuscript_nope", hashes=["1"]))
         self.assertEqual(caught.exception.status_code, 404)
         with self.assertRaises(ProjectServiceError) as caught:
-            self.service.ignore_proofreading_spot(ProofreadingIgnoreRequest(node_id=scene.id, hash="18446744073709551616"))
+            self.service.ignore_proofreading_spot(
+                ProofreadingIgnoreRequest(node_id=scene.id, hashes=["1", "18446744073709551616"])
+            )
         self.assertEqual(caught.exception.status_code, 422)
 
     # ---------- over the wire ----------
@@ -183,7 +190,9 @@ class ProofreadingTests(unittest.TestCase):
         # A malformed rule name or hash is the request's fault.
         bad = self.client.put("/api/proofreading/rules", json={"rule": "not a rule", "enabled": False, "layer_id": layer})
         self.assertEqual(bad.status_code, 422)
-        bad = self.client.post("/api/proofreading/ignores", json={"node_id": "x", "hash": "-1"})
+        bad = self.client.post("/api/proofreading/ignores", json={"node_id": "x", "hashes": ["-1"]})
+        self.assertEqual(bad.status_code, 422)
+        bad = self.client.post("/api/proofreading/ignores", json={"node_id": "x", "hashes": []})
         self.assertEqual(bad.status_code, 422)
 
 

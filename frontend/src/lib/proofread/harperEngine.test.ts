@@ -56,6 +56,7 @@ describe("toFindings", () => {
 /** A linter stand-in with every call the engine makes. */
 function fakeLinter() {
   return {
+    lint: vi.fn(async (): Promise<never[]> => []),
     organizedLints: vi.fn(async (): Promise<Record<string, never[]>> => ({})),
     clearWords: vi.fn(async () => undefined),
     importWords: vi.fn(async () => undefined),
@@ -88,15 +89,19 @@ describe("harperEngineFor", () => {
     expect(linter.ignoreLintHash.mock.calls.map((c) => (c as unknown[])[0])).toEqual([18446744073709551615n, 7n]);
   });
 
-  it("hashes a finding it made from the lint it came from, and no other", async () => {
+  it("hashes every lint at the finding's spot, the hidden overlapping ones included", async () => {
     const linter = fakeLinter();
-    const harperLint = lint(0, 3, "Spelling", "?");
-    linter.organizedLints.mockResolvedValueOnce({ SpellCheck: [harperLint] } as never);
+    // Two rules flag "untill"; Harper's overlap removal would show only one.
+    const spelling = lint(4, 10, "Spelling", "until?");
+    const wordChoice = lint(4, 10, "WordChoice", "distill?");
+    const elsewhere = lint(11, 18, "Spelling", "?");
+    linter.lint.mockResolvedValueOnce([spelling, wordChoice, elsewhere] as never);
+    linter.contextHash.mockResolvedValueOnce(1n).mockResolvedValueOnce(18446744073709551615n);
     const engine = harperEngineFor(linter as never);
-    const [finding] = await engine.lint("teh cat");
-    expect(await engine.hashOf("teh cat", finding)).toBe("18446744073709551615");
-    expect(linter.contextHash).toHaveBeenCalledWith("teh cat", harperLint);
-    expect(await engine.hashOf("teh cat", { ...finding })).toBeNull();
+    const finding = toFindings({ WrongNegative: [wordChoice] })[0];
+    expect(await engine.hashesOf("Then untill mornin", finding)).toEqual(["1", "18446744073709551615"]);
+    expect(linter.lint).toHaveBeenCalledWith("Then untill mornin", { language: "plaintext", dedup: false });
+    expect(linter.contextHash.mock.calls.map((c) => (c as unknown[])[1])).toEqual([spelling, wordChoice]);
   });
 
   it("lints as plaintext and skips blank text", async () => {

@@ -10,7 +10,7 @@ shape.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -72,4 +72,7 @@ class ProofreadingDialectRequest(BaseModel):
 
 class ProofreadingIgnoreRequest(BaseModel):
     node_id: str = Field(min_length=1)
-    hash: str = Field(pattern=HASH_PATTERN)
+    # Every lint at the spot, not only the one shown: where two rules flag the
+    # same words, Harper shows one and hides the other, and ignoring the shown
+    # one alone would uncover the hidden one.
+    hashes: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field(min_length=1, max_length=20)

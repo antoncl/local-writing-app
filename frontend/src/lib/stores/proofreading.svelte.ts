@@ -51,7 +51,7 @@ export interface ProofreadingBackend {
   read(): Promise<ProofreadingSetup>;
   addWord(word: string, layerId: string): Promise<ProofreadingSetup>;
   setRule(rule: string, enabled: boolean | null, layerId: string): Promise<ProofreadingSetup>;
-  ignore(nodeId: string, hash: string): Promise<ProofreadingSetup>;
+  ignore(nodeId: string, hashes: string[]): Promise<ProofreadingSetup>;
 }
 
 export interface ProofreadingDeps {
@@ -70,7 +70,7 @@ const defaultDeps: ProofreadingDeps = {
     read: () => api.getProofreading(),
     addWord: (word, layerId) => api.addProofreadingWord(word, layerId),
     setRule: (rule, enabled, layerId) => api.setProofreadingRule(rule, enabled, layerId),
-    ignore: (nodeId, hash) => api.ignoreProofreadingSpot(nodeId, hash),
+    ignore: (nodeId, hashes) => api.ignoreProofreadingSpot(nodeId, hashes),
   },
   // A binary that fails to load inside Harper's worker never rejects its setup
   // promise: without a limit the lens would say "loading" forever.
@@ -239,9 +239,9 @@ export class ProofreadingController implements ProofreadLens {
   }
 
   async ignoreHere(nodeId: string, text: string, finding: Finding): Promise<void> {
-    const hash = await this.engine?.hashOf(text, finding);
-    if (!hash) throw new Error("This finding can't be ignored here.");
-    await this.apply(await this.deps.backend.ignore(nodeId, hash));
+    const hashes = (await this.engine?.hashesOf(text, finding)) ?? [];
+    if (hashes.length === 0) throw new Error("This finding can't be ignored here.");
+    await this.apply(await this.deps.backend.ignore(nodeId, hashes));
   }
 
   private notify(): void {

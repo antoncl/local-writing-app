@@ -226,7 +226,7 @@ class ProofreadingMixin:
 
     def ignore_proofreading_spot(self, request: ProofreadingIgnoreRequest) -> ProofreadingSetup:
         root = self._require_project()
-        if int(request.hash) > _MAX_HASH:
+        if any(int(h) > _MAX_HASH for h in request.hashes):
             raise ProjectServiceError("An ignore-here hash is an unsigned 64-bit number.", 422)
         index = self._build_node_index(root)
         entry = index.by_id.get(request.node_id)
@@ -242,8 +242,7 @@ class ProofreadingMixin:
         path = folder / PROOFREADING_IGNORED_FILENAME
         ignored = _ignored_of(self._read_yaml(path))
         hashes = ignored.setdefault(request.node_id, [])
-        if request.hash not in hashes:
-            hashes.append(request.hash)
+        hashes.extend(h for h in dict.fromkeys(request.hashes) if h not in hashes)
         # A deleted node's hashes go with the next write here, instead of a
         # hook on every delete path (§6).
         ignored = {node_id: h for node_id, h in ignored.items() if node_id in index.by_id}

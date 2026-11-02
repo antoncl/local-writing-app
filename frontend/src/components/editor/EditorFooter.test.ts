@@ -33,12 +33,21 @@ function props(over: Record<string, unknown> = {}) {
 describe("EditorFooter", () => {
   it("reads the document state in the status line", async () => {
     const { container, rerender } = render(EditorFooter, { props: props() });
-    const status = () => container.querySelector("footer.status")?.textContent?.trim();
+    const status = () => container.querySelector("footer.status > span")?.textContent?.trim();
     expect(status()).toBe("Loaded Opening");
     await rerender(props({ dirty: true }));
     expect(status()).toBe("Unsaved changes");
     await rerender(props({ sceneTitle: null }));
     expect(status()).toBe("No scene open");
+  });
+
+  it("offers the proofreading lens on a scene only (ADR-0102 §1)", async () => {
+    const { rerender } = render(EditorFooter, { props: props() });
+    expect(screen.getByTestId("proofread-toggle").getAttribute("aria-pressed")).toBe("false");
+    await rerender(props({ documentKind: "lore" }));
+    expect(screen.queryByTestId("proofread-toggle")).toBeNull();
+    await rerender(props({ sceneTitle: null }));
+    expect(screen.queryByTestId("proofread-toggle")).toBeNull();
   });
 
   it("renders the review bar only while line edits are pending, and routes its buttons", async () => {

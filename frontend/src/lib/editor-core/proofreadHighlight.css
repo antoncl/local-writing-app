@@ -1,0 +1,64 @@
+/* Proofreading (ADR-0102 §3): the finding underlines and the finding popover.
+   Imported by proofreadHighlight.ts, which builds the popover's DOM by hand (it
+   isn't a Svelte component, so it can't carry a scoped style block). Two
+   treatments only — spelling, and everything else — drawn as a text
+   decoration so they sit apart from the implicit-context names' dotted
+   bottom border. */
+
+.proofread-mark {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+  cursor: pointer;
+}
+
+.proofread-spelling {
+  text-decoration-color: var(--danger);
+}
+
+.proofread-issue {
+  text-decoration-color: var(--warn);
+}
+
+.proofread-popover {
+  /* Body-portaled by anchoredPopover: must clear the modal layer like every other portaled popover. */
+  z-index: 10000;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--elev-2);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.proofread-popover-message {
+  margin: 0;
+}
+
+.proofread-popover-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.proofread-popover-fix {
+  appearance: none;
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font: inherit;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+
+.proofread-popover-fix:hover,
+.proofread-popover-fix:focus-visible {
+  background: var(--accent-soft2);
+}

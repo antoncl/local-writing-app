@@ -8,6 +8,7 @@
   import LineEditReviewBar from "@/components/editor/body/LineEditReviewBar.svelte";
   import LineNoteReviewBar from "@/components/editor/body/LineNoteReviewBar.svelte";
   import ReadAloudBar from "@/components/editor/body/ReadAloudBar.svelte";
+  import ProofreadToggle from "@/components/editor/ProofreadToggle.svelte";
   import { readAloud } from "@/lib/stores/readAloud.svelte";
   import type { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -89,9 +90,24 @@
 {/if}
 
 <footer class="status">
-  {#if sceneTitle !== null}
-    {dirty ? "Unsaved changes" : `Loaded ${sceneTitle}`}
-  {:else}
-    No scene open
+  <span>
+    {#if sceneTitle !== null}
+      {dirty ? "Unsaved changes" : `Loaded ${sceneTitle}`}
+    {:else}
+      No scene open
+    {/if}
+  </span>
+  <!-- Proofreading (ADR-0102 §1): step 1 checks scene prose only. -->
+  {#if sceneTitle !== null && documentKind === "manuscript"}
+    <ProofreadToggle />
   {/if}
 </footer>
+
+<style>
+  .status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+</style>

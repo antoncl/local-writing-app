@@ -15,8 +15,9 @@
   clipped `.plot-card` so it isn't cut off by the card's fixed height / overflow.
 -->
 <script lang="ts">
-  import { getContext, tick } from "svelte";
+  import { getContext, onDestroy, tick } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { leaveOnAppExit } from "@/lib/actions/inlineEdit";
   import { findNodeBySceneId, isLeafNode } from "@/lib/utils/treeHelpers";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import type { PlotCardBeat } from "@/lib/types";
@@ -242,14 +243,16 @@
   }
   function commitEdit() {
     editing = false;
-    const next = draft.trim();
+    // Read the box itself: a writing assistant may set its value without the
+    // `input` event `bind:value` follows (#2647).
+    const next = (textarea?.value ?? draft).trim();
     // Compare against the TRIMMED body: the projection's synopsis is the raw card
     // body, which the backend stores with a trailing newline, so a plain `!==` would
     // treat every no-op open/close as a change and re-save forever.
     if (actions && id && next !== data.synopsis.trim()) actions.onEditSynopsis(id, next);
   }
-  // Escape cancels: reset the draft to the saved body, so the blur that fires when
-  // the textarea unmounts commits nothing (next === the saved value).
+  // Escape cancels: reset the draft to the saved body and leave edit mode, so
+  // nothing commits.
   function cancelEdit() {
     draft = data.synopsis;
     editing = false;
@@ -270,16 +273,22 @@
   }
   function commitTitle() {
     titleEditing = false;
-    const next = titleDraft.trim();
+    const next = (titleInput?.value ?? titleDraft).trim();
     // A card title must be non-empty (the backend rejects ""), so an emptied name
     // reverts to the saved title; otherwise save only a real change.
     if (actions && id && next && next !== data.title) actions.onEditTitle(id, next);
   }
-  // Escape cancels: reset the draft so the unmount blur commits nothing.
+  // Escape cancels: reset the draft and leave edit mode, so nothing commits.
   function cancelTitle() {
     titleDraft = data.title;
     titleEditing = false;
   }
+  // An edit only ends when the writer leaves for the app's own UI (leaveOnAppExit),
+  // so a card unmounted mid-edit (pane closed, board re-rendered) saves what's typed.
+  onDestroy(() => {
+    if (editing) commitEdit();
+    if (titleEditing) commitTitle();
+  });
 </script>
 
 <div class="card-root" bind:this={rootEl}>
@@ -320,11 +329,11 @@
           bind:value={titleDraft}
           class="card-title-edit nodrag nopan"
           placeholder="Card name"
-          onblur={commitTitle}
+          use:leaveOnAppExit={commitTitle}
           onkeydown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              e.currentTarget.blur();
+              commitTitle();
             } else if (e.key === "Escape") {
               cancelTitle();
             }
@@ -357,7 +366,7 @@
         bind:value={draft}
         class="card-synopsis-edit nodrag nopan"
         placeholder={data.attached ? "No summary yet" : "Add a synopsis…"}
-        onblur={commitEdit}
+        use:leaveOnAppExit={commitEdit}
         onkeydown={(e) => {
           if (e.key === "Escape") cancelEdit();
         }}

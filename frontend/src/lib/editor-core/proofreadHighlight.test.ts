@@ -8,12 +8,14 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { undo } from "@tiptap/pm/history";
 import { proseStarterKit } from "./proseStarterKit";
 import { TodoAnchor } from "./proseMarks";
-import { MARK_CLASS, ProofreadHighlight, applyFix, findingAt, proofreadFindings } from "./proofreadHighlight";
+import { MARK_CLASS, ProofreadHighlight, applyFix, dictionaryWord, findingAt, proofreadFindings, ruleLabel } from "./proofreadHighlight";
 import type { Finding } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
+import type { ProofreadingSetup } from "@/lib/types";
 
-/** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix). */
-function fakeLens() {
+/** A lens whose engine flags "teh" (fix: "the") and "recieve" (no fix),
+ *  both under rule `ruleId`. */
+function fakeLens(ruleId = "Fake") {
   const listeners = new Set<() => void>();
   const cache = new Map<string, Finding[]>();
   let accepted = new Set<string>();
@@ -28,7 +30,7 @@ function fakeLens() {
         from,
         to,
         kind: m[0] === "teh" ? "Spelling" : "Grammar",
-        ruleId: "Fake",
+        ruleId,
         message: `Check “${m[0]}”.`,
         fixes: m[0] === "teh" ? [{ label: "the", from, to, insert: "the" }] : [],
       });
@@ -51,6 +53,23 @@ function fakeLens() {
       cache.clear();
       this.notify();
     },
+    setup: {
+      words: [],
+      word_layers: {},
+      rules: {},
+      rule_layers: {},
+      dialect: "american",
+      layers: [
+        { id: "lib", label: "Library", is_machine: false, is_library: true, is_root: false },
+        { id: "machine", label: "Machine", is_machine: true, is_library: false, is_root: false },
+        { id: "world", label: "Honorverse", is_machine: false, is_library: false, is_root: false },
+        { id: "book", label: "Book 1", is_machine: false, is_library: false, is_root: true },
+      ],
+      ignored: {},
+    } as ProofreadingSetup | null,
+    addWord: vi.fn(async (_word: string, _layerId: string) => undefined),
+    disableRule: vi.fn(async (_rule: string, _layerId: string) => undefined),
+    ignoreHere: vi.fn(async (_nodeId: string, _text: string, _finding: Finding) => undefined),
   };
   return lens satisfies ProofreadLens & { notify(): void };
 }
@@ -61,12 +80,12 @@ afterEach(() => {
   document.querySelectorAll(".proofread-popover").forEach((el) => el.remove());
 });
 
-function setup(content: JSONContent[], lens = fakeLens(), enabled = () => true) {
+function setup(content: JSONContent[], lens = fakeLens(), enabled = () => true, nodeId: string | null = "manuscript_1") {
   const element = document.createElement("div");
   document.body.appendChild(element);
   const editor = new Editor({
     element,
-    extensions: [proseStarterKit(), TodoAnchor, ProofreadHighlight.configure({ lens, enabled })],
+    extensions: [proseStarterKit(), TodoAnchor, ProofreadHighlight.configure({ lens, enabled, nodeId: () => nodeId })],
     content: { type: "doc", content: content.map((c) => ({ type: "paragraph", content: [c] })) },
   });
   editors.push(editor);
@@ -74,6 +93,24 @@ function setup(content: JSONContent[], lens = fakeLens(), enabled = () => true) 
 }
 
 const text = (t: string, marks?: JSONContent["marks"]): JSONContent => ({ type: "text", text: t, ...(marks ? { marks } : {}) });
+/** Click the first underline reading `word`; the popover it opens. */
+function openPopover(editor: Editor, word: string): HTMLElement {
+  const mark = Array.from(editor.view.dom.querySelectorAll<HTMLElement>(`.${MARK_CLASS}`)).find((el) => el.textContent === word)!;
+  mark.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+  return document.querySelector<HTMLElement>(".proofread-popover")!;
+}
+/** The popover's choice buttons by section heading ("" for the unheaded ones). */
+function sections(popover: HTMLElement): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const box of popover.querySelectorAll(".proofread-popover-section")) {
+    const heading = box.querySelector(".proofread-popover-heading")?.textContent ?? "";
+    out[heading] = [...(out[heading] ?? []), ...Array.from(box.querySelectorAll("button"), (b) => b.textContent ?? "")];
+  }
+  return out;
+}
+const choose = (popover: HTMLElement, label: string) =>
+  Array.from(popover.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === label)!.click();
+
 const underlined = (editor: Editor) => Array.from(editor.view.dom.querySelectorAll(`.${MARK_CLASS}`), (el) => el.textContent);
 
 describe("ProofreadHighlight", () => {
@@ -115,10 +152,10 @@ describe("ProofreadHighlight", () => {
     mark.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
     const popover = document.querySelector(".proofread-popover")!;
     expect(popover.textContent).toContain("Check “teh”.");
-    popover.querySelector<HTMLButtonElement>(".proofread-popover-fix")!.click();
+    popover.querySelector<HTMLButtonElement>(".proofread-popover-choice")!.click();
 
     expect(editor.state.doc.textContent).toBe("I saw the cat.");
-    expect(document.querySelector(".proofread-popover")).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector(".proofread-popover")).toBeNull());
     const anchored: string[] = [];
     editor.state.doc.descendants((node) => {
       if (node.marks.some((m) => m.type.name === "todoAnchor")) anchored.push(node.text ?? "");
@@ -156,7 +193,7 @@ describe("ProofreadHighlight", () => {
     const { editor } = setup([text("I saw teh cat.")]);
     await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
     editor.view.dom.querySelector<HTMLElement>(`.${MARK_CLASS}`)!.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
-    const button = document.querySelector<HTMLButtonElement>(".proofread-popover-fix")!;
+    const button = document.querySelector<HTMLButtonElement>(".proofread-popover-choice")!;
     // Shift the flagged word right by five characters, before any relint.
     editor.view.dispatch(editor.state.tr.insertText("Yes, ", 1));
     button.click();
@@ -197,5 +234,75 @@ describe("ProofreadHighlight", () => {
     editor.view.dispatch(editor.state.tr.insertText("x", at + 1, at + 2));
     expect(applyFix(editor.view, deco, fix)).toBe(false);
     expect(editor.state.doc.textContent).toBe("I saw txh cat.");
+  });
+
+  it("offers the three permanent ignores, the dictionary for a spelling finding only", async () => {
+    const { editor } = setup([text("I saw teh cat."), text("You recieve it.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh", "recieve"]));
+    expect(sections(openPopover(editor, "teh"))).toEqual({
+      "": ["the", "Ignore here"],
+      "Add “teh” to the dictionary of": ["This machine", "Honorverse", "Book 1"],
+      "Stop checking “Fake”": ["On this machine", "In this project"],
+    });
+    const grammar = sections(openPopover(editor, "recieve"));
+    expect(Object.keys(grammar).some((h) => h.startsWith("Add"))).toBe(false);
+  });
+
+  it("routes each ignore to the lens with the right layer, rule and block text", async () => {
+    const { editor, lens } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    choose(openPopover(editor, "teh"), "Honorverse");
+    await vi.waitFor(() => expect(lens.addWord).toHaveBeenCalledWith("teh", "world"));
+    choose(openPopover(editor, "teh"), "In this project");
+    await vi.waitFor(() => expect(lens.disableRule).toHaveBeenCalledWith("Fake", "book"));
+    choose(openPopover(editor, "teh"), "Ignore here");
+    await vi.waitFor(() => expect(lens.ignoreHere).toHaveBeenCalled());
+    const [nodeId, blockTextArg, finding] = lens.ignoreHere.mock.calls[0];
+    expect(nodeId).toBe("manuscript_1");
+    expect(blockTextArg).toBe("I saw teh cat.");
+    expect(finding.message).toBe("Check “teh”.");
+    await vi.waitFor(() => expect(document.querySelector(".proofread-popover")).toBeNull());
+  });
+
+  it("keeps the popover open and says so when an ignore fails", async () => {
+    const { editor, lens } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    lens.addWord.mockRejectedValueOnce(new Error("disk full"));
+    const popover = openPopover(editor, "teh");
+    choose(popover, "Book 1");
+    await vi.waitFor(() => expect(popover.querySelector(".proofread-popover-error")?.textContent).toContain("disk full"));
+    expect(popover.isConnected).toBe(true);
+    expect(Array.from(popover.querySelectorAll("button")).every((b) => !b.disabled)).toBe(true);
+  });
+
+  it("never offers to switch spell checking itself off from one finding", async () => {
+    const { editor } = setup([text("I saw teh cat.")], fakeLens("SpellCheck"));
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    const offered = sections(openPopover(editor, "teh"));
+    expect(Object.keys(offered).some((h) => h.startsWith("Stop checking"))).toBe(false);
+    expect(Object.keys(offered).some((h) => h.startsWith("Add"))).toBe(true);
+  });
+
+  it("offers no ignore-here without an open node, and no ignores without a setup", async () => {
+    const lens = fakeLens();
+    const { editor } = setup([text("teh")], lens, () => true, null);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    expect(sections(openPopover(editor, "teh"))[""]).toEqual(["the"]);
+    lens.setup = null;
+    expect(Object.keys(sections(openPopover(editor, "teh")))).toEqual([""]);
+  });
+});
+
+describe("ruleLabel and dictionaryWord", () => {
+  it("reads a rule name as words", () => {
+    expect(ruleLabel("OxfordComma")).toBe("Oxford comma");
+    expect(ruleLabel("SpellCheck")).toBe("Spell check");
+    expect(ruleLabel("Catch22")).toBe("Catch22");
+  });
+
+  it("drops a possessive from a flagged word", () => {
+    expect(dictionaryWord("Vashti's")).toBe("Vashti");
+    expect(dictionaryWord("Ares’")).toBe("Ares");
+    expect(dictionaryWord("Zorn")).toBe("Zorn");
   });
 });

@@ -71,6 +71,7 @@ from app.services.project.plot_context import PlotContextMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.promotion import PromotionMixin
 from app.services.project.prompts import PromptEntriesMixin
+from app.services.project.proofreading import ProofreadingMixin
 from app.services.project.references import ReferencesMixin
 from app.services.project.research import ResearchNotesMixin
 from app.services.project.scene_snapshot_mutations import SceneSnapshotMutationsMixin
@@ -147,6 +148,7 @@ class ProjectService(
     SceneTodoAnchorsMixin,
     SnapshotDiffMixin,
     SnapshotWitnessMixin,
+    ProofreadingMixin,
     SearchMixin,
     SearchCorpusMixin,
     SearchReplaceMixin,

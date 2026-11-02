@@ -63,6 +63,11 @@ log = logging.getLogger(__name__)
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
 SCHEMA_FILENAME = "metadata.schema.yaml"
+# The proofreading files (ADR-0102 §6). `PROOFREADING_FILENAME` may sit at any
+# layer, the machine and the Library included; the ignore-here file only in a
+# project folder. Both are optional: absent means empty.
+PROOFREADING_FILENAME = "proofreading.yaml"
+PROOFREADING_IGNORED_FILENAME = "proofreading.ignored.yaml"
 # The per-layer manifest: a folder carrying one IS a project, and its `inherits`
 # key is the declaration. It no longer says where the walk *stops* — that bound
 # is the machine root since #429, one folder for every project, so a manifest is
@@ -497,7 +502,8 @@ class LayerWalkMixin:
 
     def _machine_layer_folder(self) -> Path | None:
         """The machine config dir, when it carries any `MACHINE_LAYER_FAMILIES`
-        folder (`node_families.py`) — `assistants/` or `tags/` today. Any one
+        folder (`node_families.py`) — `assistants/` or `tags/` today — or a
+        `proofreading.yaml` (ADR-0102 §6). Any one
         alone is enough: a fresh machine dir whose first-ever node is a tag (no
         assistant created yet) must still resolve a machine layer, or its tag
         never becomes visible to `list_tag_entries` with no project open.
@@ -512,7 +518,11 @@ class LayerWalkMixin:
         from app.services import machine_settings as ms_service
 
         machine_dir = ms_service.assistants_dir().parent
-        if not any((machine_dir / family.folder_name).exists() for family in MACHINE_LAYER_FAMILIES):
+        # A machine `proofreading.yaml` makes it a layer too (ADR-0102 §6): the
+        # proofreading read walks this chain, and a machine that has a word in
+        # its dictionary but no assistant or tag must still contribute it.
+        has_family = any((machine_dir / family.folder_name).exists() for family in MACHINE_LAYER_FAMILIES)
+        if not has_family and not (machine_dir / PROOFREADING_FILENAME).exists():
             return None
         # Resolved, like every project layer (`_project_layer_folders`, #356) and
         # `root` itself. It was the one un-canonicalised folder in the chain, and

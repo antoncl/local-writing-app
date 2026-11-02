@@ -13,6 +13,7 @@ import { mutationSetsApi } from "./api/mutationSets";
 import { plotApi } from "./api/plot";
 import { projectApi } from "./api/project";
 import { promptsApi } from "./api/prompts";
+import { proofreadingApi } from "./api/proofreading";
 import { researchApi } from "./api/research";
 import { schemaApi } from "./api/schema";
 import { searchApi } from "./api/search";
@@ -43,4 +44,5 @@ export const api = {
   ...searchApi,
   ...tagNodesApi,
   ...snapshotsApi,
+  ...proofreadingApi,
 };

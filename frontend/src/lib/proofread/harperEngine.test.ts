@@ -3,8 +3,8 @@
 // `organizedLints` — and the engine's calls into the linter. The WASM never
 // loads here; the linter and its lints are stand-ins of the same shape.
 import { describe, expect, it, vi } from "vitest";
-import { SuggestionKind } from "harper.js";
-import { harperEngineFor, toFindings } from "./harperEngine";
+import { Dialect, SuggestionKind } from "harper.js";
+import { harperEngineFor, mergedRules, toFindings } from "./harperEngine";
 
 type FakeSuggestion = { kind: () => SuggestionKind; get_replacement_text: () => string };
 const suggestion = (kind: SuggestionKind, text = ""): FakeSuggestion => ({ kind: () => kind, get_replacement_text: () => text });
@@ -53,9 +53,59 @@ describe("toFindings", () => {
   });
 });
 
+/** A linter stand-in with every call the engine makes. */
+function fakeLinter() {
+  return {
+    lint: vi.fn(async (): Promise<never[]> => []),
+    organizedLints: vi.fn(async (): Promise<Record<string, never[]>> => ({})),
+    clearWords: vi.fn(async () => undefined),
+    importWords: vi.fn(async () => undefined),
+    setLintConfig: vi.fn(async () => undefined),
+    setDialect: vi.fn(async () => undefined),
+    clearIgnoredLints: vi.fn(async () => undefined),
+    ignoreLintHash: vi.fn(async () => undefined),
+    contextHash: vi.fn(async () => 18446744073709551615n),
+  };
+}
+
+describe("mergedRules", () => {
+  it("puts the writer's switches over Harper's defaults and skips names it lacks", () => {
+    expect(mergedRules({ SpellCheck: true, OxfordComma: true }, { OxfordComma: false, RetiredRule: false })).toEqual({
+      SpellCheck: true,
+      OxfordComma: false,
+    });
+  });
+});
+
 describe("harperEngineFor", () => {
+  it("configures rules, dialect and ignores, replacing earlier ignores", async () => {
+    const linter = fakeLinter();
+    const engine = harperEngineFor(linter as never, { SpellCheck: true, Hedging: true });
+    await engine.configure({ rules: { Hedging: false }, dialect: "british", ignored: ["18446744073709551615", "7"] });
+    expect(linter.setLintConfig).toHaveBeenCalledWith({ SpellCheck: true, Hedging: false });
+    expect(linter.setDialect).toHaveBeenCalledWith(Dialect.British);
+    expect(linter.clearIgnoredLints).toHaveBeenCalled();
+    // Exact as a bigint: a JS number would round the largest u64.
+    expect(linter.ignoreLintHash.mock.calls.map((c) => (c as unknown[])[0])).toEqual([18446744073709551615n, 7n]);
+  });
+
+  it("hashes every lint at the finding's spot, the hidden overlapping ones included", async () => {
+    const linter = fakeLinter();
+    // Two rules flag "untill"; Harper's overlap removal would show only one.
+    const spelling = lint(4, 10, "Spelling", "until?");
+    const wordChoice = lint(4, 10, "WordChoice", "distill?");
+    const elsewhere = lint(11, 18, "Spelling", "?");
+    linter.lint.mockResolvedValueOnce([spelling, wordChoice, elsewhere] as never);
+    linter.contextHash.mockResolvedValueOnce(1n).mockResolvedValueOnce(18446744073709551615n);
+    const engine = harperEngineFor(linter as never);
+    const finding = toFindings({ WrongNegative: [wordChoice] })[0];
+    expect(await engine.hashesOf("Then untill mornin", finding)).toEqual(["1", "18446744073709551615"]);
+    expect(linter.lint).toHaveBeenCalledWith("Then untill mornin", { language: "plaintext", dedup: false });
+    expect(linter.contextHash.mock.calls.map((c) => (c as unknown[])[1])).toEqual([spelling, wordChoice]);
+  });
+
   it("lints as plaintext and skips blank text", async () => {
-    const linter = { organizedLints: vi.fn(async () => ({})), clearWords: vi.fn(), importWords: vi.fn() };
+    const linter = fakeLinter();
     const engine = harperEngineFor(linter as never);
     await engine.lint("Some *prose*.");
     expect(linter.organizedLints).toHaveBeenCalledWith("Some *prose*.", { language: "plaintext" });
@@ -66,7 +116,7 @@ describe("harperEngineFor", () => {
   it("replaces the added words rather than appending to them", async () => {
     const calls: string[] = [];
     const linter = {
-      organizedLints: vi.fn(),
+      ...fakeLinter(),
       clearWords: vi.fn(async () => void calls.push("clear")),
       importWords: vi.fn(async (words: string[]) => void calls.push(`import ${words.join(",")}`)),
     };

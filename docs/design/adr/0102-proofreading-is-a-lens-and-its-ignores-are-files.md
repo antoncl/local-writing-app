@@ -474,3 +474,27 @@ statements above and adds two facts. Nothing else changes.
 ### Not changed
 
 The lens, the pipeline, the ignores and their storage, and the slices.
+
+## Amendment 2 — Ignores are read from the whole chain, and the machine is a target before its file exists
+
+2026-11-02, from building slice 2. Two statements above are made precise. Nothing else changes.
+
+### What prompted it
+
+- §5 says the lens loads the ignore-here hashes of "the open project's
+  `proofreading.ignored.yaml`", while §4 saves an ignore "in the project the node lives in". For a
+  scene the two are the same folder. For a node inherited from an ancestor project (long-text
+  fields in slice 3), the ignore would be saved where the open project never reads it.
+- §6 makes a machine `proofreading.yaml` turn the machine dir into a layer of the walk. Before the
+  first machine-level word or rule, there is no such file, so the walk has no machine layer to
+  write to.
+
+### Decision
+
+1. **The read takes ignore-here hashes from every project layer of the chain**, not the Library or
+   the machine, which never hold one. An ignore saved in the project that owns its node then holds
+   wherever that node is opened.
+2. **The machine dir is always a target.** The proofreading service's layer list is the walk with
+   the Library and the machine included. When the walk has no machine layer yet, the service adds
+   it, after the Library. The first machine write creates the file, and from then on the walk
+   yields the layer by itself (§6).

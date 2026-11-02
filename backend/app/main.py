@@ -32,6 +32,7 @@ from app.routers import (
     metadata,
     plot,
     project,
+    proofreading,
     scenes,
     session,
     snapshots,
@@ -144,6 +145,7 @@ app.include_router(lore.router)
 app.include_router(plot.router)
 app.include_router(entries.router)
 app.include_router(tag_nodes.router)
+app.include_router(proofreading.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)
 app.include_router(updates.router)

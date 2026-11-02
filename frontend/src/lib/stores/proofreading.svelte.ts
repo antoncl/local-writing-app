@@ -1,40 +1,67 @@
-// Proofreading (ADR-0102 §1): the lens. One app-wide switch, off at every start
-// and never persisted: a revision pass is a sitting, and a lens that came back
-// on by itself would underline the next first draft.
+// Proofreading (ADR-0102 §1, §4–§5): the lens. One app-wide switch, off at every
+// start and never persisted: a revision pass is a sitting, and a lens that came
+// back on by itself would underline the next first draft.
 //
 // Switching it on the first time loads the engine (a dynamic import, so the
 // binary never loads before the writer asks for it). Switching it off keeps the
 // engine for the session, so the next switch-on is immediate.
 //
+// The engine is loaded with two things: the words — the lore auto-dictionary
+// plus the writer's dictionary files — and the config — the rule switches, the
+// dialect and the ignore-here hashes, all read from the backend's merged setup.
+// The setup is fetched again whenever the lore roster changes, which it does on
+// every project switch. The popover's three permanent ignores write through the
+// backend and load the answer.
+//
 // Each prose editor's highlight plugin asks this controller to lint a block's
-// text and subscribes to hear when its findings may have changed: the lens went
-// on or off, the engine became ready, or the words changed. Results are cached
-// by text and cleared whenever the words change.
+// text and subscribes to hear when its findings may have changed. Results are
+// cached by text and dropped whenever the words or the config change.
 import { untrack } from "svelte";
+import { api } from "@/lib/api";
+import { scopeHeaders } from "@/lib/api/core";
 import { loreEntriesStore } from "@/lib/stores/lore";
-import { autoDictionary } from "@/lib/proofread/dictionary";
-import type { Finding, ProofreadEngine } from "@/lib/proofread/findings";
-import type { LoreEntrySummary } from "@/lib/types";
+import { autoDictionary, withPossessives } from "@/lib/proofread/dictionary";
+import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
+import type { LoreEntrySummary, ProofreadingSetup } from "@/lib/types";
 
 const CACHE_LIMIT = 4000;
 
-export type LensStatus ="off" | "loading" | "ready" | "error";
+export type LensStatus = "off" | "loading" | "ready" | "error";
 
 /** What the highlight extension needs of the lens. */
 export interface ProofreadLens {
   readonly active: boolean;
+  /** The merged setup: the layers the ignores can be written to. */
+  readonly setup: ProofreadingSetup | null;
   /** The findings for `text` if already linted, else undefined. */
   cached(text: string): Finding[] | undefined;
   /** Lint `text` (from the cache when it can). Rejects only on engine failure. */
   lint(text: string): Promise<Finding[]>;
   /** Hear when findings may have changed; returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
+  /** Add to dictionary: `word` is spelled right at `layerId` and below. */
+  addWord(word: string, layerId: string): Promise<void>;
+  /** Stop checking this rule at `layerId` and below. */
+  disableRule(rule: string, layerId: string): Promise<void>;
+  /** Ignore here: this one finding in `nodeId`, made from `text`, its block. */
+  ignoreHere(nodeId: string, text: string, finding: Finding): Promise<void>;
+}
+
+/** The backend calls the lens makes (the real ones are `api`'s). */
+export interface ProofreadingBackend {
+  read(): Promise<ProofreadingSetup>;
+  addWord(word: string, layerId: string): Promise<ProofreadingSetup>;
+  setRule(rule: string, enabled: boolean | null, layerId: string): Promise<ProofreadingSetup>;
+  ignore(nodeId: string, hashes: string[]): Promise<ProofreadingSetup>;
 }
 
 export interface ProofreadingDeps {
   loadEngine: () => Promise<ProofreadEngine>;
   /** Subscribe to the lore roster; returns the unsubscribe. */
   subscribeLore: (run: (entries: LoreEntrySummary[]) => void) => () => void;
+  backend: ProofreadingBackend;
+  /** The open project's root, to tell a project switch from a lore edit. */
+  projectRoot: () => string | null;
   /** How long the engine may take to start before the lens reports an error. */
   startTimeoutMs: number;
 }
@@ -42,6 +69,13 @@ export interface ProofreadingDeps {
 const defaultDeps: ProofreadingDeps = {
   loadEngine: async () => (await import("@/lib/proofread/harperEngine")).createHarperEngine(),
   subscribeLore: (run) => loreEntriesStore.subscribe(run),
+  backend: {
+    read: () => api.getProofreading(),
+    addWord: (word, layerId) => api.addProofreadingWord(word, layerId),
+    setRule: (rule, enabled, layerId) => api.setProofreadingRule(rule, enabled, layerId),
+    ignore: (nodeId, hashes) => api.ignoreProofreadingSpot(nodeId, hashes),
+  },
+  projectRoot: () => scopeHeaders()["X-Project-Root"] ?? null,
   // A binary that fails to load inside Harper's worker never rejects its setup
   // promise: without a limit the lens would say "loading" forever.
   startTimeoutMs: 60_000,
@@ -63,10 +97,53 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** The engine config the setup asks for. */
+function engineConfig(setup: ProofreadingSetup | null): EngineConfig {
+  return {
+    rules: setup?.rules ?? {},
+    dialect: setup?.dialect ?? "american",
+    ignored: Object.values(setup?.ignored ?? {}).flat(),
+  };
+}
+
+/** One kind of engine state (the words, or the config) loaded at most once
+ *  per distinct value: a repeat of what is loaded or loading waits on that
+ *  load, failure included, and a failed load is sent again next time. */
+class EngineSlot {
+  private loaded: string | null = null;
+  private current: Promise<void> = Promise.resolve();
+
+  /** `queue` runs a step on the engine in order; `onChange` hears a new value. */
+  constructor(
+    private queue: (step: () => Promise<void>) => Promise<void>,
+    private onChange: () => void,
+  ) {}
+
+  /** Load `key`'s value with `run` unless it is already loaded or loading. */
+  load(key: string, run: () => Promise<void>): Promise<void> {
+    if (key === this.loaded) return this.current;
+    this.loaded = key;
+    this.onChange();
+    this.current = this.queue(run).catch((err: unknown) => {
+      // The engine does not have this value: send it again next time instead
+      // of taking it for loaded.
+      if (this.loaded === key) this.loaded = null;
+      throw err;
+    });
+    return this.current;
+  }
+
+  reset(): void {
+    this.loaded = null;
+    this.current = Promise.resolve();
+  }
+}
+
 export class ProofreadingController implements ProofreadLens {
   on = $state(false);
   status = $state<LensStatus>("off");
   error = $state<string | null>(null);
+  setup = $state.raw<ProofreadingSetup | null>(null);
 
   private engine: ProofreadEngine | null = null;
   private loading: Promise<void> | null = null;
@@ -78,18 +155,27 @@ export class ProofreadingController implements ProofreadLens {
   /** As-of-scene name sets per editor (a scene's mid-story renames, #61),
    *  each `[title, ...aliases]`. */
   private viewNames = new Map<string, string[][]>();
-  /** The word list the engine was last given, to skip a needless reload. */
-  private loadedWords: string | null = null;
-  /** Bumped by every word reload, so a lint that started before it is dropped. */
+  private words: EngineSlot;
+  private config: EngineSlot;
+  /** Bumped whenever the words or config change, so a lint that started
+   *  before is not cached. */
   private generation = 0;
-  /** The latest word load. Lints wait on it, so none runs against a half-loaded
-   *  dictionary (setting words is two engine calls). */
-  private wordsLoad: Promise<void> = Promise.resolve();
-  /** The load of `loadedWords` itself, failure included — what a second
-   *  caller asking for the same words waits on. */
-  private currentLoad: Promise<void> = Promise.resolve();
+  /** The engine's queue: words and config are each two or more engine calls,
+   *  and no lint may run between them. Never rejects. */
+  private engineWork: Promise<void> = Promise.resolve();
+  /** Setup requests are numbered when sent; an answer older than one already
+   *  applied is dropped, so a read sent before a write can't undo it. */
+  private setupSent = 0;
+  private setupApplied = 0;
+  /** The project the loaded setup belongs to. */
+  private setupRoot: string | null = null;
 
-  constructor(private deps: ProofreadingDeps = defaultDeps) {}
+  constructor(private deps: ProofreadingDeps = defaultDeps) {
+    const queue = (step: () => Promise<void>) => this.queue(step);
+    const changed = () => this.changed();
+    this.words = new EngineSlot(queue, changed);
+    this.config = new EngineSlot(queue, changed);
+  }
 
   get active(): boolean {
     return this.on && this.status === "ready";
@@ -119,7 +205,7 @@ export class ProofreadingController implements ProofreadLens {
   setViewNames(viewKey: string, names: string[][] | null): void {
     if (names && names.length > 0) this.viewNames.set(viewKey, names);
     else if (!this.viewNames.delete(viewKey)) return;
-    this.refreshWords();
+    this.reloadWords().catch(() => undefined);
   }
 
   cached(text: string): Finding[] | undefined {
@@ -134,7 +220,7 @@ export class ProofreadingController implements ProofreadLens {
     const engine = this.engine;
     if (!engine) return Promise.resolve([]);
     const generation = this.generation;
-    const run = this.wordsLoad
+    const run = this.engineWork
       .then(() => engine.lint(text))
       .then((findings) => {
         if (generation === this.generation) {
@@ -154,6 +240,20 @@ export class ProofreadingController implements ProofreadLens {
     return () => this.listeners.delete(listener);
   }
 
+  async addWord(word: string, layerId: string): Promise<void> {
+    await this.load(() => this.deps.backend.addWord(word, layerId));
+  }
+
+  async disableRule(rule: string, layerId: string): Promise<void> {
+    await this.load(() => this.deps.backend.setRule(rule, false, layerId));
+  }
+
+  async ignoreHere(nodeId: string, text: string, finding: Finding): Promise<void> {
+    const hashes = (await this.engine?.hashesOf(text, finding)) ?? [];
+    if (hashes.length === 0) throw new Error("This finding can't be ignored here.");
+    await this.load(() => this.deps.backend.ignore(nodeId, hashes));
+  }
+
   private notify(): void {
     for (const listener of [...this.listeners]) listener();
   }
@@ -165,18 +265,26 @@ export class ProofreadingController implements ProofreadLens {
     this.loading = (async () => {
       try {
         this.engine = await withTimeout(this.deps.loadEngine(), this.deps.startTimeoutMs);
+        let starting = true;
         this.stopLore = this.deps.subscribeLore((entries) => {
           this.lore = entries;
-          this.refreshWords();
+          if (starting) return;
+          // The new names are known now: load them before anything else lints.
+          this.reloadWords().catch(() => undefined);
+          // A project switch replaces the roster: read that project's setup.
+          // A lore edit within the project doesn't change it.
+          if (this.deps.projectRoot() !== this.setupRoot) this.refresh().catch(() => undefined);
         });
-        await this.reloadWords();
+        starting = false;
+        await this.refresh();
         this.status = "ready";
       } catch (err) {
         // Undo the whole start, so switching on again starts from nothing
         // (one lore subscription, not one more per attempt).
         this.stopLore?.();
         this.stopLore = null;
-        this.loadedWords = null;
+        this.words.reset();
+        this.config.reset();
         this.engine = null;
         this.status = "error";
         this.error = err instanceof Error ? err.message : String(err);
@@ -189,31 +297,53 @@ export class ProofreadingController implements ProofreadLens {
     return this.loading;
   }
 
-  /** Reload the words from a subscription: a failure is not lost (the next
-   *  reload retries it) and is not an unhandled rejection. */
-  private refreshWords(): void {
-    this.reloadWords().catch(() => undefined);
+  /** Read the open project's setup and load it. */
+  private async refresh(): Promise<void> {
+    this.setupRoot = this.deps.projectRoot();
+    await this.load(() => this.deps.backend.read());
+  }
+
+  /** Send a setup request and load its answer, unless an answer to a later
+   *  request was loaded first. */
+  private async load(request: () => Promise<ProofreadingSetup>): Promise<void> {
+    const sent = ++this.setupSent;
+    const setup = await request();
+    if (sent < this.setupApplied) return;
+    this.setupApplied = sent;
+    this.setup = setup;
+    await Promise.all([this.reloadConfig(), this.reloadWords()]);
+  }
+
+  /** Queue `step` on the engine. */
+  private queue(step: () => Promise<void>): Promise<void> {
+    const run = this.engineWork.then(step);
+    this.engineWork = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The words or config changed: nothing linted before still holds. */
+  private changed(): void {
+    this.generation++;
+    this.cache.clear();
+    this.pending.clear();
   }
 
   private async reloadWords(): Promise<void> {
     const engine = this.engine;
     if (!engine) return;
-    const words = autoDictionary(this.lore, [...this.viewNames.values()].flat(1));
-    const key = words.join("\n");
-    if (key === this.loadedWords) return this.currentLoad;
-    this.loadedWords = key;
-    this.generation++;
-    this.cache.clear();
-    this.pending.clear();
-    const load = this.wordsLoad.then(() => engine.setWords(words)).catch((err: unknown) => {
-      // The engine does not have these words: let the next reload send them
-      // again instead of taking them for loaded.
-      if (this.loadedWords === key) this.loadedWords = null;
-      throw err;
-    });
-    this.currentLoad = load;
-    this.wordsLoad = load.catch(() => undefined);
-    await load;
+    const auto = autoDictionary(this.lore, [...this.viewNames.values()].flat(1));
+    // A word the writer added is spelled as written, possessives included.
+    const own = (this.setup?.words ?? []).flatMap(withPossessives);
+    const words = [...new Set([...auto, ...own])].sort();
+    await this.words.load(words.join("\n"), () => engine.setWords(words));
+    if (this.status === "ready") this.notify();
+  }
+
+  private async reloadConfig(): Promise<void> {
+    const engine = this.engine;
+    if (!engine) return;
+    const config = engineConfig(this.setup);
+    await this.config.load(JSON.stringify(config), () => engine.configure(config));
     if (this.status === "ready") this.notify();
   }
 
@@ -226,9 +356,13 @@ export class ProofreadingController implements ProofreadLens {
     this.cache.clear();
     this.pending.clear();
     this.viewNames.clear();
-    this.loadedWords = null;
-    this.wordsLoad = Promise.resolve();
-    this.currentLoad = Promise.resolve();
+    this.words.reset();
+    this.config.reset();
+    this.engineWork = Promise.resolve();
+    this.setup = null;
+    this.setupSent = 0;
+    this.setupApplied = 0;
+    this.setupRoot = null;
     this.on = false;
     this.status = "off";
     this.error = null;

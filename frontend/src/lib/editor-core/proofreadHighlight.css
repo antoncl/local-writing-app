@@ -40,14 +40,23 @@
   margin: 0;
 }
 
-.proofread-popover-fixes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.proofread-popover-section {
   margin-top: 6px;
 }
 
-.proofread-popover-fix {
+.proofread-popover-heading {
+  margin: 0 0 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.proofread-popover-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.proofread-popover-choice {
   appearance: none;
   padding: 2px 8px;
   background: var(--accent-soft);
@@ -58,7 +67,18 @@
   cursor: pointer;
 }
 
-.proofread-popover-fix:hover,
-.proofread-popover-fix:focus-visible {
+.proofread-popover-choice:hover,
+.proofread-popover-choice:focus-visible {
   background: var(--accent-soft2);
+}
+
+.proofread-popover-choice:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.proofread-popover-error {
+  margin: 6px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
 }

@@ -32,11 +32,19 @@ export function withPossessives(word: string): string[] {
 }
 
 /** The engine's word list: every word of every lore name plus `extraNames`,
- *  with possessives, deduplicated and sorted. */
+ *  with possessives, deduplicated and sorted. Each word also goes in lower
+ *  case: Harper accepts a capitalized entry only capitalized, but a lowercase
+ *  entry in either case — so "skyglass" in prose passes for the entry
+ *  "Skyglass", as the implicit-context matcher (case-insensitive) already
+ *  treats it. The cost is that a miscapitalized name is not flagged. */
 export function autoDictionary(entries: LoreEntrySummary[], extraNames: Iterable<string> = []): string[] {
   const words = new Set<string>();
   const add = (name: string) => {
-    for (const word of nameWords(name)) for (const form of withPossessives(word)) words.add(form);
+    for (const word of nameWords(name)) {
+      for (const form of withPossessives(word)) words.add(form);
+      const lower = word.toLowerCase();
+      if (lower !== word) for (const form of withPossessives(lower)) words.add(form);
+    }
   };
   for (const entry of entries) for (const name of loreEntryNames(entry)) add(name);
   for (const name of extraNames) add(name);

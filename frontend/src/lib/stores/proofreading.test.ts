@@ -45,6 +45,7 @@ function setup(lore: LoreEntrySummary[] = []) {
       run(lore);
       return () => undefined;
     },
+    startTimeoutMs: 1000,
   });
   return { lens, engine, log, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
 }
@@ -121,11 +122,26 @@ describe("ProofreadingController", () => {
         throw new Error("no wasm");
       },
       subscribeLore: () => () => undefined,
+      startTimeoutMs: 1000,
     });
     lens.toggle();
     await settle();
     expect(lens.status).toBe("error");
     expect(lens.error).toBe("no wasm");
+    expect(lens.on).toBe(false);
+  });
+
+  it("reports a start that never finishes instead of loading forever", async () => {
+    const lens = new ProofreadingController({
+      loadEngine: () => new Promise<never>(() => undefined),
+      subscribeLore: () => () => undefined,
+      startTimeoutMs: 10,
+    });
+    lens.toggle();
+    expect(lens.status).toBe("loading");
+    await settle();
+    expect(lens.status).toBe("error");
+    expect(lens.error).toMatch(/did not start/);
     expect(lens.on).toBe(false);
   });
 });

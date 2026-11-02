@@ -1,10 +1,10 @@
 // Proofreading (ADR-0102 §2): the text a block is linted as, and the way back
 // from an offset in it to a document position — across a hard break, an inline
 // atom (the mutation pill is a point with no text) and a character outside the
-// Basic Multilingual Plane.
+// Basic Multilingual Plane, which takes two UTF-16 units like any JS string.
 import { describe, expect, it } from "vitest";
 import { Schema } from "@tiptap/pm/model";
-import { blockText, codePointToUtf16, docRange, textBlocks } from "./blockText";
+import { blockText, docRange, textBlocks } from "./blockText";
 
 const schema = new Schema({
   nodes: {
@@ -54,22 +54,17 @@ describe("blockText", () => {
     expect(d.textBetween(blocks[1].start, blocks[1].end)).toBe("Two");
   });
 
+  it("maps text after an emoji by UTF-16 units", () => {
+    const d = doc.create(null, [paragraph.create(null, [t("Go 🙂 teh end")])]);
+    const [block] = textBlocks(d);
+    const from = block.text.indexOf("teh");
+    const range = docRange(block, from, from + 3);
+    expect(d.textBetween(range.from, range.to)).toBe("teh");
+  });
+
   it("an empty block has empty text and an insertion point at its start", () => {
     const block = blockText(paragraph.create(), 1);
     expect(block.text).toBe("");
     expect(docRange(block, 0, 0)).toEqual({ from: 1, to: 1 });
-  });
-});
-
-describe("codePointToUtf16", () => {
-  it("is the identity in the Basic Multilingual Plane", () => {
-    expect(codePointToUtf16("naïve café", 6)).toBe(6);
-  });
-
-  it("counts an emoji as two units", () => {
-    const text = "Go 🙂 teh end";
-    // Harper reports "teh" at code points 5..8; in UTF-16 it starts at 6.
-    expect(codePointToUtf16(text, 5)).toBe(text.indexOf("teh"));
-    expect(codePointToUtf16(text, 8)).toBe(text.indexOf("teh") + 3);
   });
 });

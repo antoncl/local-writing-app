@@ -56,17 +56,3 @@ export function docRange(block: BlockText, from: number, to: number): { from: nu
   const at = from > 0 ? block.pos[from - 1] + 1 : (block.pos[0] ?? block.start);
   return { from: at, to: at };
 }
-
-/** Convert a code-point index into `text` to a UTF-16 index. Harper's spans
- *  index Unicode scalar values; a JS string indexes UTF-16 units, and the two
- *  part ways after any character outside the Basic Multilingual Plane. */
-export function codePointToUtf16(text: string, codePoint: number): number {
-  let units = 0;
-  let points = 0;
-  while (points < codePoint && units < text.length) {
-    const c = text.codePointAt(units) ?? 0;
-    units += c > 0xffff ? 2 : 1;
-    points++;
-  }
-  return units;
-}

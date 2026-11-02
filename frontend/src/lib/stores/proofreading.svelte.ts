@@ -35,12 +35,33 @@ export interface ProofreadingDeps {
   loadEngine: () => Promise<ProofreadEngine>;
   /** Subscribe to the lore roster; returns the unsubscribe. */
   subscribeLore: (run: (entries: LoreEntrySummary[]) => void) => () => void;
+  /** How long the engine may take to start before the lens reports an error. */
+  startTimeoutMs: number;
 }
 
 const defaultDeps: ProofreadingDeps = {
   loadEngine: async () => (await import("@/lib/proofread/harperEngine")).createHarperEngine(),
   subscribeLore: (run) => loreEntriesStore.subscribe(run),
+  // A binary that fails to load inside Harper's worker never rejects its setup
+  // promise: without a limit the lens would say "loading" forever.
+  startTimeoutMs: 60_000,
 };
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`the checker did not start within ${ms / 1000} s`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 export class ProofreadingController implements ProofreadLens {
   on = $state(false);
@@ -139,7 +160,7 @@ export class ProofreadingController implements ProofreadLens {
     this.error = null;
     this.loading = (async () => {
       try {
-        this.engine = await this.deps.loadEngine();
+        this.engine = await withTimeout(this.deps.loadEngine(), this.deps.startTimeoutMs);
         this.stopLore = this.deps.subscribeLore((entries) => {
           this.lore = entries;
           void this.reloadWords();

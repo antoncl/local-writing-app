@@ -36,6 +36,12 @@ describe("autoDictionary", () => {
     expect(words).toContain("Skyglass's");
   });
 
+  it("adds each name in lower case too, so a lowercase use in prose passes", () => {
+    const words = autoDictionary([entry("Skyglass")]);
+    expect(words).toContain("skyglass");
+    expect(words).toContain("skyglass's");
+  });
+
   it("adds a scene's as-of-scene names, deduplicated and sorted", () => {
     const words = autoDictionary([entry("Kael")], ["Kael", "Ashcombe"]);
     expect(words.filter((w) => w === "Kael")).toHaveLength(1);

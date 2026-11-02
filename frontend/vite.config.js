@@ -123,8 +123,33 @@ export default defineConfig(({ command, mode }) => {
     },
   };
 
+  // harper.js reads its binary with `import("fs")` when it runs under Node from
+  // a file:// URL. In the browser that branch never runs, but Vite still has to
+  // resolve the specifier and warns about externalizing "fs". Resolve it — for
+  // harper.js only — to an empty module instead (ADR-0102 slice 1).
+  const HARPER_NO_FS = "\0harper-no-fs";
+  const harperNoFs = {
+    name: "harper-no-fs",
+    apply: "build",
+    // Ahead of Vite's own resolver, which is what externalizes and warns.
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (source === "fs" && importer?.replaceAll("\\", "/").includes("/node_modules/harper.js/")) return HARPER_NO_FS;
+      return null;
+    },
+    load(id) {
+      return id === HARPER_NO_FS ? "export default {};" : null;
+    },
+  };
+
   return {
-    plugins: [svelte(), failOnBuildWarnings],
+    plugins: [svelte(), harperNoFs, failOnBuildWarnings],
+    // harper.js finds its WebAssembly binary with `new URL(..., import.meta.url)`.
+    // Pre-bundling moves the module into `.vite/deps/` without the binary, so the
+    // dev server answers the binary's URL with index.html (ADR-0102 §2).
+    optimizeDeps: {
+      exclude: ["harper.js"],
+    },
     // Vitest reads this block. `setupFiles` runs once per test file, before any
     // test — here it installs the network guard that makes a test touching a
     // real backend fail loudly instead of silently hitting :8787 (#973).

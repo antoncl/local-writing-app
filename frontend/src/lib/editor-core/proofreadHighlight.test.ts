@@ -81,8 +81,10 @@ describe("ProofreadHighlight", () => {
     const lens = fakeLens();
     lens.active = false;
     const inactive = setup([text("teh")], lens);
-    await new Promise((r) => setTimeout(r, 30));
+    // Long enough for a lint to land and be drawn (the redraw waits 40ms).
+    await new Promise((r) => setTimeout(r, 120));
     expect(underlined(off.editor)).toEqual([]);
+    expect(off.lens.lint).not.toHaveBeenCalled();
     expect(underlined(inactive.editor)).toEqual([]);
     expect(lens.lint).not.toHaveBeenCalled();
   });

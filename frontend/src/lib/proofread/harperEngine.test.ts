@@ -1,5 +1,5 @@
-// Proofreading (ADR-0102 §2): Harper's lints as findings — spans converted from
-// code points to UTF-16, each suggestion kind as a fix, the rule from
+// Proofreading (ADR-0102 §2): Harper's lints as findings — spans taken as the
+// UTF-16 offsets harper.js reports, each suggestion kind as a fix, the rule from
 // `organizedLints` — and the engine's calls into the linter. The WASM never
 // loads here; the linter and its lints are stand-ins of the same shape.
 import { describe, expect, it, vi } from "vitest";
@@ -19,18 +19,16 @@ function lint(start: number, end: number, kind: string, message: string, suggest
 }
 
 describe("toFindings", () => {
-  it("converts code-point spans to UTF-16 offsets", () => {
+  it("takes the span as UTF-16 offsets, past an emoji too (measured on 3.0.0)", () => {
     const text = "We 🙂 saw teh cat";
     const at = text.indexOf("teh");
-    // Harper counts the emoji as one scalar value, so "teh" is one earlier.
-    const [finding] = toFindings(text, { SpellCheck: [lint(at - 1, at + 2, "Spelling", "Did you mean “the”?")] });
+    const [finding] = toFindings({ SpellCheck: [lint(at, at + 3, "Spelling", "Did you mean “the”?")] });
     expect(text.slice(finding.from, finding.to)).toBe("teh");
     expect(finding).toMatchObject({ engine: "harper", ruleId: "SpellCheck", kind: "Spelling" });
   });
 
   it("turns each suggestion kind into a fix over the right range", () => {
-    const text = "a a word";
-    const [finding] = toFindings(text, {
+    const [finding] = toFindings({
       Repeated: [
         lint(0, 2, "Repetition", "Repeated word", [
           suggestion(SuggestionKind.Replace, "a"),
@@ -47,7 +45,7 @@ describe("toFindings", () => {
   });
 
   it("orders findings from every rule by position", () => {
-    const findings = toFindings("one two three", {
+    const findings = toFindings({
       B: [lint(8, 13, "Style", "b")],
       A: [lint(0, 3, "Style", "a")],
     });

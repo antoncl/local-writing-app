@@ -131,6 +131,43 @@ describe("ProofreadingController", () => {
     expect(lens.on).toBe(false);
   });
 
+  it("retries words that failed to load, without an unhandled rejection", async () => {
+    const { lens, engine, pushLore } = setup();
+    lens.toggle();
+    await settle();
+    vi.mocked(engine.setWords).mockRejectedValueOnce(new Error("worker hiccup"));
+    pushLore([entry("Kael")]);
+    await settle();
+    expect(await lens.lint("Kael")).toHaveLength(1);
+    // The same roster again: the words go to the engine this time.
+    pushLore([entry("Kael")]);
+    await settle();
+    expect(await lens.lint("Kael")).toEqual([]);
+  });
+
+  it("leaves no lore subscription behind after a failed start", async () => {
+    const { engine } = fakeEngine();
+    vi.mocked(engine.setWords).mockRejectedValueOnce(new Error("worker died"));
+    let subscriptions = 0;
+    const lens = new ProofreadingController({
+      loadEngine: async () => engine,
+      subscribeLore: (run) => {
+        subscriptions++;
+        run([]);
+        return () => subscriptions--;
+      },
+      startTimeoutMs: 1000,
+    });
+    lens.toggle();
+    await settle();
+    expect(lens.status).toBe("error");
+    expect(subscriptions).toBe(0);
+    lens.toggle();
+    await settle();
+    expect(lens.status).toBe("ready");
+    expect(subscriptions).toBe(1);
+  });
+
   it("reports a start that never finishes instead of loading forever", async () => {
     const lens = new ProofreadingController({
       loadEngine: () => new Promise<never>(() => undefined),

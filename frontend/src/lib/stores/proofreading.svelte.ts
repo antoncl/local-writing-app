@@ -84,6 +84,9 @@ export class ProofreadingController implements ProofreadLens {
   /** The latest word load. Lints wait on it, so none runs against a half-loaded
    *  dictionary (setting words is two engine calls). */
   private wordsLoad: Promise<void> = Promise.resolve();
+  /** The load of `loadedWords` itself, failure included — what a second
+   *  caller asking for the same words waits on. */
+  private currentLoad: Promise<void> = Promise.resolve();
 
   constructor(private deps: ProofreadingDeps = defaultDeps) {}
 
@@ -115,7 +118,7 @@ export class ProofreadingController implements ProofreadLens {
   setViewNames(viewKey: string, names: string[] | null): void {
     if (names && names.length > 0) this.viewNames.set(viewKey, names);
     else if (!this.viewNames.delete(viewKey)) return;
-    void this.reloadWords();
+    this.refreshWords();
   }
 
   cached(text: string): Finding[] | undefined {
@@ -163,11 +166,16 @@ export class ProofreadingController implements ProofreadLens {
         this.engine = await withTimeout(this.deps.loadEngine(), this.deps.startTimeoutMs);
         this.stopLore = this.deps.subscribeLore((entries) => {
           this.lore = entries;
-          void this.reloadWords();
+          this.refreshWords();
         });
         await this.reloadWords();
         this.status = "ready";
       } catch (err) {
+        // Undo the whole start, so switching on again starts from nothing
+        // (one lore subscription, not one more per attempt).
+        this.stopLore?.();
+        this.stopLore = null;
+        this.loadedWords = null;
         this.engine = null;
         this.status = "error";
         this.error = err instanceof Error ? err.message : String(err);
@@ -180,17 +188,29 @@ export class ProofreadingController implements ProofreadLens {
     return this.loading;
   }
 
+  /** Reload the words from a subscription: a failure is not lost (the next
+   *  reload retries it) and is not an unhandled rejection. */
+  private refreshWords(): void {
+    this.reloadWords().catch(() => undefined);
+  }
+
   private async reloadWords(): Promise<void> {
     const engine = this.engine;
     if (!engine) return;
     const words = autoDictionary(this.lore, [...this.viewNames.values()].flat());
     const key = words.join("\n");
-    if (key === this.loadedWords) return this.wordsLoad;
+    if (key === this.loadedWords) return this.currentLoad;
     this.loadedWords = key;
     this.generation++;
     this.cache.clear();
     this.pending.clear();
-    const load = this.wordsLoad.then(() => engine.setWords(words));
+    const load = this.wordsLoad.then(() => engine.setWords(words)).catch((err: unknown) => {
+      // The engine does not have these words: let the next reload send them
+      // again instead of taking them for loaded.
+      if (this.loadedWords === key) this.loadedWords = null;
+      throw err;
+    });
+    this.currentLoad = load;
     this.wordsLoad = load.catch(() => undefined);
     await load;
     if (this.status === "ready") this.notify();
@@ -207,6 +227,7 @@ export class ProofreadingController implements ProofreadLens {
     this.viewNames.clear();
     this.loadedWords = null;
     this.wordsLoad = Promise.resolve();
+    this.currentLoad = Promise.resolve();
     this.on = false;
     this.status = "off";
     this.error = null;

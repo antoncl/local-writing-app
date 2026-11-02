@@ -16,9 +16,11 @@ import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
 function fakeLens() {
   const listeners = new Set<() => void>();
   const cache = new Map<string, Finding[]>();
+  let accepted = new Set<string>();
   const lint = vi.fn(async (text: string) => {
     const findings: Finding[] = [];
     for (const m of text.matchAll(/\bteh\b|\brecieve\b/g)) {
+      if (accepted.has(m[0])) continue;
       const from = m.index;
       const to = from + m[0].length;
       findings.push({
@@ -43,6 +45,12 @@ function fakeLens() {
       return () => listeners.delete(listener);
     },
     notify: () => listeners.forEach((l) => l()),
+    /** What a word change does: take the words, forget every result, say so. */
+    acceptWords(words: string[]) {
+      accepted = new Set(words);
+      cache.clear();
+      this.notify();
+    },
   };
   return lens satisfies ProofreadLens & { notify(): void };
 }
@@ -127,7 +135,56 @@ describe("ProofreadHighlight", () => {
     // Mapped, not dropped: still under the same word straight after the edit.
     expect(underlined(editor)).toEqual(["teh"]);
     await vi.waitFor(() => expect(lens.lint).toHaveBeenCalledWith("Yes, I saw teh cat."), { timeout: 2000 });
-    expect(proofreadFindings(editor.state).map((f) => f.problem)).toEqual(["teh"]);
+    expect(proofreadFindings(editor.state).map((f) => f.text)).toEqual(["teh"]);
+  });
+
+  it("keeps the underline and an open popover through a redraw that changes nothing", async () => {
+    const { editor, lens } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    const mark = editor.view.dom.querySelector<HTMLElement>(`.${MARK_CLASS}`)!;
+    mark.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    let transactions = 0;
+    editor.on("transaction", () => transactions++);
+    lens.notify();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(transactions).toBe(0);
+    expect(mark.isConnected).toBe(true);
+    expect(document.querySelector(".proofread-popover")).not.toBeNull();
+  });
+
+  it("never applies a fix to text that moved under an open popover", async () => {
+    const { editor } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    editor.view.dom.querySelector<HTMLElement>(`.${MARK_CLASS}`)!.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    const button = document.querySelector<HTMLButtonElement>(".proofread-popover-fix")!;
+    // Shift the flagged word right by five characters, before any relint.
+    editor.view.dispatch(editor.state.tr.insertText("Yes, ", 1));
+    button.click();
+    expect(editor.state.doc.textContent).toBe("Yes, I saw teh cat.");
+  });
+
+  it("never applies a fix to another occurrence of the same word", async () => {
+    const { editor } = setup([text("x teh y teh z")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh", "teh"]));
+    const second = editor.state.doc.textContent.lastIndexOf("teh") + 1;
+    // Six characters in front: the text at the second finding's old offsets
+    // (8–11) is now the FIRST "teh", shifted there.
+    editor.view.dispatch(editor.state.tr.insertText("teh y ", 1));
+    expect(editor.state.doc.textContent.slice(8, 11)).toBe("teh");
+    const mapped = findingAt(editor.state, second + 6)!;
+    expect(editor.state.doc.textBetween(mapped.from, mapped.to)).toBe("teh");
+    expect(applyFix(editor.view, mapped, proofreadFindings(editor.state)[1].fixes[0])).toBe(false);
+    expect(editor.state.doc.textContent).toBe("teh y x teh y teh z");
+  });
+
+  it("closes the popover when its finding goes away without an edit", async () => {
+    const { editor, lens } = setup([text("I saw teh cat.")]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual(["teh"]));
+    editor.view.dom.querySelector<HTMLElement>(`.${MARK_CLASS}`)!.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+    expect(document.querySelector(".proofread-popover")).not.toBeNull();
+    lens.acceptWords(["teh"]);
+    await vi.waitFor(() => expect(underlined(editor)).toEqual([]));
+    expect(document.querySelector(".proofread-popover")).toBeNull();
   });
 
   it("refuses a fix once the text under the finding has changed", async () => {

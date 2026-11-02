@@ -18,8 +18,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { anchoredPopover } from "@/lib/actions/anchoredPopover";
-import { docRange, textBlocks, type BlockText } from "@/lib/proofread/blockText";
-import { isSpelling, type Finding } from "@/lib/proofread/findings";
+import { blockText, docRange, textBlocks, type BlockText } from "@/lib/proofread/blockText";
+import { isSpelling, type Finding, type FindingFix } from "@/lib/proofread/findings";
 import type { ProofreadLens } from "@/lib/stores/proofreading.svelte";
 import "@/lib/editor-core/proofreadHighlight.css";
 
@@ -30,19 +30,6 @@ export const EDIT_DEBOUNCE_MS = 600;
 /** Coalesce a burst of landing lints into one redraw. */
 const RESULT_DEBOUNCE_MS = 40;
 
-/** A fix in document positions relative to its finding's start, so it stays
- *  right while the decoration is mapped through edits elsewhere. */
-type RelativeFix = { label: string; from: number; to: number; insert: string };
-
-/** What a finding's decoration carries. */
-export type FindingSpec = {
-  finding: Finding;
-  /** The text the finding was made for; a fix applies only while it is unchanged. */
-  problem: string;
-  size: number;
-  fixes: RelativeFix[];
-};
-
 export type ProofreadOptions = {
   lens: ProofreadLens | null;
   /** Whether this editor proofreads at all (step 1: scene prose only). */
@@ -51,25 +38,24 @@ export type ProofreadOptions = {
 
 const pluginKey = new PluginKey<DecorationSet>("proofreadHighlight");
 
+/** What a finding's decoration carries: the cached Finding itself and the text
+ *  it flagged. Both compare equal on a redraw from the same cache entry, so
+ *  ProseMirror keeps the span (and a popover anchored on it) in place. */
+type FindingSpec = { proofread: Finding; problem: string };
+const findingOf = (deco: Decoration): Finding => (deco.spec as FindingSpec).proofread;
+
 /** The decorations for one block's findings. */
 export function findingDecorations(block: BlockText, findings: Finding[]): Decoration[] {
   const decorations: Decoration[] = [];
   for (const finding of findings) {
     if (finding.to <= finding.from || finding.to > block.text.length) continue;
     const range = docRange(block, finding.from, finding.to);
-    const fixes = finding.fixes.map((fix) => {
-      const at = docRange(block, fix.from, fix.to);
-      return { label: fix.label, from: at.from - range.from, to: at.to - range.from, insert: fix.insert };
-    });
-    const spec: FindingSpec = {
-      finding,
-      problem: block.text.slice(finding.from, finding.to),
-      size: range.to - range.from,
-      fixes,
-    };
     const kindClass = isSpelling(finding) ? "proofread-spelling" : "proofread-issue";
     decorations.push(
-      Decoration.inline(range.from, range.to, { class: `${MARK_CLASS} ${kindClass}` }, { proofread: spec }),
+      Decoration.inline(range.from, range.to, { class: `${MARK_CLASS} ${kindClass}` }, {
+        proofread: finding,
+        problem: block.text.slice(finding.from, finding.to),
+      } satisfies FindingSpec),
     );
   }
   return decorations;
@@ -83,30 +69,53 @@ export function findingAt(state: EditorState, pos: number): Decoration | null {
   return hits.find((d) => d.from <= pos && pos < d.to) ?? null;
 }
 
+/** The current text of the block holding `deco`, if the finding still reads
+ *  the same there: its offsets name exactly the decorated range, and the text
+ *  there is the text it flagged. An edit before it in the block, or inside it,
+ *  breaks that until the block is linted again; an edit after it does not. */
+function liveBlock(state: EditorState, deco: Decoration): BlockText | null {
+  const $from = state.doc.resolve(deco.from);
+  const node = $from.parent;
+  if (!node.isTextblock) return null;
+  const block = blockText(node, $from.start());
+  const finding = findingOf(deco);
+  if (finding.to > block.text.length) return null;
+  if (block.text.slice(finding.from, finding.to) !== (deco.spec as FindingSpec).problem) return null;
+  const range = docRange(block, finding.from, finding.to);
+  return range.from === deco.from && range.to === deco.to ? block : null;
+}
+
 /** Apply `fix` of the finding decorated by `deco`. False, changing nothing,
- *  when the text under it changed since the finding was made. */
-export function applyFix(view: EditorView, deco: Decoration, fix: RelativeFix): boolean {
-  const spec = (deco.spec as { proofread: FindingSpec }).proofread;
-  const { doc } = view.state;
-  if (deco.to - deco.from !== spec.size || doc.textBetween(deco.from, deco.to) !== spec.problem) return false;
-  const from = deco.from + fix.from;
-  const to = deco.from + fix.to;
+ *  when the text under it moved or changed since the finding was made. */
+export function applyFix(view: EditorView, deco: Decoration, fix: FindingFix): boolean {
+  const block = liveBlock(view.state, deco);
+  if (!block) return false;
+  const { from, to } = docRange(block, fix.from, fix.to);
   const tr = fix.insert ? view.state.tr.insertText(fix.insert, from, to) : view.state.tr.delete(from, to);
   view.dispatch(tr.scrollIntoView());
   return true;
 }
 
-/** Every finding decoration's spec, in document order (tests and the e2e
- *  check read what is drawn through this). */
-export function proofreadFindings(state: EditorState): FindingSpec[] {
+/** Every drawn finding with the text it covers, in document order. */
+export function proofreadFindings(state: EditorState): Array<Finding & { text: string }> {
   const set = pluginKey.getState(state);
   if (!set) return [];
-  return set.find().map((d) => (d.spec as { proofread: FindingSpec }).proofread);
+  return set.find().map((d) => ({ ...findingOf(d), text: state.doc.textBetween(d.from, d.to) }));
+}
+
+/** Whether two decoration lists draw the same thing (same ranges, same findings). */
+function sameDecorations(a: Decoration[], b: Decoration[]): boolean {
+  if (a.length !== b.length) return false;
+  const order = (list: Decoration[]) => [...list].sort((x, y) => x.from - y.from || x.to - y.to);
+  const [sa, sb] = [order(a), order(b)];
+  return sa.every(
+    (d, i) => d.from === sb[i].from && d.to === sb[i].to && d.spec.proofread === sb[i].spec.proofread && d.spec.problem === sb[i].spec.problem,
+  );
 }
 
 type FindingPopover = {
   readonly target: HTMLElement | null;
-  show(target: HTMLElement, spec: FindingSpec, onFix: (fix: RelativeFix) => void): void;
+  show(target: HTMLElement, finding: Finding, onFix: (fix: FindingFix) => void): void;
   hide(): void;
 };
 
@@ -139,16 +148,16 @@ function createFindingPopover(): FindingPopover {
     if (!(node instanceof Node) || (!el.contains(node) && !target?.contains(node))) hide();
   }
 
-  function render(spec: FindingSpec, onFix: (fix: RelativeFix) => void) {
+  function render(finding: Finding, onFix: (fix: FindingFix) => void) {
     el.replaceChildren();
     const message = document.createElement("p");
     message.className = `${POPOVER_CLASS}-message`;
-    message.textContent = spec.finding.message;
+    message.textContent = finding.message;
     el.appendChild(message);
-    if (spec.fixes.length === 0) return;
+    if (finding.fixes.length === 0) return;
     const fixes = document.createElement("div");
     fixes.className = `${POPOVER_CLASS}-fixes`;
-    for (const fix of spec.fixes) {
+    for (const fix of finding.fixes) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `${POPOVER_CLASS}-fix`;
@@ -168,9 +177,9 @@ function createFindingPopover(): FindingPopover {
     get target() {
       return target;
     },
-    show(next, spec, onFix) {
+    show(next, finding, onFix) {
       target = next;
-      render(spec, onFix);
+      render(finding, onFix);
       if (placement) {
         placement.update({ anchor: next });
         return;
@@ -254,6 +263,9 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
                 () => undefined,
               );
             }
+            // Nothing new to draw (a lint landed for text already drawn, or
+            // one still pending): skip the transaction and the redraw.
+            if (sameDecorations(current.find(), decorations)) return;
             replace(DecorationSet.create(view.state.doc, decorations));
           }
 
@@ -264,9 +276,13 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
             const pos = view.posAtDOM(target, 0);
             const deco = findingAt(view.state, pos);
             if (!deco) return;
-            const spec = (deco.spec as { proofread: FindingSpec }).proofread;
-            popover.show(target, spec, (fix) => {
-              const live = findingAt(view.state, deco.from);
+            const finding = findingOf(deco);
+            popover.show(target, finding, (fix) => {
+              // Resolve the decoration again from the underline the popover
+              // hangs from: positions captured at click time are stale after an
+              // edit. A redraw with another finding replaces the span, so a
+              // connected span is still this finding's.
+              const live = target.isConnected ? findingAt(view.state, view.posAtDOM(target, 0)) : null;
               if (!live || !applyFix(view, live, fix)) schedule(0);
               view.focus();
             });
@@ -282,11 +298,9 @@ export const ProofreadHighlight = Extension.create<ProofreadOptions>({
 
           return {
             update(updated, previous) {
-              if (updated.state.doc !== previous.doc) {
-                schedule(EDIT_DEBOUNCE_MS);
-                // The underline the popover hangs from was re-rendered or edited.
-                if (popover.target && !updated.dom.contains(popover.target)) popover.hide();
-              }
+              if (updated.state.doc !== previous.doc) schedule(EDIT_DEBOUNCE_MS);
+              // The underline the popover hangs from was edited or redrawn away.
+              if (popover.target && !updated.dom.contains(popover.target)) popover.hide();
               syncSpellcheck();
             },
             destroy() {

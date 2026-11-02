@@ -71,8 +71,9 @@ export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a ca
 // a small extra gap is harmless, an overlap is not.
 export const PLOT_NODE_HEADER_H = 64; // header band above the collapsed beat roster
 export const PLOT_NODE_BEAT_ROW_H = 24; // one beat row in that roster
-export function estPlotNodeHeight(beatCount: number): number {
-  return PLOT_NODE_HEADER_H + beatCount * PLOT_NODE_BEAT_ROW_H;
+// Like a card, the node's text is sized by --ui-scale (#2362), so the estimate scales with it.
+export function estPlotNodeHeight(beatCount: number, scale = boardTextScale()): number {
+  return Math.ceil((PLOT_NODE_HEADER_H + beatCount * PLOT_NODE_BEAT_ROW_H) * scale);
 }
 export const CONTAINER_PAD = 20; // inner padding between a box edge and its content
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box

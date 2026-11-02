@@ -848,8 +848,11 @@
       return;
     }
     // The text scale is part of the key: card heights are estimated from it (#2362), so
-    // changing the text size re-lays the board out like a data change does.
-    const key = `${projectionDataKey(projection)}@${projectSession.machineSettings?.display.ui_scale ?? 1}`;
+    // changing the text size re-lays the board out like a data change does. It is the
+    // scale on screen: the draft while Machine Settings live-previews it, else the saved one.
+    const { machineSettingsOpen, machineSettingsDraft, machineSettings } = projectSession;
+    const uiScale = (machineSettingsOpen ? machineSettingsDraft?.display.ui_scale : undefined) ?? machineSettings?.display.ui_scale ?? 1;
+    const key = `${projectionDataKey(projection)}@${uiScale}`;
     if (key === loadedDataKey) return;
     loadedDataKey = key;
     const saved = readBoardPositions(projection.layout);

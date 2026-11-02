@@ -533,6 +533,36 @@ class AssistantOrderMergeTests(unittest.TestCase):
         self.assertEqual(self._roster(), ["outer_b", "outer_a"])
         self.assertTrue((self.root / "assistants" / ".order.yaml").exists())
 
+    def test_reset_order_makes_the_project_follow_its_ancestors_again(self) -> None:
+        # #375: a drag writes the whole sequence locally, freezing out later
+        # ancestor reorders. Reset is the way back: after it, an ancestor's
+        # reorder reaches the project again.
+        self._write_assistant(self.base, "outer_a", "Outer A")
+        self._write_assistant(self.base, "outer_b", "Outer B")
+        self._order(self.base, ids=["outer_a", "outer_b"])
+        self.service.reorder_assistant_entries(ReorderAssistantsRequest(ordered_ids=["outer_b", "outer_a"]))
+        self.assertTrue(self.service.list_assistant_entries().local_order)
+        self._order(self.base, ids=["outer_a", "outer_b"])  # the ancestor reorders
+        self.assertEqual(self._roster(), ["outer_b", "outer_a"])  # frozen out
+
+        listed = self.service.reset_assistant_order()
+
+        self.assertFalse(listed.local_order)
+        self.assertEqual(self._roster(), ["outer_a", "outer_b"])
+        self.assertEqual(self.service._read_assistants_order(self.root / "assistants").ids, [])
+
+    def test_reset_order_keeps_the_projects_unlisted_assistants_unlisted(self) -> None:
+        self._write_assistant(self.base, "outer_a", "Outer A")
+        self._write_assistant(self.base, "outer_b", "Outer B")
+        self.service.reorder_assistant_entries(ReorderAssistantsRequest(ordered_ids=["outer_b", "outer_a"]))
+        self.service.unlist_assistant_entry(UnlistAssistantRequest(entry_id="outer_a"))
+
+        self.service.reset_assistant_order()
+
+        order = self.service._read_assistants_order(self.root / "assistants")
+        self.assertEqual(order.ids, [])
+        self.assertEqual(order.excluded, ["outer_a"])
+
     def test_unlisting_an_inherited_assistant_does_not_touch_the_ancestor(self) -> None:
         self._write_assistant(self.base, "outer", "Outer")
         self._write_assistant(self.root, "inner", "Inner")

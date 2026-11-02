@@ -25,7 +25,7 @@ import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { deletePlotline } from "@/lib/stores/plotlines";
 import { deleteDeck } from "@/lib/stores/decks";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-import { setAssistantEntries } from "@/lib/stores/assistants";
+import { setAssistantRoster } from "@/lib/stores/assistants";
 import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { chatCascadeLine, setChatSessions, withChatCascade } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
@@ -225,7 +225,7 @@ async function removeDocument(host: DeletePaneHost, pane: PaneWithScene, documen
     // refreshes the roster + board so the box disappears and they reflow.
     await deleteDeck(pane.scene.id);
   } else if (documentKind === "assistant") {
-    setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
+    setAssistantRoster(await api.deleteAssistantEntry(pane.scene.id));
   } else if (documentKind === "tag") {
     // The dedicated delete returns 204, not the roster (review fix) — refresh
     // it ourselves, mirroring the assistant branch's write-through.

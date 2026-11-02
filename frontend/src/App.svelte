@@ -71,9 +71,10 @@
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
+    assistantLocalOrderStore,
     defaultAssistantIdStore,
     refreshAssistantEntries as storeRefreshAssistantEntries,
-    setAssistantEntries,
+    setAssistantRoster,
   } from "@/lib/stores/assistants";
   import {
     hireMachineAssistant,
@@ -528,13 +529,21 @@
   // neither takes a layer id and the pane does no layer arithmetic.
   async function setAssistantOrder(orderedIds: string[]) {
     await run(async () => {
-      setAssistantEntries((await api.reorderAssistants(orderedIds)).entries);
+      setAssistantRoster(await api.reorderAssistants(orderedIds));
     });
   }
 
   async function unlistAssistant(entryId: string) {
     await run(async () => {
-      setAssistantEntries((await api.unlistAssistant(entryId)).entries);
+      setAssistantRoster(await api.unlistAssistant(entryId));
+    });
+  }
+
+  // #375: a drag makes the project's order its own, after which ancestor reorders
+  // never reach it. This is the way back: the project follows its ancestors again.
+  async function resetAssistantOrder() {
+    await run(async () => {
+      setAssistantRoster(await api.resetAssistantOrder());
     });
   }
 
@@ -919,6 +928,9 @@
   {/snippet}
 
   {#snippet assistantsActions()}
+      {#if $assistantLocalOrderStore}
+        <button class="pin-button" type="button" title="Reset to inherited order (this project follows its parent folders' assistant order again)" aria-label="Reset to inherited order" onmousedown={(event) => event.stopPropagation()} onclick={resetAssistantOrder}><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
+      {/if}
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
   {/snippet}
   {#snippet assistantsBody(viewSpec: ViewSpec | undefined)}

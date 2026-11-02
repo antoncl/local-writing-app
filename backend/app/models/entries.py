@@ -1355,6 +1355,10 @@ class AssistantEntry(BaseModel):
 
 class AssistantEntryList(BaseModel):
     entries: list[AssistantEntrySummary] = Field(default_factory=list)
+    # The open project's own `assistants/.order.yaml` names an order (#375): a drag wrote
+    # one, and from then on the project no longer follows its ancestors' ordering. The
+    # pane offers "Reset to inherited order" only then. False with no project open.
+    local_order: bool = False
 
 
 class CreateAssistantEntryRequest(BaseModel):

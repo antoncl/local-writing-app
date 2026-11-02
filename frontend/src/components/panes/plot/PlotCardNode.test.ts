@@ -138,6 +138,11 @@ function renderWithActions(over: Partial<PlotCardData>, acts: PlotCardActions, i
   return render(PlotCardNode, { props: { id, data: data(over) }, context: new Map([[PLOT_CARD_ACTIONS, acts]]) });
 }
 
+/** The writer leaves an inline edit: a press elsewhere in the app (#2647). */
+async function leave() {
+  await fireEvent.pointerDown(document.body);
+}
+
 describe("PlotCardNode", () => {
   it("renders the card title and synopsis", () => {
     render(PlotCardNode, { props: { data: data() } });
@@ -353,13 +358,13 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     expect(acts.onOpen).toHaveBeenCalledWith("card_2");
   });
 
-  it("renames the card in place and commits the change on blur", async () => {
+  it("renames the card in place and commits the change when the writer leaves it", async () => {
     const acts = actions();
     renderWithActions({ title: "Old name" }, acts, "card_t1");
     await fireEvent.click(screen.getByRole("button", { name: "Old name" }));
     const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "New name" } });
-    await fireEvent.blur(input);
+    await leave();
     expect(acts.onEditTitle).toHaveBeenCalledWith("card_t1", "New name");
   });
 
@@ -369,7 +374,7 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Keep" }));
     const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "   " } });
-    await fireEvent.blur(input);
+    await leave();
     expect(acts.onEditTitle).not.toHaveBeenCalled();
   });
 
@@ -380,28 +385,27 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
     await fireEvent.input(input, { target: { value: "discard" } });
     await fireEvent.keyDown(input, { key: "Escape" });
-    await fireEvent.blur(input);
+    await leave();
     expect(acts.onEditTitle).not.toHaveBeenCalled();
   });
 
-  it("edits the synopsis in place and commits the change on blur", async () => {
+  it("edits the synopsis in place and commits the change when the writer leaves it", async () => {
     const acts = actions();
     renderWithActions({ synopsis: "old" }, acts, "card_3");
     await fireEvent.click(screen.getByRole("button", { name: "old" }));
     const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
     await fireEvent.input(box, { target: { value: "new synopsis" } });
-    await fireEvent.blur(box);
+    await leave();
     expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_3", "new synopsis");
   });
 
   it("does not re-save an unchanged synopsis whose body has a trailing newline", async () => {
-    // The projection synopsis is the raw body, stored with a trailing "\n"; a blur
+    // The projection synopsis is the raw body, stored with a trailing "\n"; leaving
     // with no edit must not fire a save (it would churn forever otherwise).
     const acts = actions();
     renderWithActions({ synopsis: "unchanged\n" }, acts, "card_6");
     await fireEvent.click(screen.getByRole("button", { name: "unchanged" }));
-    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
-    await fireEvent.blur(box);
+    await leave();
     expect(acts.onEditSynopsis).not.toHaveBeenCalled();
   });
 
@@ -412,8 +416,95 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
     await fireEvent.input(box, { target: { value: "discard this" } });
     await fireEvent.keyDown(box, { key: "Escape" });
-    await fireEvent.blur(box);
+    await leave();
     expect(acts.onEditSynopsis).not.toHaveBeenCalled();
+  });
+
+  it("Enter commits the title edit", async () => {
+    const acts = actions();
+    renderWithActions({ title: "Old name" }, acts, "card_t4");
+    await fireEvent.click(screen.getByRole("button", { name: "Old name" }));
+    const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "Entered" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(acts.onEditTitle).toHaveBeenCalledWith("card_t4", "Entered");
+    expect(screen.queryByPlaceholderText("Card name")).not.toBeInTheDocument();
+  });
+
+  // #2647: a writing assistant (ProWritingAid, Grammarly) applies a fix from a popup
+  // it draws outside the app, often setting the box's value without an input event.
+  it("keeps the synopsis box open when focus leaves for an extension's popup, and saves its fix", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "teh cat" }, acts, "card_x1");
+    await fireEvent.click(screen.getByRole("button", { name: "teh cat" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    const popup = document.createElement("pwa-popup");
+    document.body.append(popup);
+    try {
+      await fireEvent.pointerDown(popup);
+      await fireEvent.blur(box);
+      expect(screen.getByPlaceholderText("Add a synopsis…")).toBe(box);
+      expect(acts.onEditSynopsis).not.toHaveBeenCalled();
+      box.value = "the cat"; // the extension's write: no input event
+      await leave();
+      expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x1", "the cat");
+    } finally {
+      popup.remove();
+    }
+  });
+
+  it("ends the synopsis edit when focus moves to another of the app's controls", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "old" }, acts, "card_x2");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "tabbed away" } });
+    await fireEvent.focusOut(box, { relatedTarget: screen.getByLabelText("Card actions") });
+    expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x2", "tabbed away");
+    expect(screen.queryByPlaceholderText("Add a synopsis…")).not.toBeInTheDocument();
+  });
+
+  it("saves on a blur to outside the page (another window) but keeps the box open, and saves once", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "old" }, acts, "card_x4");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "typed then alt-tab" } });
+    await fireEvent.focusOut(box, { relatedTarget: null });
+    expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x4", "typed then alt-tab");
+    expect(screen.getByPlaceholderText("Add a synopsis…")).toBe(box);
+    await leave();
+    expect(acts.onEditSynopsis).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends the edit when focus moves into one of the app's own portaled popovers", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "old" }, acts, "card_x5");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "into a picker" } });
+    const popover = document.createElement("div");
+    popover.setAttribute("data-app-portal", "");
+    const field = document.createElement("input");
+    popover.append(field);
+    document.body.append(popover);
+    try {
+      await fireEvent.focusOut(box, { relatedTarget: field });
+      expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x5", "into a picker");
+      expect(screen.queryByPlaceholderText("Add a synopsis…")).not.toBeInTheDocument();
+    } finally {
+      popover.remove();
+    }
+  });
+
+  it("saves a synopsis still being edited when the card unmounts", async () => {
+    const acts = actions();
+    const { unmount } = renderWithActions({ synopsis: "old" }, acts, "card_x3");
+    await fireEvent.click(screen.getByRole("button", { name: "old" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "mid-edit" } });
+    unmount();
+    expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_x3", "mid-edit");
   });
 
   it("reassigns the plotline from the Set-plotline submenu", async () => {

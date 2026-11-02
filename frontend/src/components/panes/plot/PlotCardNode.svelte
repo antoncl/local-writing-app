@@ -15,8 +15,9 @@
   clipped `.plot-card` so it isn't cut off by the card's fixed height / overflow.
 -->
 <script lang="ts">
-  import { getContext, tick } from "svelte";
+  import { getContext, onDestroy, tick } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { leaveOnAppExit } from "@/lib/actions/inlineEdit";
   import { findNodeBySceneId, isLeafNode } from "@/lib/utils/treeHelpers";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import type { PlotCardBeat } from "@/lib/types";
@@ -233,23 +234,34 @@
     }
   }
 
+  // What this edit last stored, so a repeated save signal (a blur, then the leave)
+  // sends nothing new. TRIMMED: the projection's synopsis is the raw card body, which
+  // the backend stores with a trailing newline, so a plain `!==` would treat every
+  // no-op open/close as a change and re-save forever.
+  let savedSynopsis = "";
   async function startEdit() {
     if (!actions) return;
     draft = data.synopsis;
+    savedSynopsis = data.synopsis.trim();
     editing = true;
     await tick();
     textarea?.focus();
   }
-  function commitEdit() {
-    editing = false;
-    const next = draft.trim();
-    // Compare against the TRIMMED body: the projection's synopsis is the raw card
-    // body, which the backend stores with a trailing newline, so a plain `!==` would
-    // treat every no-op open/close as a change and re-save forever.
-    if (actions && id && next !== data.synopsis.trim()) actions.onEditSynopsis(id, next);
+  function saveEdit() {
+    // Read the box itself: a writing assistant may set its value without the
+    // `input` event `bind:value` follows (#2647).
+    const next = (textarea?.value ?? draft).trim();
+    if (!actions || !id || next === savedSynopsis) return;
+    savedSynopsis = next;
+    actions.onEditSynopsis(id, next);
   }
-  // Escape cancels: reset the draft to the saved body, so the blur that fires when
-  // the textarea unmounts commits nothing (next === the saved value).
+  function commitEdit() {
+    if (!editing) return;
+    saveEdit();
+    editing = false;
+  }
+  // Escape cancels: reset the draft to the saved body and leave edit mode, so
+  // nothing commits.
   function cancelEdit() {
     draft = data.synopsis;
     editing = false;
@@ -260,26 +272,40 @@
   let titleEditing = $state(false);
   let titleDraft = $state("");
   let titleInput = $state<HTMLInputElement | null>(null);
+  let savedTitle = "";
 
   async function startTitleEdit() {
     if (!actions) return;
     titleDraft = data.title;
+    savedTitle = data.title;
     titleEditing = true;
     await tick();
     titleInput?.select();
   }
-  function commitTitle() {
-    titleEditing = false;
-    const next = titleDraft.trim();
+  function saveTitle() {
+    const next = (titleInput?.value ?? titleDraft).trim();
     // A card title must be non-empty (the backend rejects ""), so an emptied name
     // reverts to the saved title; otherwise save only a real change.
-    if (actions && id && next && next !== data.title) actions.onEditTitle(id, next);
+    if (!actions || !id || !next || next === savedTitle) return;
+    savedTitle = next;
+    actions.onEditTitle(id, next);
   }
-  // Escape cancels: reset the draft so the unmount blur commits nothing.
+  function commitTitle() {
+    if (!titleEditing) return;
+    saveTitle();
+    titleEditing = false;
+  }
+  // Escape cancels: reset the draft and leave edit mode, so nothing commits.
   function cancelTitle() {
     titleDraft = data.title;
     titleEditing = false;
   }
+  // An edit only ends when the writer leaves for the app's own UI (leaveOnAppExit),
+  // so a card unmounted mid-edit (pane closed, board re-rendered) saves what's typed.
+  onDestroy(() => {
+    commitEdit();
+    commitTitle();
+  });
 </script>
 
 <div class="card-root" bind:this={rootEl}>
@@ -319,12 +345,15 @@
           bind:this={titleInput}
           bind:value={titleDraft}
           class="card-title-edit nodrag nopan"
+          data-gramm="false"
+          data-gramm_editor="false"
+          data-enable-grammarly="false"
           placeholder="Card name"
-          onblur={commitTitle}
+          use:leaveOnAppExit={{ save: saveTitle, leave: commitTitle }}
           onkeydown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              e.currentTarget.blur();
+              commitTitle();
             } else if (e.key === "Escape") {
               cancelTitle();
             }
@@ -352,12 +381,18 @@
     </div>
 
     {#if editing}
+      <!-- Writing assistants (ProWritingAid, Grammarly) are told to stay out of the
+           card's edit boxes (#2647): on the zoomed canvas their underlines land in the
+           wrong place and Rephrase does nothing. Checking works in the card's editor. -->
       <textarea
         bind:this={textarea}
         bind:value={draft}
         class="card-synopsis-edit nodrag nopan"
+        data-gramm="false"
+        data-gramm_editor="false"
+        data-enable-grammarly="false"
         placeholder={data.attached ? "No summary yet" : "Add a synopsis…"}
-        onblur={commitEdit}
+        use:leaveOnAppExit={{ save: saveEdit, leave: commitEdit }}
         onkeydown={(e) => {
           if (e.key === "Escape") cancelEdit();
         }}

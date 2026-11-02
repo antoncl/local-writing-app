@@ -34,7 +34,8 @@ export const CARD_PILLS_PER_ROW = 1;
 // by `--ui-scale` (every --fs-* token multiplies through it), so a scaled line is taller
 // and holds fewer characters; the paddings and gaps are plain px and don't scale (#2362).
 export function estCardHeight(title: string, synopsis: string, beatCount: number, scale = boardTextScale()): number {
-  const lines = (text: string, charsPerLine: number) => Math.max(1, Math.ceil(text.length / Math.floor(charsPerLine / scale)));
+  const lines = (text: string, charsPerLine: number) =>
+    Math.max(1, Math.ceil(text.length / Math.max(1, Math.floor(charsPerLine / scale))));
   const titleLines = Math.min(CARD_TITLE_MAX_LINES, lines(title, CARD_TITLE_CHARS_PER_LINE));
   const head = Math.max(CARD_HEAD_MIN_H, titleLines * CARD_TITLE_LINE_H) * scale;
   const synopsisLines = Math.min(

@@ -79,6 +79,7 @@
   } from "@/lib/stores/plotlines";
   import { deleteArc, getArcEntry, saveArcEntry } from "@/lib/stores/characterArcs";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
+  import { projectSession } from "@/lib/stores/projectSession.svelte";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import FlowViewCenter from "./plot/FlowViewCenter.svelte";
@@ -846,7 +847,9 @@
       dragging = false;
       return;
     }
-    const key = projectionDataKey(projection);
+    // The text scale is part of the key: card heights are estimated from it (#2362), so
+    // changing the text size re-lays the board out like a data change does.
+    const key = `${projectionDataKey(projection)}@${projectSession.machineSettings?.display.ui_scale ?? 1}`;
     if (key === loadedDataKey) return;
     loadedDataKey = key;
     const saved = readBoardPositions(projection.layout);

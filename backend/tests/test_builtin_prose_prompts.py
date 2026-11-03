@@ -333,6 +333,18 @@ class DraftScenePromptTests(unittest.TestCase):
         self._set(self.act.scene_id, kind="container", tense="past")
         self.assertIn("Write the beat in past tense.", self._roleplay_system(self.scene_ids[0]))
 
+    def test_roleplay_turn_is_one_beat_of_the_played_character_only(self) -> None:
+        """#2666: a turn is one MRU (or paragraph) of the played character, never
+        another character's action or speech, and it picks up from the last line."""
+        self._set(self.scene_ids[0], summary="Honor leaves the station.")
+        text = self._roleplay_system(self.scene_ids[0])
+        self.assertIn("motivation-reaction unit", text)
+        self.assertIn("at most one paragraph", text)
+        self.assertIn("**Only this character.**", text)
+        self.assertIn("even a character with no entry of their own", text)
+        self.assertIn("**Pick up from the last line.**", text)
+        self.assertNotIn("One beat, not a paragraph of them.", text)
+
     def test_draft_scene_names_the_pov_character_inherited_from_the_act(self) -> None:
         # #2619: Prose generation settings names the viewpoint character beside
         # the mode and tense (the resolved narration, here inherited from the act).

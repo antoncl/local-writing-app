@@ -30,8 +30,10 @@ export function laterAppendCount(
 /** The advisory close-picker note for `count` later appends ("" for none). */
 export function laterAppendNote(count: number): string {
   if (count <= 0) return "";
-  if (count === 1) return "1 later append to the same field remains live and may lean on this text.";
-  return `${count} later appends to the same field remain live and may lean on this text.`;
+  // Field-neutral and tense-neutral: a unit's count spans its rows' fields, and
+  // a counted append may not have started yet at the close point.
+  if (count === 1) return "1 later append may lean on this text.";
+  return `${count} later appends may lean on this text.`;
 }
 
 /** Group manuscript-ordered records into units, first-occurrence order (a

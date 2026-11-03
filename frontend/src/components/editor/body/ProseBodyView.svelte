@@ -784,7 +784,7 @@
           // here, not at the end of the scene.
           const pos = editor?.state.selection.from;
           const offset = pos !== undefined ? markdownOffsetAt(pos) : undefined;
-          if (closing) mutationDialogs?.openClose(match?.id ?? "", offset);
+          if (closing) void mutationDialogs?.openClose(match?.id ?? "", offset);
           else void mutationDialogs?.openAuthoring(match?.id ?? "", offset);
         },
       },

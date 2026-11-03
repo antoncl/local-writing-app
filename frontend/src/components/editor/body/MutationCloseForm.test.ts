@@ -54,7 +54,7 @@ describe("MutationCloseForm later-append note", () => {
     });
     await mount();
     const note = document.querySelector(".close-note");
-    expect(note?.textContent).toContain("1 later append to the same field remains live");
+    expect(note?.textContent).toContain("1 later append may lean on this text.");
     expect(note?.querySelector("a")?.getAttribute("href")).toContain(
       "docs/mutations.md#appending-and-why-fragments-must-stand-alone",
     );

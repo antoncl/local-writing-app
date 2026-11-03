@@ -18,7 +18,7 @@ describe("laterAppendCount (#73)", () => {
 describe("laterAppendNote (#73)", () => {
   it("words the singular, plural and empty cases", () => {
     expect(laterAppendNote(0)).toBe("");
-    expect(laterAppendNote(1)).toBe("1 later append to the same field remains live and may lean on this text.");
-    expect(laterAppendNote(2)).toBe("2 later appends to the same field remain live and may lean on this text.");
+    expect(laterAppendNote(1)).toBe("1 later append may lean on this text.");
+    expect(laterAppendNote(2)).toBe("2 later appends may lean on this text.");
   });
 });

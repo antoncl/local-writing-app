@@ -85,7 +85,10 @@
     authoringOpen = true;
   }
 
-  export function openClose(preset = "", position?: number | null) {
+  // The picker resolves at `position`, a CURRENT-text offset, against the saved
+  // index, so flush first or unsaved edits above the cursor skew it (#73).
+  export async function openClose(preset = "", position?: number | null) {
+    await flushFirst();
     closePresetEntityId = preset;
     closePosition = position;
     closeOpen = true;

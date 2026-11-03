@@ -456,7 +456,11 @@
       ondrop={ctx.reorder?.onDrop}
     >
       {#snippet titleSlot()}
+        <!-- #2649: commits on blur; a title gets no writing-assistant fix. -->
         <input
+          data-gramm="false"
+          data-gramm_editor="false"
+          data-enable-grammarly="false"
           class="tree-title tree-rename-input"
           data-node-edit-id={node.id}
           value={ctx.editValue}

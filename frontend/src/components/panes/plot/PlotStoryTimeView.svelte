@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { getContext } from "svelte";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { getSwatch } from "@/lib/utils/colors";
   import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
   import type { StoryAnchor } from "@/lib/api/plot";
@@ -75,7 +76,6 @@
   let menuFor = $state<string | null>(null);
   let menuView = $state<"main" | "place">("main");
   let placeFilter = $state("");
-  let rootEl = $state<HTMLElement | null>(null);
 
   function closeMenu() {
     menuFor = null;
@@ -99,24 +99,9 @@
   );
 
   // Close on an outside press or Escape, only while a menu is open.
-  $effect(() => {
-    if (menuFor === null) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
 </script>
 
-<div class="story-view" bind:this={rootEl}>
+<div class="story-view" use:closeOnOutsidePress={{ open: menuFor !== null, close: closeMenu }}>
   {#if ordered.length === 0}
     <p class="story-empty">No cards yet.</p>
   {:else}

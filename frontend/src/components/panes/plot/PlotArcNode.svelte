@@ -27,6 +27,7 @@
 -->
 <script lang="ts">
   import { getContext, onDestroy } from "svelte";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import { withStampedBeatIds } from "@/lib/plot/beatRoster";
   import { createDebouncedCommit } from "@/lib/plot/debouncedCommit";
@@ -70,7 +71,6 @@
   // Header kebab: Delete without expanding (no "Open in editor" — an arc has no
   // full-pane escape hatch this slice). Only rendered with an actions context.
   let menuOpen = $state(false);
-  let rootEl = $state<HTMLElement | null>(null);
   function toggleMenu(): void {
     menuOpen = !menuOpen;
   }
@@ -81,21 +81,6 @@
     closeMenu();
     if (op && id) op(id);
   }
-  $effect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
 
   let colorId = $derived(typeof draft?.metadata.color === "string" ? (draft.metadata.color as string) : null);
   let characterId = $derived(typeof draft?.metadata.character === "string" ? (draft.metadata.character as string) : null);
@@ -229,7 +214,7 @@
   class:coloured={accent}
   class:expanded={isExpanded}
   style={accent ? `--arc-accent: ${accent}` : undefined}
-  bind:this={rootEl}
+  use:closeOnOutsidePress={{ open: menuOpen, close: closeMenu }}
 >
   {#if actions}
     <div class="arc-head">

@@ -18,6 +18,7 @@
   import { getContext, onDestroy, tick } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import { leaveOnAppExit } from "@/lib/actions/inlineEdit";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { findNodeBySceneId, isLeafNode } from "@/lib/utils/treeHelpers";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import type { PlotCardBeat } from "@/lib/types";
@@ -96,29 +97,9 @@
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
-  let rootEl = $state<HTMLElement | null>(null);
 
-  // Close the menu on an outside pointerdown or Escape — NOT on focusout, which would
-  // fire (and wrongly close) the moment the two-page menu swaps pages and removes the
-  // focused button. Only while open, cleaned up on close / unmount.
-  $effect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      // The Attach picker's popover is portaled to <body> (outside the card), so a press
-      // inside it is not an outside press.
-      if ((e.target as Element | null)?.closest?.(".ctx-menu")) return;
-      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
+  // The menu closes via `closeOnOutsidePress` (not focusout, which the two-page menu's
+  // page swap would trip).
 
   function toggleMenu() {
     if (menuOpen) {
@@ -308,7 +289,7 @@
   });
 </script>
 
-<div class="card-root" bind:this={rootEl}>
+<div class="card-root" use:closeOnOutsidePress={{ open: menuOpen, close: closeMenu }}>
   <!-- svelte-ignore a11y_no_static_element_interactions -- the card is an HTML5 drop
        target for beats; the keyboard path to link is the Arcs editor, not this drop. -->
   <article

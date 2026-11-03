@@ -28,6 +28,7 @@
 -->
 <script lang="ts">
   import { getContext, onDestroy } from "svelte";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { getSwatch } from "@/lib/utils/colors";
   import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import { withStampedBeatIds } from "@/lib/plot/beatRoster";
@@ -74,7 +75,6 @@
   // they no longer need the expand-and-scroll the foot-actions require. Mirrors the plot
   // card's kebab; only rendered with an actions context (never in the read-only mount).
   let menuOpen = $state(false);
-  let rootEl = $state<HTMLElement | null>(null);
   function toggleMenu(): void {
     menuOpen = !menuOpen;
   }
@@ -85,25 +85,9 @@
     closeMenu();
     if (op && id) op(id);
   }
-  // Close on an outside pointerdown / Escape. Capture phase so a click that lands on the
-  // canvas (which reselects / pans) still closes the menu first. The node is lifted above
-  // its siblings while open by a pure-CSS `:has()` rule on the board (#1100), so there's no
+  // Closes on an outside press via `closeOnOutsidePress`. The node is lifted above its
+  // siblings while open by a pure-CSS `:has()` rule on the board (#1100), so there's no
   // elevation signal to fire here.
-  $effect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
 
   let colorId = $derived(typeof draft?.metadata.color === "string" ? (draft.metadata.color as string) : null);
 
@@ -225,7 +209,7 @@
   class:coloured={accent}
   class:expanded={isExpanded}
   style={accent ? `--plotline-accent: ${accent}` : undefined}
-  bind:this={rootEl}
+  use:closeOnOutsidePress={{ open: menuOpen, close: closeMenu }}
 >
   {#if actions}
     <!-- The header row: a leading drag grip, then an eye toggle that FOCUSES this thread

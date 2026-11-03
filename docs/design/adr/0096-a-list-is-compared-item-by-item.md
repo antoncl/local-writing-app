@@ -337,8 +337,8 @@ row's click does nothing during the comparison, since the body sections it would
   Members without a unit are not shown.
 - **Addition:** one stacked cool region holding the whole item, so it is adopted as one unit.
   **Removal:** the same, warm.
-- **Order:** one stacked region at the head of the section: the paired items' titles in O's order
-  over the same titles in L's. Once settled, the region is removed, since the rows below already
+- **Order:** one stacked region at the head of the section: the paired items' titles in the older
+  side's order over the same titles in the newer side's (ADR-0100 Amendment 1; #2533). Once settled, the region is removed, since the rows below already
   show the result.
 
 These are the body's tints for a change, an insertion and a deletion, and no glyphs (ADR-0044 §J).

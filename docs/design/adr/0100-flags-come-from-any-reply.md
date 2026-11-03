@@ -99,3 +99,48 @@ The case that prompted this: *The Water Line — Scene / doctor*, a project prom
   - **S2 — Place flags in scene conversations.** *Done when:* the route test runs the extraction turn against a mocked model (both kinds, entry resolution, retry, the transcript cut and the cue); component tests cover the button, the chat-side controller and the mixed review in a real editor; and in the browser, on a scratch project with the extraction answered by a canned reply, Place flags opens the scene on its Body with one edit and two notes in one review, Accept inserts the new paragraph, and Keep turns each note into a TODO. (The app has no chat end-to-end harness; its e2e suite is a smoke test.) With a real model, *Scene / doctor* on *The Water Line* (Anton's, after approval). *Not:* lore entry conversations, automatic placement, streaming, or a change to any prompt.
   - **S3 — the *Revising* layout.** *Done when:* the layout menu offers *Revising* beside the other built-ins, and applying it shows the outline, the editor with room for a scene and its conversation side by side, and TODOs. *Not:* any change to the user's saved presets.
   - **S4 — line edits look like diffs.** *Done when:* an edit that changes one word in a sentence marks only that word warm and shows only the new word, cool, beside it; a pure cut shows its words warm with nothing inserted; an insertion of new paragraphs shows them cool; Accept, Keep, Reject, the keys and the current item behave as before; and the diff reviews look exactly as they did. *Not:* notes, the diff reviews themselves, or a Current / Proposed / Both view.
+
+## Amendment 1 — the diff reviews are one family
+
+- **Status:** **Accepted**, 2026-11-03 (Anton, in conversation). Issue: #2530. Text by Claude.
+- **Amends:** §11, whose last point deferred "the diff reviews' disagreements with each other (#2530)". It also restates ADR-0044 §I's view names and ADR-0096 §6's order.
+
+### What prompted it
+
+§11 gave the diff reviews one look, but they still disagreed with each other:
+- **Colour:** the inline AI suggestion was gold, though gold means only the pin (`docs/design/design-language.md`). Every other review showed the AI's text cool.
+- **Names:** the writer's side was *Active* on the snapshot strip and *Current* everywhere else.
+- **The view switcher:** line edits drew their own, with no warm/cool tone.
+- **Verbs:** the AI's text was turned down with *Reject* in some places and *Discard* in others, and the replace card accepted with *Replace*.
+- **Order:** a list section in a proposal review put the proposed items before the current ones, the opposite of #2533.
+
+### Decision
+
+1. **The AI's text is cool, everywhere.** The inline suggestion (`.ai-suggestion`) takes the cool `r-was` wash and dotted edge, like the AI's text in the proposal review and in line edits.
+2. **The writer's side is *Current*.** The other side is named for what it is: *Proposed* for the AI's text, *Snapshot* for a snapshot. The views read *Current / Proposed / Both* or *Current / Snapshot / Both*, and the keys stay A / S / B.
+3. **One view switcher.** Every review's view toggle is `SegmentedControl`, with *Current* toned warm and the other side toned cool.
+4. **The AI's text is settled with *Accept* and *Reject*.** This applies in the inline suggestion, the replace card and line edits, and in their *… all* forms. When the inline suggestion replaced a selection, *Reject*'s tooltip says it puts the original back.
+5. **The older text comes first, in every part of a review.** A list section's items and its order region follow #2533:
+   - in a proposal review, the current side is the older one, so it comes first;
+   - in a snapshot compare, the snapshot is the older one, so it comes first.
+
+   This replaces ADR-0096 §6's "O's order over the same titles in L's".
+6. **Alt + A / S / B works in every review.**
+   - Line edits need Alt, because their text can be typed into.
+   - The read-only reviews keep the plain letters (ADR-0044 §I) and also accept Alt, so one habit works everywhere.
+   - ADR-0044 §I withdrew a held Shift, which trips Windows FilterKeys and Sticky Keys. Alt trips neither, and here it is an option, not a requirement.
+
+### Differences kept on purpose
+
+- **When an accept is written.**
+  - The proposal review collects choices until *Done*: it settles one patch to a whole entry and sends it as one write.
+  - The snapshot strip, line edits, the replace card and the inline suggestion write each accept at once, because each accept stands alone.
+- **Words that don't settle the AI's text.** None of these accepts or rejects a proposal, so each keeps its own word:
+  - *Restore*, *Pin* and *Delete* on the snapshot strip;
+  - *Keep* and *Dismiss* on notes;
+  - the conflict dialog's *Overwrite* and *Keep editing*.
+- **The read-only diffs.** The conflict dialog and the propagation view show both versions and adopt nothing.
+
+### Not part of this
+
+- **Showing the replaced text.** When the inline suggestion replaces a selection, the writer's original is hidden until *Reject*. Showing it warm beside the suggestion, as line edits do, is a rendering change rather than a consistency fix, so it is tracked on its own: #2659.

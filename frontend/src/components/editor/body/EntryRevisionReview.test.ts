@@ -85,6 +85,23 @@ describe("EntryRevisionReview — #710 whole-version gestures", () => {
     expect(onView).toHaveBeenLastCalledWith("both");
   });
 
+  it("also takes Alt+A/S/B (and not Alt+Shift or Alt+Ctrl), preventing default (#2530)", async () => {
+    const onView = vi.fn();
+    const onToggleView = vi.fn();
+    render(EntryRevisionReview, { props: baseProps({ onView, onToggleView }) });
+    const notPrevented = await fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(notPrevented).toBe(false);
+    expect(onToggleView).toHaveBeenLastCalledWith("now");
+    await fireEvent.keyDown(window, { key: "ß", code: "KeyS", altKey: true });
+    expect(onToggleView).toHaveBeenLastCalledWith("was");
+    await fireEvent.keyDown(window, { key: "b", altKey: true });
+    expect(onView).toHaveBeenLastCalledWith("both");
+    onToggleView.mockClear();
+    await fireEvent.keyDown(window, { key: "a", altKey: true, shiftKey: true });
+    await fireEvent.keyDown(window, { key: "a", altKey: true, ctrlKey: true });
+    expect(onToggleView).not.toHaveBeenCalled();
+  });
+
   it("ignores A/S/B keys typed into an input, and auto-repeat", async () => {
     const onToggleView = vi.fn();
     const onView = vi.fn();

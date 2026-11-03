@@ -18,6 +18,7 @@
   import ListReviewSection from "@/components/editor/body/ListReviewSection.svelte";
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import { paneOwnsKey } from "@/lib/utils/paneScope";
+  import { compareKey } from "@/lib/utils/compareKey";
   import type { FieldFlip } from "@/lib/utils/entryRevision";
   import type { ListReviewEntry } from "@/lib/stores/entryProposal.svelte";
   import type { DiffView } from "@/lib/types";
@@ -114,16 +115,16 @@
 
   function onKeydown(event: KeyboardEvent): void {
     if (!hasProse) return;
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const letter = compareKey(event);
+    if (!letter) return;
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
-    if (!/^[asb]$/i.test(event.key)) return;
     if (!paneOwnsKey(rootEl, target)) return;
     if (event.repeat) {
       event.preventDefault();
       return;
     }
-    switch (event.key.toLowerCase()) {
+    switch (letter) {
       case "a":
         onToggleView("now");
         break;
@@ -201,6 +202,7 @@
         O={review.O}
         resolution={listResolutions[fieldId] ?? {}}
         {view}
+        older="now"
         resolveTitle={resolveListMemberTitle}
         onSettleUnit={(unitKey, value) => onSettleListUnit(fieldId, unitKey, value)}
       />

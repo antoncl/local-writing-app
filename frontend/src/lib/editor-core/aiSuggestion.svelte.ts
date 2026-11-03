@@ -414,6 +414,11 @@ export class AiSuggestionController {
       });
   }
 
+  /** Whether the pending suggestion replaced a selection (its original is stashed), so reject restores it. */
+  get replacesSelection(): boolean {
+    return this.#suggestionOriginal !== null;
+  }
+
   revert(): void {
     this.#cancelRenderTimer();
     const editor = this.#deps.getEditor();
@@ -491,7 +496,7 @@ export class AiSuggestionController {
       return;
     }
     if (this.suggestionId) {
-      this.error = "Accept or revert the pending suggestion before generating another.";
+      this.error = "Accept or reject the pending suggestion before generating another.";
       return;
     }
     const declared = effectivePromptInputs(entry);

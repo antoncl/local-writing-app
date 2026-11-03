@@ -40,3 +40,15 @@ describe("ProseAIToolbar - Cancel (#2464)", () => {
     expect(screen.queryByTestId("ai-cancel")).toBeNull();
   });
 });
+
+describe("ProseAIToolbar - Reject (#2530)", () => {
+  it("says it deletes the text for a continuation", () => {
+    mount({ suggestionId: "ai-1" });
+    expect(screen.getByRole("button", { name: "Reject" }).getAttribute("title")).toBe("Reject (delete the text)");
+  });
+
+  it("says it puts the original back when a selection was replaced", () => {
+    mount({ suggestionId: "ai-1", replacesSelection: true });
+    expect(screen.getByRole("button", { name: "Reject" }).getAttribute("title")).toBe("Reject (put the original back)");
+  });
+});

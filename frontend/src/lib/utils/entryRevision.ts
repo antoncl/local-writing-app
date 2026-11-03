@@ -18,9 +18,9 @@
  * the entry yet" — the same reading as snapshot compare (warm = the live scene,
  * cool = the stored alternative). It also keeps a reused invariant intact — the
  * run reassembly and `adoptRegion` treat `now` as the live baseline, so
- * declining every region is a no-op on the live body. Only the run *titles*
- * baked into `renderDiffRuns` ("Restore this") are snapshot wording the UI slice
- * will reword for a proposal; the *tint* is correct as-is and needs no override.
+ * declining every region is a no-op on the live body. The *tint* is correct as-is
+ * and needs no override. (Runs once carried per-run "Restore this" titles; #710
+ * removed them - the colour is the whole affordance.)
  *
  * **The order is not the engine's.** The engine emits a changed region's `was`
  * runs first — right for a snapshot (the past), wrong here, where `was` is the

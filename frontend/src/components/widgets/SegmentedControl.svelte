@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends string">
   // A segmented control: one choice out of a few, the selected one being the
   // answer to a single question ("which version am I reading"). Extracted from
-  // the snapshot compare's Active·Snapshot·Both (#710) so that control and the
+  // the snapshot compare's Current·Snapshot·Both (#710) so that control and the
   // brainstorm review's Current·Proposed·Both are one widget, not two that drift.
   //
   // Presentation only — it owns no state. The host passes the items, the current
@@ -14,6 +14,7 @@
     items,
     value,
     ariaLabel,
+    keyModifier = "",
     onSelect,
   }: {
     items: readonly Item[];
@@ -21,6 +22,8 @@
     value: T;
     /** Names the group for assistive tech (the question the choice answers). */
     ariaLabel: string;
+    /** Prefixes each key in the tooltip only (`Alt+` gives "(Alt+A)"); the kbd still shows the bare key. */
+    keyModifier?: string;
     onSelect: (id: T) => void;
   } = $props();
 </script>
@@ -35,7 +38,7 @@
       aria-pressed={value === item.id}
       aria-label={item.label}
       title={item.hint
-        ? `${item.label} — ${item.hint}${item.key ? ` (${item.key})` : ""}`
+        ? `${item.label} — ${item.hint}${item.key ? ` (${keyModifier}${item.key})` : ""}`
         : item.label}
       onclick={() => onSelect(item.id)}>{item.label}{#if item.key}<kbd>{item.key}</kbd>{/if}</button>
   {/each}

@@ -64,6 +64,22 @@ function mount(scrub: LoreScrubController) {
 }
 
 describe("FootDock — unified keyboard + mode switch (ADR-0088 S2)", () => {
+  it("answers Alt+A/S/B like the bare letters, and nothing else with Alt (#2530)", () => {
+    const { container, spies } = mount(scrubWithMutations());
+
+    press(container, "a", { altKey: true });
+    expect(spies.toggleView).toHaveBeenCalledWith("now");
+    press(container, "å", { altKey: true, code: "KeyA" }); // macOS: Alt turns the letter
+    expect(spies.toggleView).toHaveBeenCalledTimes(2);
+    press(container, "b", { altKey: true });
+    expect(spies.setView).toHaveBeenCalledWith("both");
+    press(container, "ArrowLeft", { altKey: true });
+    press(container, "a", { altKey: true, shiftKey: true });
+    press(container, "a", { altKey: true, ctrlKey: true });
+    expect(spies.snapStep).not.toHaveBeenCalled();
+    expect(spies.toggleView).toHaveBeenCalledTimes(2);
+  });
+
   it("drives the snapshot track by default", () => {
     const { container, spies } = mount(scrubWithMutations());
 

@@ -1355,6 +1355,7 @@
     suggestionId={aiSuggestion.suggestionId}
     error={aiSuggestion.error}
     meta={aiSuggestion.meta}
+    replacesSelection={aiSuggestion.replacesSelection}
     onAccept={() => aiSuggestion.accept()}
     onRetry={() => aiSuggestion.retry()}
     onDiscard={() => aiSuggestion.revert()}

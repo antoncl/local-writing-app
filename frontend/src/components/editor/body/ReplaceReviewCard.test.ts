@@ -2,7 +2,7 @@
 // The `replace`-mode review card (ADR-0051 S5-next). The #642 lesson: a pane
 // that must DISPLAY data needs a mount test asserting it renders — here, that
 // the proposed value actually shows (not just that a callback wires up), and
-// that Replace / Discard fire their gestures.
+// that Accept / Reject fire their gestures.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import ReplaceReviewCard from "./ReplaceReviewCard.svelte";
@@ -26,16 +26,16 @@ describe("ReplaceReviewCard (ADR-0051 S5-next)", () => {
     expect(screen.getByText("A new synopsis of the scene.")).toBeInTheDocument();
   });
 
-  it("Replace fires the commit gesture and Discard drops it", async () => {
+  it("Accept fires the commit gesture and Reject drops it", async () => {
     const onReplace = vi.fn();
     const onDiscard = vi.fn();
     render(ReplaceReviewCard, { props: { fields, onReplace, onDiscard } });
 
-    await fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
     expect(onReplace).toHaveBeenCalledOnce();
     expect(onDiscard).not.toHaveBeenCalled();
 
-    await fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Reject" }));
     expect(onDiscard).toHaveBeenCalledOnce();
   });
 

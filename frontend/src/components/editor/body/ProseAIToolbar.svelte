@@ -2,11 +2,11 @@
   ProseAIToolbar — floating inline toolbar shown over an AI continuation/revision
   in ProseBodyView. Pure presentation: it shows the generating spinner (with a
   Cancel), an error
-  with a Dismiss, or the accept/retry/discard controls + usage-cost meta for a
+  with a Dismiss, or the accept/retry/reject controls + usage-cost meta for a
   ready suggestion.
 
   The host (the AI-suggestion pipeline) owns ALL state — when/where it shows
-  (position), generating/suggestionId/error/meta — and the accept/retry/discard/
+  (position), generating/suggestionId/error/meta — and the accept/retry/reject/
   dismiss actions. onmousedown handlers preventDefault inline so a click never
   blurs the editor.
 -->
@@ -20,6 +20,8 @@
     suggestionId: string | null;
     error: string | null;
     meta: AiSuggestionMeta | null;
+    /** The suggestion replaced a selection, so Reject puts the original back. */
+    replacesSelection?: boolean;
     onAccept: () => void;
     onRetry: () => void;
     onDiscard: () => void;
@@ -27,7 +29,7 @@
     onCancel: () => void;
   }
 
-  let { position, generating, suggestionId, error, meta, onAccept, onRetry, onDiscard, onDismissError, onCancel }: Props = $props();
+  let { position, generating, suggestionId, error, meta, replacesSelection = false, onAccept, onRetry, onDiscard, onDismissError, onCancel }: Props = $props();
 </script>
 
 {#if position.visible && (generating || suggestionId || error)}
@@ -63,8 +65,8 @@
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onRetry(); }} title="Retry (regenerate)" disabled={generating}>
         Retry
       </button>
-      <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={(e) => { e.preventDefault(); onDiscard(); }} title="Discard (delete the text)">
-        Discard
+      <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={(e) => { e.preventDefault(); onDiscard(); }} title={replacesSelection ? "Reject (put the original back)" : "Reject (delete the text)"}>
+        Reject
       </button>
       {#if meta}
         <span class="ai-toolbar-meta">

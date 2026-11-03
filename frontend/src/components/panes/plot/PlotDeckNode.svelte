@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { getContext, tick } from "svelte";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { CONTAINER_DRAG_HANDLE_CLASS, type PlotDeckData } from "@/lib/plot/plotBoardLayout";
   import { deckSynopsisLines } from "@/lib/plot/boxLayout";
   import { PLOT_DECK_ACTIONS, type PlotDeckActions } from "./plotDeckActions";
@@ -43,29 +44,13 @@
   }
 
   let menuOpen = $state(false);
-  let rootEl = $state<HTMLElement | null>(null);
   function run(op: ((deckId: string) => void) | undefined): void {
     menuOpen = false;
     op?.(data.deckId);
   }
-  $effect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) menuOpen = false;
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") menuOpen = false;
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
 </script>
 
-<div class="plot-deck" bind:this={rootEl} data-testid="plot-deck">
+<div class="plot-deck" use:closeOnOutsidePress={{ open: menuOpen, close: () => (menuOpen = false) }} data-testid="plot-deck">
   <!-- The header is the drag handle of a top-level box (#877): SvelteFlow's `dragHandle`
        targets this class, so the box moves ONLY when grabbed here. -->
   <div class="deck-head {CONTAINER_DRAG_HANDLE_CLASS}">

@@ -219,7 +219,11 @@
     {#if !editable}
       <span class="idl-seg" class:idl-empty={empty} title={label}>{empty ? label : displayFor(member)}</span>
     {:else if editingKey === member.key && INLINE_TYPES.has(member.type)}
+      <!-- #2649: commits on blur; a title gets no writing-assistant fix. -->
       <input
+        data-gramm="false"
+        data-gramm_editor="false"
+        data-enable-grammarly="false"
         class="idl-input"
         bind:this={inputEl}
         value={draft}

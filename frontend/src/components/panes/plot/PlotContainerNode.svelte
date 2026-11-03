@@ -17,6 +17,7 @@
 -->
 <script lang="ts">
   import { getContext, tick } from "svelte";
+  import { closeOnOutsidePress } from "@/lib/actions/outsidePress";
   import { PLOT_DECK_ACTIONS, type PlotDeckActions } from "./plotDeckActions";
   import { CONTAINER_DRAG_HANDLE_CLASS, type PlotContainerData } from "@/lib/plot/plotBoardLayout";
   import { structureStore } from "@/lib/stores/structure";
@@ -68,29 +69,13 @@
   }
 
   let menuOpen = $state(false);
-  let rootEl = $state<HTMLElement | null>(null);
   function run(op: ((deckId: string) => void) | undefined): void {
     menuOpen = false;
     if (deckId) op?.(deckId);
   }
-  $effect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) menuOpen = false;
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") menuOpen = false;
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  });
 </script>
 
-<div class="plot-container" bind:this={rootEl} class:act={isAct} class:deep={isDeep} class:loose={isLoose} data-level={data.level}>
+<div class="plot-container" use:closeOnOutsidePress={{ open: menuOpen, close: () => (menuOpen = false) }} class:act={isAct} class:deep={isDeep} class:loose={isLoose} data-level={data.level}>
   <!-- The header is the drag handle (#877): SvelteFlow's `dragHandle` targets this
        class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
        and the transparent interior stays inert (card drags + edges pass through). -->

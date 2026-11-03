@@ -97,8 +97,6 @@
       (c) => c.id !== menuFor && c.title.toLowerCase().includes(placeFilter.trim().toLowerCase()),
     ),
   );
-
-  // Close on an outside press or Escape, only while a menu is open.
 </script>
 
 <div class="story-view" use:closeOnOutsidePress={{ open: menuFor !== null, close: closeMenu }}>

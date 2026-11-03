@@ -17,7 +17,6 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode, MarkType } from "@tiptap/pm/model";
-import { leaveOnAppExit } from "../actions/inlineEdit";
 
 const HANDLE_CLASS = "interiority-handle";
 const BLOCK_CLASS = "interiority-block";
@@ -168,9 +167,6 @@ function buildHandle(
   return btn;
 }
 
-/** Each block's `leaveOnAppExit` handle, destroyed when ProseMirror drops the widget. */
-const exitActions = new WeakMap<HTMLElement, { destroy: () => void }>();
-
 function buildBlock(
   view: EditorView,
   getPos: () => number | undefined,
@@ -195,27 +191,7 @@ function buildBlock(
   };
   area.addEventListener("input", autosize);
   area.addEventListener("mousedown", (e) => e.stopPropagation());
-  // Write back when the writer leaves for the app (#2649, mirrors the plot card #2647).
-  // A blur toward anything else does NOT write yet: the write-back changes the beat's
-  // mark, and ProseMirror redraws a changed mark together with this widget, replacing
-  // the textarea. A browser writing assistant whose popup took the focus would then
-  // apply its fix to a detached box. So the box stays live, and the text is written
-  // on the next leave, or as soon as the window itself loses focus (the writer
-  // switched away), so nothing typed waits unsaved.
-  const write = () => {
-    window.removeEventListener("blur", write);
-    writeBackInternal(view, getPos, area.value);
-  };
-  const action = leaveOnAppExit(area, {
-    save: () => window.addEventListener("blur", write),
-    leave: write,
-  });
-  exitActions.set(wrap, {
-    destroy: () => {
-      window.removeEventListener("blur", write);
-      action?.destroy?.();
-    },
-  });
+  area.addEventListener("blur", () => writeBackInternal(view, getPos, area.value));
   wrap.appendChild(area);
   // Measure after mount.
   window.requestAnimationFrame(autosize);
@@ -251,7 +227,6 @@ function buildDecorations(
           key: `interiority-block-${beat.id}-${beat.to}`,
           side: 1,
           ignoreSelection: true,
-          destroy: (node) => exitActions.get(node as HTMLElement)?.destroy(),
         }),
       );
     }

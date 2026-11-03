@@ -252,7 +252,7 @@ nothing has to be a chord.
 | keys | axis |
 |---|---|
 | <kbd>←</kbd> <kbd>→</kbd> | **when** — move through the snapshots; right past the newest lands on Live |
-| <kbd>A</kbd> <kbd>S</kbd> <kbd>B</kbd> | **which** — Active · Snapshot · Both |
+| <kbd>A</kbd> <kbd>S</kbd> <kbd>B</kbd> | **which** — Active · Snapshot · Both (*Current* · Snapshot · Both since ADR-0100 Amendment 1) |
 | <kbd>Esc</kbd> | back to Live |
 
 Left hand on the letters, right hand on the arrows, so the two axes can be driven at once. Not

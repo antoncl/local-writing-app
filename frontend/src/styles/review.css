@@ -4,10 +4,18 @@
    Imported right after styles.css (main.ts). Nothing in styles.css or
    prose.css targets these classes, so loading them after all of styles.css
    rather than mid-file changes no result. */
+/* AI text is always cool (#2530): the same wash and dotted edge as `.r-was`,
+   in the prose's own text colour. */
 .ai-suggestion {
-  background: var(--star-soft);
-  border-bottom: 1px dashed var(--star-border);
-  color: var(--star);
+  background-color: var(--diff-was-soft);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--diff-was-edge) 0 3px,
+    transparent 3px 6px
+  );
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 2px;
   padding: 0 1px;
   border-radius: 2px;
 }

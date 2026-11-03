@@ -22,6 +22,7 @@
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
   import RunFlip from "@/components/editor/body/RunFlip.svelte";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
+  import { olderFirst } from "@/lib/utils/diffRuns";
   import { composeList, listSequence, type ListPairing, type ListResolution, type ListUnit } from "@/lib/utils/listCompare";
   import { visibleItemMembers } from "@/lib/editor-core/listItemIdentity";
   import { itemMarkdown, itemTitle, memberDisplayText, orderMarkdown } from "@/lib/utils/listReviewText";
@@ -38,6 +39,7 @@
     view,
     resolveTitle = undefined,
     adoptable = true,
+    older = "was",
     onSettleUnit,
   }: {
     field: MetadataFieldDefinition;
@@ -53,6 +55,9 @@
     resolveTitle?: (id: string) => string | null;
     /** False at an override layer (ADR-0096 §6): shown, nothing clickable. */
     adoptable?: boolean;
+    /** Which side is the older one, shown first (#2533): the snapshot (`was`) in a
+     *  snapshot compare, the current entry (`now`) in a proposal review. */
+    older?: "was" | "now";
     onSettleUnit: (unitKey: string, value: true | string | false) => void;
   } = $props();
 
@@ -96,10 +101,13 @@
   }
 
   function memberRuns(member: GroupMember, lValue: MetadataValue | undefined, oValue: MetadataValue | undefined): DiffRun[] {
-    return [
-      { kind: "was", text: memberDisplayText(member, oValue), stacked: true },
-      { kind: "now", text: memberDisplayText(member, lValue), stacked: true },
-    ];
+    return olderFirst(
+      [
+        { kind: "was", text: memberDisplayText(member, oValue), stacked: true },
+        { kind: "now", text: memberDisplayText(member, lValue), stacked: true },
+      ],
+      older,
+    );
   }
 
   /** A settled member's markdown: the region-resolved text for a `long_text`
@@ -128,11 +136,13 @@
           {adoptable}
           label={`${label} order`}
           {view}
-          runs={[
-            // The current order first, the proposed after it (#2533).
-            { kind: "now", text: orderMarkdown(lTitles), stacked: true },
-            { kind: "was", text: orderMarkdown(oTitles), stacked: true },
-          ]}
+          runs={olderFirst(
+            [
+              { kind: "was", text: orderMarkdown(oTitles), stacked: true },
+              { kind: "now", text: orderMarkdown(lTitles), stacked: true },
+            ],
+            older,
+          )}
           onSettle={(adopted) => onSettleUnit("order", adopted)}
         />
       </div>
@@ -164,6 +174,7 @@
                       label={member.name || member.key}
                       showLabel={!field.item_scalar}
                       {view}
+                      {older}
                       onResolved={(v) => onSettleUnit(unitKey, v ?? false)}
                     />
                   {:else if settled !== undefined}

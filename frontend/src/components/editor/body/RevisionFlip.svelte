@@ -24,6 +24,7 @@
     showLabel = true,
     view = "both",
     adoptable = true,
+    older = "now",
     onResolved,
   }: {
     /** The value as the author currently sees it (the warm `now` side). */
@@ -42,6 +43,9 @@
     /** False where the value cannot be written (ADR-0096 §6, a list at an
      *  override layer): the comparison shows, but no region is clickable. */
     adoptable?: boolean;
+    /** Which side is older, shown first (#2533): the current text in a proposal
+     *  review, the stored one when a snapshot compare's list section uses the flip. */
+    older?: "was" | "now";
     /** Report the running resolution: null while unchanged from the original. */
     onResolved: (value: string | null) => void;
   } = $props();
@@ -51,7 +55,7 @@
   // baseline, or declining a purely-cosmetic diff would write a normalized body.
   const originalText = untrack(() => normalizeReviewMarkdown(currentText));
 
-  let runs = $state<DiffRun[]>(untrack(() => reviewBodyProposal(currentText, proposedText).runs));
+  let runs = $state<DiffRun[]>(untrack(() => reviewBodyProposal(currentText, proposedText, older).runs));
 
   let html = $state("");
   $effect(() => {

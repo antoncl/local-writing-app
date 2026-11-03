@@ -18,9 +18,9 @@
  * the entry yet" — the same reading as snapshot compare (warm = the live scene,
  * cool = the stored alternative). It also keeps a reused invariant intact — the
  * run reassembly and `adoptRegion` treat `now` as the live baseline, so
- * declining every region is a no-op on the live body. Only the run *titles*
- * baked into `renderDiffRuns` ("Restore this") are snapshot wording the UI slice
- * will reword for a proposal; the *tint* is correct as-is and needs no override.
+ * declining every region is a no-op on the live body. The *tint* is correct as-is
+ * and needs no override. (Runs once carried per-run "Restore this" titles; #710
+ * removed them - the colour is the whole affordance.)
  *
  * **The order is not the engine's.** The engine emits a changed region's `was`
  * runs first — right for a snapshot (the past), wrong here, where `was` is the
@@ -150,11 +150,16 @@ function canonicalizeEmphasis(line: string): string {
  * `now` side and the proposed body on the `was` side, the same invariant every
  * consumer of these runs relies on.
  */
-export function reviewBodyProposal(currentBody: string, proposedBody: string): BodyRevision {
-  // The current body is the older text: it shows first, the proposal after it (#2533).
+export function reviewBodyProposal(
+  currentBody: string,
+  proposedBody: string,
+  older: "was" | "now" = "now",
+): BodyRevision {
+  // The older text shows first (#2533): for a proposal that is the current body.
+  // A snapshot compare's list member passes `was`, its stored side being the older.
   const runs = olderFirst(
     diffRuns(normalizeReviewMarkdown(proposedBody), normalizeReviewMarkdown(currentBody)),
-    "now",
+    older,
   );
   return { runs, regions: groupRuns(runs).regions };
 }

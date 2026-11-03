@@ -84,12 +84,12 @@ describe("EditorFooter", () => {
       setLineEditView: vi.fn(),
     };
     render(EditorFooter, { props: props({ lineEditReview: controller }) });
-    expect(screen.getByTestId("review-view-now").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("review-view-proposed").getAttribute("aria-pressed")).toBe("false");
-    expect(screen.getByTestId("review-view-proposed").getAttribute("title")).toContain("Alt+S");
-    await fireEvent.click(screen.getByTestId("review-view-proposed"));
+    expect(screen.getByRole("button", { name: "Current" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Proposed" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Proposed" }).getAttribute("title")).toContain("Alt+S");
+    await fireEvent.click(screen.getByRole("button", { name: "Proposed" }));
     expect(controller.setLineEditView).toHaveBeenCalledWith("proposed");
-    await fireEvent.click(screen.getByTestId("review-view-both"));
+    await fireEvent.click(screen.getByRole("button", { name: "Both" }));
     expect(controller.setLineEditView).toHaveBeenCalledWith("both");
   });
 

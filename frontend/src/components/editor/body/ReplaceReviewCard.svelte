@@ -37,12 +37,12 @@
 
 <div class="replace-review">
   <div class="review-bar">
-    <span class="review-hint" title="Replace the current value with the proposed one, or discard it."
+    <span class="review-hint" title="Accept to replace the current value with the proposed one, or reject it."
       >{heading}</span
     >
     <div class="review-actions">
-      <button type="button" class="review-reject" onclick={onDiscard}>Discard</button>
-      <button type="button" class="review-replace" onclick={onReplace}>Replace</button>
+      <button type="button" class="review-reject" onclick={onDiscard}>Reject</button>
+      <button type="button" class="review-replace" onclick={onReplace}>Accept</button>
     </div>
   </div>
   <div class="replace-fields">

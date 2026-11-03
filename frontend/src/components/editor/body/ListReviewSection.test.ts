@@ -179,7 +179,7 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
     "She remarks on the wound, a remark and never a question.",
   ];
 
-  function scalarProps(view: "both" | "now") {
+  function scalarProps(view: "both" | "now", older?: "was" | "now") {
     const pairing = pairListItems(scalarField, sL, sO);
     return {
       field: scalarField,
@@ -190,9 +190,24 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
       O: sO,
       resolution: {},
       view,
+      ...(older ? { older } : {}),
       onSettleUnit: vi.fn(),
     };
   }
+
+  // #2530: a prose member's own diff follows the section's older side too.
+  const firstChanged = (c: HTMLElement) =>
+    [...c.querySelectorAll(".lrs-edited .r-now, .lrs-edited .r-was")].map((el) => (el.classList.contains("r-now") ? "now" : "was"))[0];
+
+  it("an edited item's diff puts the snapshot's words first in a snapshot compare", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both") });
+    await waitFor(() => expect(firstChanged(container)).toBe("was"));
+  });
+
+  it("an edited item's diff puts the current words first in a proposal review", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both", "now") });
+    await waitFor(() => expect(firstChanged(container)).toBe("now"));
+  });
 
   it("an edited item is its diff alone, with no title line or member heading", async () => {
     const { container } = render(ListReviewSection, { props: scalarProps("both") });
@@ -230,5 +245,45 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
     const { container } = render(ListReviewSection, { props: scalarProps("now") });
     await waitFor(() => expect(container.querySelectorAll(".lrs-single .effective-body-content.prose-column p")).toHaveLength(3));
     expect(container.querySelector(".lrs-single strong")).toBeNull();
+  });
+});
+
+// #2533: the older side comes first - the snapshot in a compare, the current
+// entry in a proposal review - for an edited member AND for the order region.
+describe("ListReviewSection - older side first (#2533)", () => {
+  const rL: MetadataValue[] = [beat("a", "Alpha old", "ga"), beat("b", "Beta", "gb")];
+  const rO: MetadataValue[] = [beat("b", "Beta", "gb"), beat("a", "Alpha new", "ga")];
+
+  function props(older?: "was" | "now") {
+    const pairing = pairListItems(field, rL, rO);
+    return {
+      field,
+      label: "Beats",
+      pairing,
+      units: listUnits(field, pairing),
+      L: rL,
+      O: rO,
+      resolution: {},
+      view: "both" as const,
+      ...(older ? { older } : {}),
+      onSettleUnit: vi.fn(),
+    };
+  }
+
+  const kinds = (nodes: NodeListOf<Element>) =>
+    [...nodes].map((el) => (el.classList.contains("blk-now") ? "now" : "was"));
+  const order = (c: HTMLElement) => kinds(c.querySelectorAll(".lrs-order .blk"));
+  const member = (c: HTMLElement) => kinds(c.querySelectorAll(".lrs-edited .lrs-member .blk"));
+
+  it("a proposal review (older = now) puts the current side above the proposed", async () => {
+    const { container } = render(ListReviewSection, { props: props("now") });
+    await waitFor(() => expect(order(container)).toEqual(["now", "was"]));
+    await waitFor(() => expect(member(container).slice(0, 2)).toEqual(["now", "was"]));
+  });
+
+  it("a snapshot compare (default) puts the snapshot above the live side", async () => {
+    const { container } = render(ListReviewSection, { props: props() });
+    await waitFor(() => expect(order(container)).toEqual(["was", "now"]));
+    await waitFor(() => expect(member(container).slice(0, 2)).toEqual(["was", "now"]));
   });
 });

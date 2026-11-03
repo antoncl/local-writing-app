@@ -67,7 +67,7 @@
   // never do. But a keyboard author who has tabbed to a notch has to be able to
   // walk the timeline from there, and at Live that means ← is their way in.
   //
-  // A/S/B are the compare axis (#409): Active · Snapshot · Both. Left hand on
+  // A/S/B are the compare axis (#409): Current · Snapshot · Both. Left hand on
   // the letters, right hand on the arrows, so *when* and *which* are driven at
   // once. Not ↑↓, which fight page scroll on a long scene. (The key handling
   // itself now lives in the FootDock — this list is still the source of truth
@@ -76,8 +76,8 @@
   // The three compare states, as a list so the buttons and the key map cannot
   // drift apart.
   const VIEWS = [
-    { id: "now", key: "A", label: "Active", hint: "the scene as it is now" },
-    { id: "was", key: "S", label: "Snapshot", hint: "the scene as it was" },
+    { id: "now", key: "A", label: "Current", hint: "the scene as it is now", tone: "warm" },
+    { id: "was", key: "S", label: "Snapshot", hint: "the scene as it was", tone: "cool" },
     { id: "both", key: "B", label: "Both", hint: "both versions, adjacent" },
   ] as const;
 

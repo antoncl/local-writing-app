@@ -17,6 +17,7 @@
   import type { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import type { DocumentKind } from "@/lib/types";
   import { paneOwnsKey } from "@/lib/utils/paneScope";
+  import { compareKey } from "@/lib/utils/compareKey";
 
   type Track = "mutations" | "snapshots";
 
@@ -84,7 +85,10 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.ctrlKey || event.metaKey) return;
+    // Alt answers only as the Alt+A/S/B version chord; every other Alt press is the browser's.
+    const compare = compareKey(event);
+    if (event.altKey && !compare) return;
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
 
@@ -118,12 +122,11 @@
     if (shownTrack === "snapshots") {
       // A/S/B are toggles, not held modifiers; ignore auto-repeat so the view
       // can't strobe between two states (ADR-0044 §I). Arrows are exempt.
-      const compare = /^[asb]$/i.test(event.key);
       if (compare && event.repeat) {
         event.preventDefault();
         return;
       }
-      switch (event.key) {
+      switch (compare ?? event.key) {
         case "ArrowLeft":
           snapshots.step(-1);
           break;
@@ -134,15 +137,12 @@
           void snapshots.park(null);
           break;
         case "a":
-        case "A":
           snapshots.toggleView("now");
           break;
         case "s":
-        case "S":
           snapshots.toggleView("was");
           break;
         case "b":
-        case "B":
           snapshots.setView("both");
           break;
         default:

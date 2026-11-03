@@ -26,7 +26,11 @@ context_strategy:
       from_input: character
 ---
 
-{% set char = entry(inputs.character) %}
+{# A turn inserted mid-scene knows nothing after its cursor: the lore and the
+   character read where the cursor is, and `character_turns` only the prose
+   before it. With no cursor they read the whole scene. #}
+{% if cursor_offset is not none %}{% do lore_as_of("selection") %}{% endif %}
+{% set char = entry(inputs.character, position=cursor_offset) %}
 {% role "system" %}
 You roleplay one character within an ongoing scene. Stay in voice, in motive, in the moment. Write that character's NEXT beat and stop.
 

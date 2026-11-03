@@ -1,6 +1,6 @@
 # ADR-0070: A roleplay beat carries private interiority; a final stage projects the clean scene
 
-- Status: **Accepted** — 2026-08-22 (Anton). Design complete; all open questions resolved (the reveal affordance settled by mockup). Only behavioural prompt-tuning is deferred to live testing. Implementation proceeds as vertical slices; nothing built yet.
+- Status: **Accepted** — 2026-08-22 (Anton). Design complete; all open questions resolved (the reveal affordance settled by mockup). Only behavioural prompt-tuning is deferred to live testing. Implementation proceeds as vertical slices; nothing built yet. **Amendment 1 (proposed 2026-11-03)** brackets a beat with two markers and moves its interiority to the close marker (#2665).
 - Issue: #844 (spun out of the roleplay intent-vs-impl review)
 - Follows: ADR-0051 (a node owns its conversations — roleplay stays a scene-hosted prompt, **not** a node), ADR-0046 (an AI proposal is author-reviewable — author authority over AI writes), the character mark + comment-marker round-trip (`proseMarks.ts` / `markdown.ts`), and the Dynamics scene-direction field.
 - **Non-goal of this ADR:** it decides the *model and its invariants*, not the generation/handler mechanism — those are listed as open questions and deferred to a first slice.
@@ -69,3 +69,32 @@ A separate per-character inner-state field was the first draft of this ADR. It w
 ## The journey (why this shape)
 
 A dedicated roleplay coordinating node was considered and rejected as YAGNI; roleplay stays a scene-hosted prompt. Per-character direction surfaced that a character's subtext can't ride in a *visible* beat without leaking to the others — the interiority-filtering problem the node would have owned. Three homes for interiority were weighed: a separate per-character channel (this ADR's own first draft), a hidden marker on the beat, and inline-unmarked-cleaned-at-the-end. The marker home won because it reuses the comment-marker round-trip, needs no new field type, and — decisively — keeps everything in one ordered record, so the author can trace each character's inner life and rewind the scene cleanly. Direction and subtext, which began as two features, are one channel with two writers; and the cleanup stage is where the "scene is a filtered projection of a richer record" idea, raised at the very start, finally lands.
+
+## Amendment 1 — A beat is bracketed by two markers, and its interiority rides the close marker
+
+**Proposed** 2026-11-03, awaiting Anton's approval; nothing is built against it until it is accepted. From Anton's first test of roleplay and its interiority on a real scene (#2665, #2666, #2669). It revisits Resolved-in-review 4 ("nested vs. paired-with-atomic-delete"), which the first slice answered with an attribute on the character mark. The invariants and the cleanup stage don't change.
+
+### What prompted it
+
+- **A beat had no identity of its own.** One `/roleplay` reply of four paragraphs was stored as four `character` spans, because a mark can't cross a paragraph break, and each span carried a full copy of the interiority. `character_turns` then gave the model the same inner monologue four times. The editor showed four eye handles, and an edit reached only the copy that was opened: Anton's test edit landed in one span and not the other three. Pressing Enter inside a beat does the same.
+- **The interiority couldn't be edited safely.** It lived on the mark, so writing it back changed the mark, and ProseMirror redraws a changed mark together with the widgets beside it. Every save replaced the revealed textarea and the eye handle. No save moment was safe:
+  - on a blur, a writing assistant's fix landed in a detached box;
+  - on a press, the eye click was lost (#2649).
+- **The interiority isn't proofread.** The revealed box is a plain textarea that the proofreading lens (ADR-0102) doesn't check. The cleanup stage (§4) can keep the focal character's interiority as narration, so its words can reach the reader.
+- **A turn could see the future.** `character_turns` read the whole scene, so a turn inserted between two beats knew what came after it (#2669).
+
+### Decision
+
+1. **A beat is a pair of markers: an open marker and a close marker.** They are inline atoms in the prose, as mutation anchors are (ADR-0095), and a beat may span paragraphs. The open marker names the character, and the close marker carries the interiority, **stored once per beat**. The markdown keeps the existing comment-marker round-trip; the interiority moves from the opening comment to the closing one. The exact encoding is a slice detail. The contract: one beat is one pair, the interiority is stored once, it is hidden, it round-trips, and it dies with its beat.
+2. **Who said what is drawn between the markers.** The coloured underline is a decoration over the range between a pair, not a mark on the text.
+3. **Beats never nest.** All text between a pair belongs to that beat, including what the author types there and any paragraph breaks.
+4. **The interiority is edited from the close marker, and an edit changes only that atom.** Its node view takes the new value without rebuilding its DOM, so the edit box stays live while it is open. A writing assistant's fix lands and stays, and the eye click works. Whether the box sits inline in the node view or in a popover anchored to the marker is a slice detail, with one requirement: **the proofreading lens checks the interiority, and its fixes apply there.** A popover hosting the long-text editor of ADR-0102 Amendment 3 meets that without new proofreading work.
+5. **`/roleplay` is not offered inside a beat.** With the cursor between a pair, the slash menu shows `/roleplay` disabled, with the reason on its hint line ("Inside Elias's beat: move the cursor outside it, or split the beat"). The slash menu gains a disabled state for this.
+6. **`/roleplay split` splits a beat at the cursor.** It is offered only inside a beat. It ends the beat with a new close marker and starts a new beat for the same character after it. Both halves get a copy of the interiority, and both are revealed, so the author trims each to its half. A beat never exists without an interiority, and the copy is made in plain view, on purpose.
+7. **A turn knows nothing after its insertion point.** Everything a roleplay send reads from the scene body (the turn history, and anything else derived from the body) stops at the insertion point (#2669).
+8. **A marker without its partner attributes nothing.** An open marker with no close, or a close with no open, is shown as broken in the editor and reported by validation (advisory, as for mutation anchors). Text is never silently reattributed. Deleting a beat's whole range removes both markers together. Deleting one marker alone leaves the other broken until the author fixes or removes it.
+9. **Existing scenes migrate (ADR-0071).** Consecutive spans for the same character with identical interiority, separated only by paragraph breaks, merge into one beat. Spans whose interiority differs become separate beats, each keeping its own. The first case is the four-paragraph reply; the second is a copy the author already edited.
+
+### Not changed
+
+The invariants (no cross-character leak, visible prose stays external, one ordered record, author authority), the privacy rule in `character_turns`, the cleanup stage, and the reveal glyph and shell toggle of Resolved-in-review 2.

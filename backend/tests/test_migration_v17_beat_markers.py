@@ -32,7 +32,8 @@ def _old(char: str, text: str, enc: str = "") -> str:
 
 
 def _beat(char: str, text: str, enc: str = "") -> str:
-    close = f"<!-- /character;internal={enc} -->" if enc else "<!-- /character -->"
+    internal = f";internal={enc}" if enc else ""
+    close = f"<!-- /character:id={char}{internal} -->"
     return f"<!-- character:id={char} -->{text}{close}"
 
 
@@ -65,9 +66,17 @@ class BeatMarkerMigrationTests(unittest.TestCase):
         body = _old("annie", "One.", "aaa") + " " + _old("annie", "Two.", "aaa")
         self.assertEqual(_migrate(body), _beat("annie", "One.", "aaa") + " " + _beat("annie", "Two.", "aaa"))
 
-    def test_a_span_without_interiority_keeps_a_bare_close(self) -> None:
+    def test_a_span_without_interiority_gets_an_id_bearing_close(self) -> None:
         body = "Before. " + _old("bill", "He grins.") + " After."
-        self.assertEqual(_migrate(body), body)
+        migrated = _migrate(body)
+        self.assertEqual(migrated, "Before. " + _beat("bill", "He grins.") + " After.")
+        self.assertIn("<!-- /character:id=bill -->", migrated)
+
+    def test_closes_are_emitted_in_the_new_format(self) -> None:
+        migrated = _migrate(_old("annie", "One.", "aaa") + "\n\n" + _old("bill", "Two."))
+        self.assertIn("<!-- /character:id=annie;internal=aaa -->", migrated)
+        self.assertIn("<!-- /character:id=bill -->", migrated)
+        self.assertNotIn("<!-- /character -->", migrated)
 
     def test_identical_spans_without_interiority_merge(self) -> None:
         body = _old("bill", "One.") + "\n\n" + _old("bill", "Two.")

@@ -17,18 +17,22 @@ from app.services.project.beat_marker_validation import orphan_beat_markers
 
 class OrphanScanTests(unittest.TestCase):
     def test_a_paired_beat_has_no_orphans(self) -> None:
-        body = "<!-- character:id=a -->x\n\ny<!-- /character;internal=z -->"
+        body = "<!-- character:id=a -->x\n\ny<!-- /character:id=a;internal=z -->"
         self.assertEqual(orphan_beat_markers(body), ([], 0))
 
     def test_open_with_no_close(self) -> None:
         self.assertEqual(orphan_beat_markers("<!-- character:id=a -->x"), (["a"], 0))
 
     def test_close_with_no_open(self) -> None:
-        self.assertEqual(orphan_beat_markers("x<!-- /character -->"), ([], 1))
+        self.assertEqual(orphan_beat_markers("x<!-- /character:id=a -->"), ([], 1))
 
     def test_an_open_followed_by_another_open_is_the_orphan(self) -> None:
-        body = "<!-- character:id=a -->x<!-- character:id=b -->y<!-- /character -->"
+        body = "<!-- character:id=a -->x<!-- character:id=b -->y<!-- /character:id=b -->"
         self.assertEqual(orphan_beat_markers(body), (["a"], 0))
+
+    def test_a_close_naming_another_character_orphans_both(self) -> None:
+        body = "<!-- character:id=a -->x<!-- /character:id=b -->"
+        self.assertEqual(orphan_beat_markers(body), (["a"], 1))
 
 
 class BeatMarkerValidationTests(unittest.TestCase):
@@ -52,7 +56,7 @@ class BeatMarkerValidationTests(unittest.TestCase):
         return [w for w in validation.warnings if "beat" in w or "end marker" in w]
 
     def test_paired_beat_is_clean(self) -> None:
-        self.assertEqual(self._warnings("<!-- character:id=c1 -->Hi.<!-- /character -->"), [])
+        self.assertEqual(self._warnings("<!-- character:id=c1 -->Hi.<!-- /character:id=c1 -->"), [])
 
     def test_orphan_open_warns(self) -> None:
         self.assertEqual(
@@ -62,7 +66,7 @@ class BeatMarkerValidationTests(unittest.TestCase):
 
     def test_orphan_close_warns(self) -> None:
         self.assertEqual(
-            self._warnings("Hi there.<!-- /character -->"),
+            self._warnings("Hi there.<!-- /character:id=c1 -->"),
             ["Scene 'The Tide': an end marker has no beat."],
         )
 

@@ -65,7 +65,7 @@ A turn is **one beat of the played character**: their reaction to the last thing
 - **The interiority** is the character's private inner state for that beat, stored once, on the end marker. Click the eye to open it in a tinted box under the line, and edit it there like any long-text field: it is spell- and grammar-checked with the scene. Every keystroke is saved to the marker, so closing the box loses nothing. The eye in the editor header (Alt+I) opens or closes every beat's interiority at once.
 - **Beats never nest.** See the slash conveniences above for what `/roleplay` does inside a beat.
 - **Deleting a beat** (both markers) removes its attribution and its interiority. A marker left without its partner attributes nothing: it shows in the danger colour, and validation lists it, until you delete it or add its partner.
-- **On disk** the markers are HTML comments: `<!-- character:id=lore_abc -->text<!-- /character -->`, the end marker carrying the interiority once when there is any (`<!-- /character;internal=… -->`). A beat may span paragraphs. Comment markers survive every markdown parser.
+- **On disk** the markers are HTML comments: `<!-- character:id=lore_abc -->text<!-- /character:id=lore_abc -->`, the end marker carrying the interiority once when there is any (`<!-- /character:id=lore_abc;internal=… -->`). Both markers name the character, so a mismatched pair (say, after a deletion splices two beats together) attributes nothing. A beat may span paragraphs. Comment markers survive every markdown parser.
 
 ## How the thread is reconstructed (send-time)
 

@@ -1119,8 +1119,10 @@ def _collect_scene_text(
 # split the body into per-character segments at send time.
 #
 # A beat is an open marker `<!-- character:id=X -->` and a close marker
-# `<!-- /character -->`; the text between may span paragraphs (ADR-0070
-# Amendment 1). It may also carry its character's PRIVATE interiority as an
+# `<!-- /character:id=X -->`; BOTH name the character and a pair matches only
+# when the ids agree, so a deletion that splices two beats together can never
+# reattribute one character's text or interiority to another. The text between
+# may span paragraphs (ADR-0070 Amendment 1). It may also carry its character's PRIVATE interiority as an
 # optional `;internal=<url-encoded>` field on the CLOSE marker, stored once per
 # beat — hidden inner state bound to the beat. It is included only on the FOCUS
 # character's own turns and stripped from every other character's (see
@@ -1130,7 +1132,7 @@ def _collect_scene_text(
 CHARACTER_SPAN_PATTERN = re.compile(
     r"<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->"
     r"((?:(?!<!--\s*/?character[:;\s-])[\s\S])*?)"
-    r"<!--\s*/character(?:;internal=(\S*?))?\s*-->",
+    r"<!--\s*/character:id=\1(?:;internal=(\S*?))?\s*-->",
 )
 
 # The delimiter separating a beat's external prose from its interiority in the
@@ -1146,7 +1148,7 @@ def _split_body_by_character_markers(
     """Return [(character_id | None, text, internal), …] for the body.
 
     Text outside any character marker becomes a (None, text, "") segment.
-    Text inside `<!-- character:id=X -->…<!-- /character -->` becomes
+    Text inside `<!-- character:id=X -->…<!-- /character:id=X -->` becomes
     (X, text, internal), where `internal` is the decoded interiority payload
     from the optional `;internal=` field of the close marker ("" when absent).
     An orphan open or close marker attributes nothing: its text stays in the
@@ -1230,15 +1232,15 @@ def _character_turns(
     return "".join(parts)
 
 
-_CHARACTER_OPEN = re.compile(r"<!--\s*character:id=")
-_CHARACTER_CLOSE = re.compile(r"<!--\s*/character(?:;internal=\S*?)?\s*-->")
+_CHARACTER_OPEN = re.compile(r"<!--\s*character:id=([A-Za-z0-9_-]+)")
+_CHARACTER_CLOSE = re.compile(r"<!--\s*/character:id=[A-Za-z0-9_-]+(?:;internal=\S*?)?\s*-->")
 
 
 def _body_before_cursor(body: str, cursor_offset: Any) -> str:
     """`body` cut at `cursor_offset` (clamped); the whole body when there is no
     int offset. A cut inside a beat leaves its opening marker unclosed, so the
-    closing marker is appended: the partial beat still counts as that
-    character's span. The bare close carries no `;internal=`, so a cut beat's
+    closing marker (naming that open's character) is appended: the partial beat
+    still counts as that character's span. The appended close carries no `;internal=`, so a cut beat's
     interiority is dropped (roleplay can't be invoked inside a beat anyway).
     """
     if not isinstance(cursor_offset, int) or isinstance(cursor_offset, bool):
@@ -1250,7 +1252,7 @@ def _body_before_cursor(body: str, cursor_offset: Any) -> str:
     closes = list(_CHARACTER_CLOSE.finditer(cut))
     if closes and closes[-1].start() > opens[-1].start():
         return cut
-    return cut + "<!-- /character -->"
+    return cut + f"<!-- /character:id={opens[-1].group(1)} -->"
 
 
 def _role_block(role: str, text: str) -> str:

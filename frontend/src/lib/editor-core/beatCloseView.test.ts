@@ -56,7 +56,7 @@ async function innerEditor(editor: Editor, loaded: string): Promise<Editor> {
   return inner!;
 }
 
-const BEAT = "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=Steady. -->";
+const BEAT = "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character:id=lore_1;internal=Steady. -->";
 
 describe("the close marker's node view", () => {
   it("is one handle per beat, coloured, and opens the interiority in the long-text editor", async () => {
@@ -94,12 +94,25 @@ describe("the close marker's node view", () => {
   });
 
   it("shows an end marker with no beat as broken, and never opens it", async () => {
-    const editor = await mountScene("Narration.<!-- /character;internal=Lost. -->");
+    const editor = await mountScene("Narration.<!-- /character:id=lore_1;internal=Lost. -->");
     const dom = closeDom(editor);
     expect(dom.classList.contains("beat-marker-broken")).toBe(true);
     editor.view.dispatch(editor.state.tr.setMeta(INTERIORITY_META.revealAll, true));
     flushSync();
     expect(dom.querySelector(".interiority-block")).toBeNull();
+  });
+});
+
+describe("a read-only body", () => {
+  it("opens the interiority read-only, and an edit there never reaches the marker", async () => {
+    const editor = await mountScene(BEAT);
+    editor.setEditable(false);
+    reveal(editor);
+    const inner = await innerEditor(editor, "Steady.");
+    expect(inner.isEditable).toBe(false);
+    inner.commands.insertContentAt(1, "Hold ");
+    flushSync();
+    expect(scanBeats(editor.state.doc).beats[0].internal).toBe("Steady.");
   });
 });
 

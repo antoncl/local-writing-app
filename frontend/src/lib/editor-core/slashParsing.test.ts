@@ -20,9 +20,14 @@ describe("slashParagraphText (#2234)", () => {
   });
 
   it("keeps string length equal to the paragraph's doc size, atoms included", () => {
-    const paragraph = schema.node("paragraph", null, [schema.text("/mutate "), schema.node("pill")]);
+    const paragraph = schema.node("paragraph", null, [schema.text("/mutate "), schema.node("pill"), schema.text("x")]);
     expect(slashParagraphText(paragraph)).toHaveLength(paragraph.content.size);
     expect(slashParagraphText(paragraph).startsWith("/mutate")).toBe(true);
+  });
+
+  it("drops trailing atoms, so clearing the query stops before them", () => {
+    const paragraph = schema.node("paragraph", null, [schema.text("/mutate "), schema.node("pill")]);
+    expect(slashParagraphText(paragraph)).toBe("/mutate ");
   });
 });
 
@@ -107,5 +112,18 @@ describe("a multi-word label beats the one-word command it starts with", () => {
     expect(filterSlashCommands(commands, parseSlashBody("roleplay Irene")!).map((c) => c.label)).toEqual([
       "Roleplay",
     ]);
+  });
+});
+
+describe("a trailing atom is not part of the slash query", () => {
+  // A beat's close marker left alone on a new line, then "/roleplay split" typed
+  // before it: the query must not read the marker, and clearing it must stop there.
+  const paragraph = {
+    content: { size: 16 },
+    textBetween: () => "/roleplay split￼",
+  };
+
+  it("drops the trailing atom", () => {
+    expect(slashParagraphText(paragraph)).toBe("/roleplay split");
   });
 });

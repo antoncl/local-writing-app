@@ -3,9 +3,11 @@
 // (`characterClose`, carries the interiority). Both are inline atoms, so a beat
 // may span paragraphs, and the interiority is stored once, on the close marker.
 //
-// Markers pair in document order. Beats never nest, so an open marker followed
-// by another open marker before any close is an orphan, and so is a close marker
-// with no open marker before it. An orphan attributes nothing (decision 8).
+// Markers pair in document order, and both name the character. Beats never
+// nest, so an open marker followed by another open marker before any close is an
+// orphan, and so is a close marker with no open marker before it. A close naming
+// another character than the open before it makes both orphans: text is never
+// reattributed. An orphan attributes nothing (decision 8).
 
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
@@ -40,7 +42,10 @@ export function scanBeats(doc: PMNode): BeatScan {
       if (pending) orphans.push(pending.pos);
       pending = { characterId: String(node.attrs.characterId ?? ""), pos };
     } else if (node.type.name === BEAT_CLOSE) {
-      if (pending) {
+      if (pending && pending.characterId !== String(node.attrs.characterId ?? "")) {
+        orphans.push(pending.pos, pos);
+        pending = null;
+      } else if (pending) {
         beats.push({
           characterId: pending.characterId,
           open: pending.pos,
@@ -82,9 +87,27 @@ export function splitBeat(
   const beat = beatAt(state.doc, pos);
   if (!beat) return null;
   const { schema } = state;
-  const close = schema.nodes[BEAT_CLOSE].create({ internal: beat.internal });
+  const close = schema.nodes[BEAT_CLOSE].create({ characterId: beat.characterId, internal: beat.internal });
   const open = schema.nodes[BEAT_OPEN].create({ characterId: beat.characterId });
   const tr = state.tr.insert(pos, [close, open]);
   tr.setSelection(TextSelection.create(tr.doc, pos + 2));
   return { tr, closes: [pos, beat.close + 2] };
+}
+
+/** Does `from…to` hold a beat marker? A rewrite deletes its range, so it would
+ *  take the marker (and an interiority) with it. */
+export function rangeHasBeatMarker(doc: PMNode, from: number, to: number): boolean {
+  let found = false;
+  doc.nodesBetween(from, to, (node) => {
+    if (node.type.name === BEAT_OPEN || node.type.name === BEAT_CLOSE) found = true;
+    return !found;
+  });
+  return found;
+}
+
+/** The leaf text of an atom in text sent to a model: a beat marker is not
+ *  prose, so it adds nothing; any other leaf (a pill, a line break) reads as a
+ *  space, as it always has. Pass it as `textBetween`'s leaf text. */
+export function modelLeafText(node: PMNode): string {
+  return node.type.name === BEAT_OPEN || node.type.name === BEAT_CLOSE ? "" : " ";
 }

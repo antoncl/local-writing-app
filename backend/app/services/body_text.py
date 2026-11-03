@@ -2,7 +2,7 @@
 
 Every marker the app keeps in a body is an HTML comment: mutation anchors
 (`<!-- mutate:… -->`), roleplay beats (`<!-- character:id=… -->…
-<!-- /character;internal=… -->`), embedded todos, legacy todo anchors. Only the tags go; the
+<!-- /character:id=X;internal=… -->`), embedded todos, legacy todo anchors. Only the tags go; the
 text between an open and close tag (a beat's visible words, a todo's anchored
 text) stays. A body rendered for a model goes through here so no marker — and no
 roleplay beat's private interiority — reaches it. Dependency-free so any service

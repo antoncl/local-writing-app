@@ -9,6 +9,7 @@
 // click is never lost to a redraw. Pairing, colour and reveal state arrive as
 // the node decoration `interiorityReveal` puts on the marker.
 import { mount, unmount } from "svelte";
+import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Decoration, EditorView, NodeView } from "@tiptap/pm/view";
 
@@ -62,9 +63,16 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
     value: String(props.node.attrs.internal ?? ""),
     ariaLabel: "Interiority for this beat",
     proofreadNodeId: options.proofreadNodeId(),
+    // A frozen or scrubbed body is read-only, and so is its interiority.
+    onEditorReady: (editor: Editor, phase: "ready" | "destroy") => {
+      inner = phase === "ready" ? editor : null;
+      // Only when it differs: setEditable fires an update, and one before the value
+      // has loaded would write an empty interiority back to the marker.
+      if (inner && inner.isEditable !== view.editable) inner.setEditable(view.editable);
+    },
     onChange: (next: string) => {
       const pos = getPos();
-      if (pos == null) return;
+      if (pos == null || !view.editable) return;
       const current = view.state.doc.nodeAt(pos);
       if (!current || current.type.name !== BEAT_CLOSE || current.attrs.internal === next) return;
       view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...current.attrs, internal: next }));
@@ -72,6 +80,7 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
   });
 
   let block: HTMLElement | null = null;
+  let inner: Editor | null = null;
   let mounted: Record<string, unknown> | null = null;
 
   function reveal(open: boolean): void {
@@ -109,6 +118,7 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
     );
     handle.title = broken ? "This beat end has no beat start. Delete it, or add a start." : "Interiority";
     reveal(open);
+    if (inner && inner.isEditable !== view.editable) inner.setEditable(view.editable);
   }
 
   apply(props.decorations);

@@ -312,3 +312,35 @@ describe("gatheredRequestFields (#2491)", () => {
     });
   });
 });
+
+describe("a rewrite over a beat marker (ADR-0070 Amendment 1)", () => {
+  // A rewrite deletes its range, so a beat marker in it would go too, and with it
+  // the beat's interiority. Notes never write the document, so they still run.
+  function editorWithMarker(): Editor {
+    const marker = { type: { name: "characterClose" } };
+    return {
+      state: {
+        selection: { from: 10, to: 20 },
+        doc: {
+          content: { size: 100 },
+          textBetween: (from: number, to: number) => `T[${from},${to}]`,
+          nodesBetween: (_from: number, _to: number, visit: (node: unknown) => boolean | void) => visit(marker),
+        },
+      },
+    } as unknown as Editor;
+  }
+  const crossing = "The selection crosses a roleplay beat marker. Select inside the beat, or outside it.";
+
+  it("refuses a revise and a line-edit run, saying why", () => {
+    for (const handler of [inlineHandler, inlineEditsHandler]) {
+      const host = makeInlineHost(editorWithMarker(), "selection");
+      expect(handler.produce(host)).toBeNull();
+      expect(host.errors).toEqual([{ message: crossing, anchor: 10 }]);
+    }
+  });
+
+  it("still gathers for notes", () => {
+    const host = makeInlineHost(editorWithMarker(), "selection");
+    expect(inlineNotesHandler.produce(host)).not.toBeNull();
+  });
+});

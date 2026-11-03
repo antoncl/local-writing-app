@@ -2,8 +2,8 @@
 advisory pass `validate_project` runs over every manuscript scene body.
 
 A beat is an open marker `<!-- character:id=X -->` and a close marker
-`<!-- /character -->`; they pair in document order. A marker without its
-partner attributes nothing (text is never silently reattributed), so each
+`<!-- /character:id=X -->`; they pair in document order and only when both name
+the same character. A marker without its partner attributes nothing (text is never silently reattributed), so each
 orphan is reported here as a warning — never an error, as for mutation anchors.
 """
 
@@ -14,7 +14,7 @@ from typing import Any
 
 _BEAT_MARKER = re.compile(
     r"<!--\s*character:id=(?P<open>[A-Za-z0-9_-]+)\s*-->"
-    r"|<!--\s*/character(?:;internal=\S*?)?\s*-->"
+    r"|<!--\s*/character:id=(?P<close>[A-Za-z0-9_-]+)(?:;internal=\S*?)?\s*-->"
 )
 
 
@@ -31,10 +31,15 @@ def orphan_beat_markers(body: str) -> tuple[list[str], int]:
             if pending is not None:
                 orphan_opens.append(pending)
             pending = char_id
-        elif pending is not None:
+        elif pending is not None and match.group("close") == pending:
             pending = None
         else:
+            # A close with no open, or naming another character than the pending
+            # open: the close is an orphan, and so is that open.
             orphan_closes += 1
+            if pending is not None:
+                orphan_opens.append(pending)
+                pending = None
     if pending is not None:
         orphan_opens.append(pending)
     return orphan_opens, orphan_closes

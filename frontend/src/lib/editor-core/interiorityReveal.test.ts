@@ -32,14 +32,14 @@ const schema = new Schema({
       group: "inline",
       inline: true,
       atom: true,
-      attrs: { internal: { default: "" } },
+      attrs: { characterId: { default: "" }, internal: { default: "" } },
       toDOM: () => ["span", { "data-character-close": "" }],
     },
   },
 });
 
 const open = (id: string) => schema.node("characterOpen", { characterId: id });
-const close = (internal = "") => schema.node("characterClose", { internal });
+const close = (id: string, internal = "") => schema.node("characterClose", { characterId: id, internal });
 const text = (t: string) => schema.text(t);
 function para(...inline: PMNode[]) {
   return schema.node("paragraph", null, inline);
@@ -67,8 +67,8 @@ const underlines = (state: EditorState) =>
 function sampleDoc(): PMNode {
   return schema.node("doc", null, [
     para(text("Narration. "), open("annie"), text("She fired.")),
-    para(text("Then ran."), close("Steady now.")),
-    para(open("bill"), text("He grins."), close("She'll miss.")),
+    para(text("Then ran."), close("annie", "Steady now.")),
+    para(open("bill"), text("He grins."), close("bill", "She'll miss.")),
   ]);
 }
 
@@ -83,14 +83,23 @@ describe("scanBeats", () => {
   });
 
   it("treats an open marker followed by another open as an orphan (beats never nest)", () => {
-    const doc = schema.node("doc", null, [para(open("annie"), text("a "), open("bill"), text("b"), close())]);
+    const doc = schema.node("doc", null, [para(open("annie"), text("a "), open("bill"), text("b"), close("bill"))]);
     const { beats, orphans } = scanBeats(doc);
     expect(beats.map((b) => b.characterId)).toEqual(["bill"]);
     expect(orphans).toEqual([1]);
   });
 
   it("treats a close with no open, and an unclosed open, as orphans", () => {
-    const doc = schema.node("doc", null, [para(text("a"), close(), text("b "), open("annie"), text("c"))]);
+    const doc = schema.node("doc", null, [para(text("a"), close("annie"), text("b "), open("annie"), text("c"))]);
+    const { beats, orphans } = scanBeats(doc);
+    expect(beats).toEqual([]);
+    expect(orphans).toHaveLength(2);
+  });
+
+  it("makes both markers orphans when the close names another character", () => {
+    // A deletion from inside Annie's beat to past Bill's open marker: Annie's open
+    // now meets Bill's close. Neither may hand its text or interiority over.
+    const doc = schema.node("doc", null, [para(open("annie"), text("a b"), close("bill", "Bill's secret"))]);
     const { beats, orphans } = scanBeats(doc);
     expect(beats).toEqual([]);
     expect(orphans).toHaveLength(2);

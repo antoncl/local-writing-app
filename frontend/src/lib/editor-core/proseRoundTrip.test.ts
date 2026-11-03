@@ -64,10 +64,14 @@ describe("scene round-trip through a real editor (#1866)", () => {
   // Each is already in the canonical on-disk form the save side emits, so a
   // faithful editor must reproduce it exactly after a full loop.
   it.each([
-    ["a beat in prose", "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character --> awake."],
+    ["a beat in prose", "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character:id=lore_1 --> awake."],
     [
       "a beat spanning paragraphs, its interiority once on the close (ADR-0070 Amendment 1)",
-      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=I%20can't%20miss. -->",
+      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character:id=lore_1;internal=I%20can't%20miss. -->",
+    ],
+    [
+      "an interiority of two paragraphs",
+      "<!-- character:id=lore_1 -->She fired.<!-- /character:id=lore_1;internal=First.%0A%0ASecond. -->",
     ],
     ["an orphan open marker, kept as written", "<!-- character:id=lore_1 -->Mira walked on."],
     ["an embedded todo", "<!-- embedded-todo:id=todo1;status=open;note= -->fix this line<!-- /embedded-todo -->"],

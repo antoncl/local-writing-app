@@ -72,7 +72,7 @@ describe("accepting a roleplay turn", () => {
     expect(beats).toHaveLength(1);
     expect(beats[0]).toMatchObject({ characterId: "lore_elias", internal: "Steady now." });
     expect(editorHtmlToSceneMarkdown(editor.getHTML())).toBe(
-      "<!-- character:id=lore_elias -->She fired.\n\nThen ran.<!-- /character;internal=Steady%20now. -->",
+      "<!-- character:id=lore_elias -->She fired.\n\nThen ran.<!-- /character:id=lore_elias;internal=Steady%20now. -->",
     );
   });
 });
@@ -80,12 +80,31 @@ describe("accepting a roleplay turn", () => {
 describe("a roleplay turn inside a beat", () => {
   it("is refused with the reason, and nothing is sent", async () => {
     const { editor, ctrl, notices } = await setup(
-      "<!-- character:id=lore_elias -->She fired.<!-- /character;internal=Steady. -->",
+      "<!-- character:id=lore_elias -->She fired.<!-- /character:id=lore_elias;internal=Steady. -->",
     );
     editor.commands.setTextSelection(4);
     const stream = fakeStream("Again.");
     await ctrl.runPromptEntryWithInputs(ROLEPLAY, { character: ELIAS });
     expect(stream).not.toHaveBeenCalled();
     expect(notices).toEqual(["Inside Elias's beat: move the cursor outside it, or split the beat."]);
+  });
+});
+
+describe("a roleplay reply whose cursor moved into a beat during the call", () => {
+  it("is not placed there", async () => {
+    const { editor, ctrl } = await setup(
+      "Narration.\n\n<!-- character:id=lore_elias -->She fired.<!-- /character:id=lore_elias;internal=Steady. -->",
+    );
+    editor.commands.setTextSelection(2); // in the narration: the send is allowed
+    vi.spyOn(api, "aiGenerateStream").mockImplementation(async function* () {
+      // Before the first token arrives, the author clicks inside the beat.
+      editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 4);
+      yield { type: "delta", text: "Again." } as never;
+      yield { type: "done", provider: "p", model: "m", latency_ms: 1, truncated: false } as never;
+    });
+    await ctrl.runPromptEntryWithInputs(ROLEPLAY, { character: ELIAS });
+    expect(ctrl.suggestionId).toBeNull();
+    expect(ctrl.error).toMatch(/moved into a beat/);
+    expect(editor.state.doc.textContent).not.toContain("Again.");
   });
 });

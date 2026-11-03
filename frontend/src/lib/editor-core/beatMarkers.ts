@@ -67,6 +67,13 @@ export const BeatCloseMarker = Node.create<BeatCloseViewOptions>({
   },
   addAttributes() {
     return {
+      // The close names its character too: a pair matches only when both agree,
+      // so a deletion across two beats can't hand one's interiority to the other.
+      characterId: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-character-close") ?? "",
+        renderHTML: (attributes) => ({ "data-character-close": String(attributes.characterId ?? "") }),
+      },
       internal: {
         default: "",
         parseHTML: (element) => element.getAttribute("data-internal") ?? "",
@@ -79,7 +86,7 @@ export const BeatCloseMarker = Node.create<BeatCloseViewOptions>({
     return [{ tag: "span[data-character-close]" }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ["span", mergeAttributes(HTMLAttributes, { "data-character-close": "", class: "beat-close" }), "⌟"];
+    return ["span", mergeAttributes(HTMLAttributes, { class: "beat-close" }), "⌟"];
   },
   addNodeView() {
     return (props) => createBeatCloseView(props, this.options);

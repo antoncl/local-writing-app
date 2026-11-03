@@ -77,7 +77,7 @@ import {
 } from "@/lib/editor-core/mutationMarkers";
 import { joinAtCursor } from "@/lib/editor-core/cursorJoin";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
-import { BEAT_CLOSE, BEAT_OPEN, beatAt, insideBeatReason } from "@/lib/editor-core/beats";
+import { BEAT_CLOSE, BEAT_OPEN, beatAt, insideBeatReason, modelLeafText } from "@/lib/editor-core/beats";
 import type {
   ChatUsage,
   CheckedEntry,
@@ -375,7 +375,7 @@ export class AiSuggestionController {
         // stays put.
         const internal = this.#pendingInternal ?? "";
         chain = chain
-          .insertContentAt(range.to, { type: BEAT_CLOSE, attrs: { internal } })
+          .insertContentAt(range.to, { type: BEAT_CLOSE, attrs: { characterId, internal } })
           .insertContentAt(range.from, { type: BEAT_OPEN, attrs: { characterId } });
         end = range.to + 2;
       }
@@ -847,7 +847,7 @@ export class AiSuggestionController {
         this.error = res.error || "Unknown error";
         return;
       }
-      if (editor.state.doc.textBetween(from, to, "\n\n", " ") !== selectionText) {
+      if (editor.state.doc.textBetween(from, to, "\n\n", modelLeafText) !== selectionText) {
         this.error = "Document changed during the AI call. Re-select the text and retry.";
         return;
       }
@@ -1156,7 +1156,7 @@ export class AiSuggestionController {
     const ensureStreamingStarted = () => {
       if (streamingActive || !editor) return;
       if (destination === "selection") {
-        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+        const currentText = editor.state.doc.textBetween(from, to, "\n\n", modelLeafText);
         if (currentText !== selectionText) {
           this.error = "Document changed during the AI call. Re-select the text and retry.";
           streamErrored = true;
@@ -1167,6 +1167,13 @@ export class AiSuggestionController {
         this.#suggestionOriginal = selectionText!;
       } else {
         startPos = editor.state.selection.from;
+        // The reply lands where the cursor is NOW, which the author may have moved
+        // since the send: a beat still can't start inside another (decision 5).
+        if (carriesInteriority && beatAt(editor.state.doc, startPos)) {
+          this.error = "The cursor moved into a beat during the AI call. Move it outside the beat and retry.";
+          streamErrored = true;
+          return;
+        }
         // The caret's own block around it (#2459); a leaf (a pill, a line
         // break) reads as U+FFFC, which never asks for a space.
         const caret = editor.state.doc.resolve(startPos);

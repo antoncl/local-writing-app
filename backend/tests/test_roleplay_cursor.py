@@ -14,11 +14,15 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateLoreEntryRequest
-from app.services.ai.helpers import _body_before_cursor, _character_turns
+from app.services.ai.helpers import (
+    _body_before_cursor,
+    _character_turns,
+    _split_body_by_character_markers,
+)
 from app.services.ai.preview import PreviewRequest, build_preview
 
-BEAT_A = "<!-- character:id=lore_a -->First beat.<!-- /character -->"
-BEAT_B = "<!-- character:id=lore_a -->Second beat.<!-- /character -->"
+BEAT_A = "<!-- character:id=lore_a -->First beat.<!-- /character:id=lore_a -->"
+BEAT_B = "<!-- character:id=lore_a -->Second beat.<!-- /character:id=lore_a -->"
 
 
 class BodyBeforeCursorTests(unittest.TestCase):
@@ -34,7 +38,14 @@ class BodyBeforeCursorTests(unittest.TestCase):
 
     def test_a_cut_inside_a_beat_closes_it(self) -> None:
         cut = _body_before_cursor(self.body, self.body.index("Second") + len("Second"))
-        self.assertTrue(cut.endswith("Second<!-- /character -->"))
+        self.assertTrue(cut.endswith("Second<!-- /character:id=lore_a -->"))
+
+    def test_the_appended_close_names_the_cut_beats_character(self) -> None:
+        body = "<!-- character:id=lore_z -->Half a be"
+        cut = _body_before_cursor(body, len(body))
+        self.assertEqual(cut, body + "<!-- /character:id=lore_z -->")
+        # The partial beat still counts as that character's span.
+        self.assertEqual(_split_body_by_character_markers(cut), [("lore_z", "Half a be", "")])
 
     def test_a_cut_after_a_closed_beat_is_left_alone(self) -> None:
         offset = self.body.index("Bridge.")
@@ -83,8 +94,8 @@ class RoleplayRenderCursorTests(unittest.TestCase):
         created = client.post("/api/scenes", json={"title": "One"})
         self.assertEqual(created.status_code, 200, created.text)
         self.scene = created.json()["id"]
-        beat = f"<!-- character:id={self.honor} -->Honor bows.<!-- /character -->"
-        later = f"<!-- character:id={self.honor} -->Honor LATERBEAT sails.<!-- /character -->"
+        beat = f"<!-- character:id={self.honor} -->Honor bows.<!-- /character:id={self.honor} -->"
+        later = f"<!-- character:id={self.honor} -->Honor LATERBEAT sails.<!-- /character:id={self.honor} -->"
         pill = f"<!-- mutate:entity={self.honor};field=title;value=Admiral%20Harrington;id=m1 -->"
         save_scenes_with_mutations(
             self.service, {self.scene: f"Dawn.\n\n{beat}\n\nMeanwhile. {pill} Dusk.\n\n{later}"}

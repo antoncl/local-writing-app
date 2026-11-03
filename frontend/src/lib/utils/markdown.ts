@@ -67,9 +67,12 @@ turndown.addRule("characterOpen", {
 turndown.addRule("characterClose", {
   filter: (node: Node) => node instanceof HTMLElement && node.tagName === "SPAN" && node.hasAttribute("data-character-close"),
   replacement: (_content: string, node: Node) => {
-    // The interiority is stored once per beat, url-encoded; absent when empty.
-    const internal = (node as HTMLElement).dataset.internal ?? "";
-    return internal ? `<!-- /character;internal=${encodeURIComponent(internal)} -->` : "<!-- /character -->";
+    // It names its character too, so a pair matches only when both markers agree,
+    // and the interiority is stored once per beat, url-encoded; absent when empty.
+    const element = node as HTMLElement;
+    const id = element.getAttribute("data-character-close") ?? "";
+    const internal = element.dataset.internal ?? "";
+    return `<!-- /character:id=${id}${internal ? `;internal=${encodeURIComponent(internal)}` : ""} -->`;
   },
 });
 turndown.addRule("mutationMark", {
@@ -193,10 +196,13 @@ function markEmbeddedCharacters(markdown: string): string {
       /<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->/g,
       (_match, characterId: string) => `<span data-character-open="${escapeAttribute(characterId)}"></span>`,
     )
-    .replace(/<!--\s*\/character(?:;internal=(\S*?))?\s*-->/g, (_match, internal: string | undefined) => {
-      const internalAttr = internal ? ` data-internal="${escapeAttribute(decodeNote(internal))}"` : "";
-      return `<span data-character-close${internalAttr}></span>`;
-    });
+    .replace(
+      /<!--\s*\/character:id=([A-Za-z0-9_-]+)(?:;internal=(\S*?))?\s*-->/g,
+      (_match, characterId: string, internal: string | undefined) => {
+        const internalAttr = internal ? ` data-internal="${escapeAttribute(decodeNote(internal))}"` : "";
+        return `<span data-character-close="${escapeAttribute(characterId)}"${internalAttr}></span>`;
+      },
+    );
 }
 
 function mutationSpan(setId: string, anchorId: string): string {
@@ -243,5 +249,12 @@ function decodeNote(value: string): string {
 }
 
 function escapeAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // A newline is escaped too: `marked` runs over the attribute afterwards, and a
+  // blank line inside it would read as a paragraph break mid-tag.
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r?\n/g, "&#10;");
 }

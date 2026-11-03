@@ -152,30 +152,39 @@ describe("markdown round-trip — content-bearing markers stay byte-stable", () 
 describe("beat markers — each direction", () => {
   it("loads each marker as its own empty atom span, interiority on the close", async () => {
     const html = await sceneMarkdownToHtml(
-      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=I%20can't%20miss. -->",
+      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character:id=lore_1;internal=I%20can't%20miss. -->",
     );
     expect(html).toContain('<span data-character-open="lore_1"></span>She fired.');
-    expect(html).toContain('Then ran.<span data-character-close data-internal="I can\'t miss."></span>');
+    expect(html).toContain('Then ran.<span data-character-close="lore_1" data-internal="I can\'t miss."></span>');
   });
 
   it("loads a close marker with no interiority", async () => {
-    const html = await sceneMarkdownToHtml("<!-- character:id=lore_1 -->Mira<!-- /character -->");
-    expect(html).toContain("Mira<span data-character-close></span>");
+    const html = await sceneMarkdownToHtml("<!-- character:id=lore_1 -->Mira<!-- /character:id=lore_1 -->");
+    expect(html).toContain('Mira<span data-character-close="lore_1"></span>');
   });
 
   it("saves the markers from the editor's spans, the interiority url-encoded once", () => {
     const md = editorHtmlToSceneMarkdown(
       '<p><span data-character-open="lore_1" class="beat-open">⌜</span>She fired.</p>' +
-        '<p>Then ran.<span data-character-close="" data-internal="I can\'t miss." class="beat-close">⌟</span></p>',
+        '<p>Then ran.<span data-character-close="lore_1" data-internal="I can\'t miss." class="beat-close">⌟</span></p>',
     );
     expect(md).toBe(
-      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=I%20can't%20miss. -->",
+      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character:id=lore_1;internal=I%20can't%20miss. -->",
     );
   });
 
   it("saves a close marker with no interiority bare", () => {
-    const md = editorHtmlToSceneMarkdown('<p>Mira<span data-character-close="" class="beat-close">⌟</span></p>');
-    expect(md).toBe("Mira<!-- /character -->");
+    const md = editorHtmlToSceneMarkdown('<p>Mira<span data-character-close="lore_1" class="beat-close">⌟</span></p>');
+    expect(md).toBe("Mira<!-- /character:id=lore_1 -->");
+  });
+
+  it("keeps an interiority with a blank line inside its attribute on load", async () => {
+    // A newline left raw in the attribute let `marked` split the tag into two
+    // paragraphs, losing the close marker.
+    const html = await sceneMarkdownToHtml("Ran.<!-- /character:id=lore_1;internal=First.%0A%0ASecond. -->");
+    expect(html).toContain('Ran.<span data-character-close="lore_1" data-internal="First.&#10;&#10;Second."></span>');
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelector("span[data-character-close]")?.getAttribute("data-internal")).toBe("First.\n\nSecond.");
   });
 });
 

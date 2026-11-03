@@ -44,7 +44,10 @@ interface InlineContainer {
  * paragraph that begins with an atom never reads as a slash context.
  */
 export function slashParagraphText(paragraph: InlineContainer): string {
-  return paragraph.textBetween(0, paragraph.content.size, undefined, "￼");
+  // Trailing atoms (a beat's close marker on its own line) are not part of the
+  // typed query: dropped, so the filter reads `/roleplay split`, not
+  // `/roleplay split￼`, and clearing the query stops before the atom.
+  return paragraph.textBetween(0, paragraph.content.size, undefined, "￼").replace(/￼+$/, "");
 }
 
 /** Split a "/command args" body (the "/" already stripped) into command + raw args. */

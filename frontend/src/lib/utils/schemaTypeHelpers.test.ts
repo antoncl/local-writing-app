@@ -10,6 +10,7 @@ import {
   entryTypeAncestryDistance,
   isMetadataValuePresent,
   kindEntryTypeFqns,
+  properNamesPayload,
   kindEntryTypeOptions,
   kindRootEntryTypeId,
   nestingLocalPrefix,
@@ -486,5 +487,24 @@ describe("effectiveFieldDescription (#2389)", () => {
     expect(effectiveFieldDescription(schema, "lore:note", "body")).toBe("Shared");
     expect(effectiveFieldDescription(schema, null, "body")).toBe("Shared");
     expect(effectiveFieldDescription(schema, "lore:note", "missing")).toBeUndefined();
+  });
+});
+
+describe("properNamesPayload (#2658)", () => {
+  it("sends the value only when it differs from the parent's, else null", () => {
+    expect(properNamesPayload("lore", true, false)).toBe(true);
+    expect(properNamesPayload("lore", false, true)).toBe(false);
+    expect(properNamesPayload("lore", true, true)).toBeNull();
+    expect(properNamesPayload("lore", false, false)).toBeNull();
+  });
+
+  it("always sends a built-in type's value, so unticking Character sticks", () => {
+    // Character's parent (lore:base) is off; null would clear back to Character's built-in on.
+    expect(properNamesPayload("lore", false, false, true)).toBe(false);
+    expect(properNamesPayload("lore", true, true, true)).toBe(true);
+  });
+
+  it("is null for a kind without the control", () => {
+    expect(properNamesPayload("prompt", true, false)).toBeNull();
   });
 });

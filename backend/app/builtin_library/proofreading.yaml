@@ -4,10 +4,20 @@
 # BoringWords and AvoidContractions are already off in Harper's own defaults;
 # they are listed so the intent stays visible if those defaults change.
 # DisjointPrefixes and MissingPreposition flag correct prose (#2653).
+# MassNouns flags the counted mass nouns fiction uses ("two coffees"), and
+# LongSentences treats sentence length as an error, not a style (#2658).
 rules:
   AvoidContractions: false
   BoringWords: false
   DisjointPrefixes: false
   Hedging: false
+  LongSentences: false
+  MassNouns: false
   MissingPreposition: false
   OxfordComma: false
+# Correct closed compounds Harper's SplitWords rule wants split ("doorframe" ->
+# "door frame"; Automattic/harper#4794). A listed word is accepted as written.
+# Harper has no inflection, so each form is listed.
+words:
+  - doorframe
+  - doorframes

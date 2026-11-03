@@ -120,6 +120,9 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
             "references",
         ],
         "color": "slate-blue",
+        # Names of a concept/term/material accept lower case in the proofreading
+        # dictionary; Character and Location opt back in (#2658).
+        "proper_names": False,
         # Lore entries call their title a "Name" (#116). Expressed as a
         # per-type label override on the intrinsic `title` field rather
         # than a hardcoded per-kind label in the editor — inherited by
@@ -132,6 +135,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "kind": "lore",
         "parent": "lore:base",
         "fields": ["role", "pronouns", "home_place", "character_cost"],
+        "proper_names": True,
     },
     "lore:location": {
         # Local key aligned to its "Location" display (#85); the old key
@@ -142,6 +146,7 @@ DEFAULT_ENTRY_TYPES: dict[str, Any] = {
         "kind": "lore",
         "parent": "lore:base",
         "fields": ["location_type", "region"],
+        "proper_names": True,
     },
     "lore:item": {
         "name": "Item",

@@ -114,6 +114,9 @@
   // Seed for the "Summary" control's own nomination (#2008) — mirrors
   // initColor/initIcon's pre-inheritance convention.
   let schemaTypeInitSummaryFields: string[] | null = $state(null);
+  // Seed for "Names are proper nouns" (#2658): the type's effective value
+  // (null → the editor uses the parent's).
+  let schemaTypeInitProperNames: boolean | null = $state(null);
   let schemaTypeDraftToken = $state(0);
 
   // The per-type editor's tab is titled after the type it edits — like any
@@ -333,7 +336,7 @@
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     selectedSchemaTypeId = null;
-    const ok = await saveSchemaType({ typeId: payload.localKey, name: payload.name, color: null, icon: null, summaryFields: null });
+    const ok = await saveSchemaType({ typeId: payload.localKey, name: payload.name, color: null, icon: null, summaryFields: null, properNames: null });
     if (ok !== false) {
       createSeedParentId = undefined;
       openSchemaTypeDetail(`${kind}:${payload.localKey}`);
@@ -373,6 +376,7 @@
     schemaTypeInitIcon = entryType.own_icon ?? null;
     // Seed own-summary-nomination (pre-inheritance), same convention (#2008).
     schemaTypeInitSummaryFields = entryType.own_summary_fields ?? null;
+    schemaTypeInitProperNames = entryType.proper_names ?? null;
     schemaTypeDraftToken += 1;
     openSubordinatePane("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
   }
@@ -779,6 +783,8 @@
         // Sent explicitly (list OR null) — null clears this layer's own
         // nomination so the resolver falls back to the parent's (#2008).
         summary_fields: payload.summaryFields,
+        // Sent explicitly — null clears this layer's own value (#2658).
+        proper_names: payload.properNames,
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         setStatus("Renaming types is not available yet");
@@ -1024,6 +1030,7 @@
     initialColor={schemaTypeInitColor}
     initialIcon={schemaTypeInitIcon}
     initialSummaryFields={schemaTypeInitSummaryFields}
+    initialProperNames={schemaTypeInitProperNames}
     bind:schemaTypeLayerId
     bind:expandedSchemaFieldId
     bind:fieldDropTarget

@@ -54,6 +54,15 @@ class ProofreadingTests(unittest.TestCase):
         layer = next(x for x in self.service.collect_layers(self.root) if x.folder == folder)
         return layer.id
 
+    def _library_words(self) -> list[str]:
+        """The shipped Library's own words: correct compounds Harper's SplitWords flags (#2658)."""
+        return next(x for x in self.service.read_proofreading().layers if x.is_library).words
+
+    def _own_words(self, words: list[str]) -> list[str]:
+        """`words` without the Library's, so a test sees only what it added."""
+        library = set(self._library_words())
+        return [w for w in words if w not in library]
+
     def _file(self, folder: Path, name: str = "proofreading.yaml") -> dict:
         return yaml.safe_load((folder / name).read_text(encoding="utf-8"))
 
@@ -61,13 +70,17 @@ class ProofreadingTests(unittest.TestCase):
 
     def test_absent_files_read_as_the_fiction_default_only(self) -> None:
         setup = self.service.read_proofreading()
-        self.assertEqual(setup.words, [])
+        library = next(x for x in setup.layers if x.is_library)
+        # The only words are the Library's own (#2658), credited to it.
+        self.assertIn("doorframe", library.words)
+        self.assertEqual(setup.words, sorted(library.words))
+        self.assertEqual(setup.word_layers["doorframe"], [library.id])
         self.assertEqual(setup.ignored, {})
         self.assertEqual(setup.dialect, "american")
         # The shipped Library file switches the fiction-hostile rules off.
-        self.assertIs(setup.rules["OxfordComma"], False)
-        library = next(x for x in setup.layers if x.is_library)
-        self.assertEqual(setup.rule_layers["OxfordComma"], library.id)
+        for rule in ("OxfordComma", "MassNouns", "LongSentences"):
+            self.assertIs(setup.rules[rule], False, rule)
+            self.assertEqual(setup.rule_layers[rule], library.id)
         self.assertFalse((self.root / "proofreading.yaml").exists())
 
     def test_layers_are_library_machine_then_the_chain_outermost_first(self) -> None:
@@ -82,7 +95,7 @@ class ProofreadingTests(unittest.TestCase):
     def test_words_are_the_union_and_a_world_word_reaches_the_book(self) -> None:
         self.service.add_proofreading_word(ProofreadingWordRequest(word="skyglass", layer_id=self._layer(folder=self.world)))
         setup = self.service.add_proofreading_word(ProofreadingWordRequest(word="Vashti", layer_id=self._layer(folder=self.root)))
-        self.assertEqual(setup.words, ["Vashti", "skyglass"])
+        self.assertEqual(self._own_words(setup.words), ["Vashti", "skyglass"])
         self.assertEqual(setup.word_layers["skyglass"], [self._layer(folder=self.world)])
         self.assertEqual(self._file(self.world), {"words": ["skyglass"]})
 
@@ -207,11 +220,12 @@ class ProofreadingTests(unittest.TestCase):
         layer = self._layer(folder=self.root)
         response = self.client.post("/api/proofreading/words", json={"word": "Vashti", "layer_id": layer})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["words"], ["Vashti"])
+        self.assertEqual(self._own_words(response.json()["words"]), ["Vashti"])
         response = self.client.post("/api/proofreading/words/remove", json={"word": "Vashti", "layer_id": layer})
-        self.assertEqual(response.json()["words"], [])
-        response = self.client.put("/api/proofreading/rules", json={"rule": "LongSentences", "enabled": False, "layer_id": layer})
-        self.assertIs(response.json()["rules"]["LongSentences"], False)
+        self.assertEqual(self._own_words(response.json()["words"]), [])
+        # The Library switches LongSentences off; the project turns it back on.
+        response = self.client.put("/api/proofreading/rules", json={"rule": "LongSentences", "enabled": True, "layer_id": layer})
+        self.assertIs(response.json()["rules"]["LongSentences"], True)
         response = self.client.put("/api/proofreading/dialect", json={"dialect": "canadian", "layer_id": layer})
         self.assertEqual(response.json()["dialect"], "canadian")
         self.assertEqual(self.client.get("/api/proofreading").json()["dialect"], "canadian")

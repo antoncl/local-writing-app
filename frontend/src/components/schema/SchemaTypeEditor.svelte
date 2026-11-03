@@ -10,6 +10,8 @@
     icon: string | null;
     // Own row-detail nomination (#2008); null clears it (falls back to the parent's).
     summaryFields: string[] | null;
+    // Own "names are proper nouns" setting (#2658); null clears it (falls back to the parent's).
+    properNames: boolean | null;
   };
 </script>
 
@@ -35,6 +37,7 @@
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SummaryFieldsEditor from "@/components/schema/SummaryFieldsEditor.svelte";
+  import ProperNamesToggle from "@/components/schema/ProperNamesToggle.svelte";
   import RailGroupHead from "@/components/editor/RailGroupHead.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
@@ -49,6 +52,7 @@
     inheritedFromLabel,
     nestingLocalPrefix,
     nodeTypeDisplayName,
+    properNamesPayload,
     sameSummaryFields,
     slugifyFieldId,
     sourceBadgeLabel,
@@ -80,6 +84,8 @@
     initialIcon?: string | null;
     // Seed for the "Summary" control (#2008), same pre-inheritance convention as initialColor/Icon.
     initialSummaryFields?: string[] | null;
+    // Seed for "Names are proper nouns" (#2658): the type's effective value; null = the parent's.
+    initialProperNames?: boolean | null;
     // Two-way bound by the parent:
     schemaTypeLayerId?: string;
     expandedSchemaFieldId?: string | null;
@@ -144,6 +150,7 @@
     initialColor = null,
     initialIcon = null,
     initialSummaryFields = null,
+    initialProperNames = null,
     schemaTypeLayerId = $bindable(""),
     expandedSchemaFieldId = $bindable(null),
     fieldDropTarget = $bindable(null),
@@ -210,12 +217,17 @@
   // `{#key}`), so capturing only the initial prop value is intentional —
   // `untrack` makes that explicit and silences the state_referenced_locally
   // lint for the deliberate one-time read. ---
+  // The parent's resolved proper_names (#2658): what a matching checkbox saves as null.
+  const inheritedProperNames = $derived(
+    schemaTypeParent ? (metadataSchema?.entry_types[schemaTypeParent]?.proper_names ?? false) : false,
+  );
   const seed = untrack(() => ({
     name: initialName,
     typeId: initialTypeId,
     color: initialColor,
     icon: initialIcon,
     summaryFields: initialSummaryFields,
+    properNames: initialProperNames ?? inheritedProperNames,
   }));
 
   let draftName = $state(seed.name);
@@ -227,6 +239,7 @@
   let draftIcon = $state(seed.icon);
   // Own summary-line nomination (#2008); null = "inherit the parent's".
   let draftSummaryFields = $state<string[] | null>(seed.summaryFields);
+  let draftProperNames = $state(seed.properNames);
   // The parent's effective nomination (dimmed display + copy-on-edit base)
   // and its display name; the field roster the "+" offers.
   const inheritedSummaryFields = $derived(
@@ -352,6 +365,7 @@
       color: draftColor,
       icon: draftIcon,
       summaryFields: draftSummaryFields,
+      properNames: draftProperNames,
     };
   }
   const isDirty = $derived(
@@ -359,7 +373,8 @@
       draftTypeId !== baseline.typeId ||
       draftColor !== baseline.color ||
       draftIcon !== baseline.icon ||
-      !sameSummaryFields(draftSummaryFields, baseline.summaryFields),
+      !sameSummaryFields(draftSummaryFields, baseline.summaryFields) ||
+      draftProperNames !== baseline.properNames,
   );
   $effect(() => {
     dirty = isDirty;
@@ -372,6 +387,7 @@
       color: draftColor,
       icon: draftIcon,
       summaryFields: draftSummaryFields,
+      properNames: properNamesPayload(schemaTypeKind, draftProperNames, inheritedProperNames, schemaTypeReadonly),
     });
     // Re-baseline on success so `dirty` clears without a remount (a failed save
     // — e.g. a blocked rename — returns false and keeps the changes flagged).
@@ -546,6 +562,12 @@
     inheritedFrom={inheritedSummaryFrom}
     onChange={(next) => (draftSummaryFields = next)}
   />
+  {#if schemaTypeKind === "lore"}
+    <ProperNamesToggle
+      bind:checked={draftProperNames}
+      inherited={properNamesPayload(schemaTypeKind, draftProperNames, inheritedProperNames, schemaTypeReadonly) === null}
+    />
+  {/if}
   {#if selectedSchemaTypeId}
     {@const ownFieldIds = new Set(typeOwnFieldEntries.map(([id]) => id))}
     {@const totalFieldCount = typeFieldSections.reduce((n, s) => n + s.entries.length, 0)}

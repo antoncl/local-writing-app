@@ -34,7 +34,14 @@ RESOLVER_STAMPED_FIELD_KEYS = frozenset(
 # Never persisted into a layer — a request that echoes a resolved type carries
 # them, and the type writer drops them.
 RESOLVER_STAMPED_ENTRY_TYPE_KEYS = frozenset(
-    {"own_fields", "own_color", "own_icon", "own_summary_fields", "own_field_overrides"}
+    {
+        "own_fields",
+        "own_color",
+        "own_icon",
+        "own_summary_fields",
+        "own_proper_names",
+        "own_field_overrides",
+    }
 )
 
 
@@ -143,6 +150,8 @@ class MetadataSchemaInheritanceMixin:
         # summary nomination as declared here, before parent inheritance
         # overwrites the effective `summary_fields` (#2008).
         next_entry_type["own_summary_fields"] = deepcopy(raw_entry_type.get("summary_fields"))
+        # `own_proper_names` likewise (#2658).
+        next_entry_type["own_proper_names"] = raw_entry_type.get("proper_names")
         inherited_fields = parent_def.get("fields", []) if isinstance(parent_def, dict) else []
         next_entry_type["fields"] = self._merge_metadata_field_lists(inherited_fields, local_fields)
         # L2: append generated fields from this type's group applications (after
@@ -223,6 +232,7 @@ class MetadataSchemaInheritanceMixin:
             "color",
             "icon",
             "summary_fields",
+            "proper_names",
         ):
             # An explicit `null` is a layer's clear of an ancestor LAYER's value
             # (#1919), not a declaration: the parent type still flows, the way

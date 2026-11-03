@@ -31,16 +31,25 @@ export function withPossessives(word: string): string[] {
   return forms;
 }
 
+/** A scene's name set for one entity: its id and `[title, ...aliases]`, as the
+ *  effective-names endpoint returns them. */
+export type SceneNameSet = [entityId: string, names: string[]];
+
 /** The engine's word list: every word of every lore name, plus the name sets
- *  in `sceneNames` (each `[title, ...aliases]`, as the effective-names endpoint
- *  returns them), with possessives, deduplicated and sorted.
+ *  in `sceneNames`, with possessives, deduplicated and sorted.
  *
- *  A title is case-sensitive and an alias is not (Anton's rule for names). A
- *  title's words go in as written: Harper accepts a capitalized entry only
- *  capitalized, so "kael" is still flagged for the entry "Kael". An alias's
- *  words go in lower case too, and Harper accepts a lowercase entry in either
- *  case. */
-export function autoDictionary(entries: LoreEntrySummary[], sceneNames: Iterable<string[]> = []): string[] {
+ *  Whether a title is case-sensitive is decided by its entry's type
+ *  (`properName`, ADR-0102 Amendment 4). A proper-noun type's title goes in as
+ *  written: Harper accepts a capitalized entry only capitalized, so "kael" is
+ *  still flagged for the entry "Kael". Any other type's title goes in lower case
+ *  too (Harper accepts a lowercase entry in either case), so a concept like
+ *  "Katadesis" may be written "katadesis". An alias is always any case. A scene
+ *  name set whose id is not in `entries` counts as a proper name. */
+export function autoDictionary(
+  entries: LoreEntrySummary[],
+  sceneNames: Iterable<SceneNameSet> = [],
+  properName: (entryType: string) => boolean = () => true,
+): string[] {
   const words = new Set<string>();
   const add = (name: string, anyCase: boolean) => {
     for (const word of nameWords(name)) {
@@ -49,11 +58,18 @@ export function autoDictionary(entries: LoreEntrySummary[], sceneNames: Iterable
       if (anyCase && lower !== word) for (const form of withPossessives(lower)) words.add(form);
     }
   };
-  const addNameSet = ([title, ...aliases]: string[]) => {
-    if (title) add(title, false);
+  const addNameSet = ([title, ...aliases]: string[], titleAnyCase: boolean) => {
+    if (title) add(title, titleAnyCase);
     for (const alias of aliases) add(alias, true);
   };
-  for (const entry of entries) addNameSet(loreEntryNames(entry));
-  for (const nameSet of sceneNames) addNameSet(nameSet);
+  const typeOf = new Map<string, string>();
+  for (const entry of entries) {
+    typeOf.set(entry.id, entry.entry_type);
+    addNameSet(loreEntryNames(entry), !properName(entry.entry_type));
+  }
+  for (const [id, nameSet] of sceneNames) {
+    const type = typeOf.get(id);
+    addNameSet(nameSet, type !== undefined && !properName(type));
+  }
   return [...words].sort();
 }

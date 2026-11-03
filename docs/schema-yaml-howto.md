@@ -210,6 +210,7 @@ land at `Chapter 1.md` and `Chapter 1 (2).md`.
 | `display_template` | Outline title template, see above | `{title}` |
 | `has_body` | If false, hide the body markdown editor when this type is open. Inherited. | true |
 | `fields` | List of field ids to attach (concatenates with parent's) | `[]` |
+| `proper_names` | Lore only. If true, spell checking accepts this type's names only as capitalised (*Kael*, not *kael*); if false, lower case passes too (*katadesis* for the entry *Katadesis*). Aliases always pass in any case. Inherited. | true for Character and Location, false for every other lore type |
 
 Anything not listed here either has no override yet or hasn't been
 documented because the UI covers it.

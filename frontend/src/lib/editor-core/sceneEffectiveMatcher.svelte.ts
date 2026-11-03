@@ -12,6 +12,7 @@
 import { api } from "@/lib/api";
 import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { compileMatcher, type CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
+import type { SceneNameSet } from "@/lib/proofread/dictionary";
 import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
 export function createSceneEffectiveMatcher(opts: {
@@ -21,12 +22,13 @@ export function createSceneEffectiveMatcher(opts: {
   /** Called for its reactive reads only — recompute when it changes (e.g. the
    *  global matcher reference, which changes when lore is added/edited). */
   invalidateOn?: () => unknown;
-}): { readonly current: CompiledMatcher | null; readonly names: string[][] | null } {
+}): { readonly current: CompiledMatcher | null; readonly names: SceneNameSet[] | null } {
   let matcher = $state<CompiledMatcher | null>(null);
-  // The scene's effective name sets, one `[title, ...aliases]` per entry — the
-  // proofreading dictionary takes them too, so a renamed character's
-  // as-of-scene name is not flagged, its title still case-sensitive (ADR-0102 §5).
-  let names = $state.raw<string[][] | null>(null);
+  // The scene's effective name sets, one `[entityId, [title, ...aliases]]` per
+  // entry — the proofreading dictionary takes them too, so a renamed character's
+  // as-of-scene name is not flagged, its title case-sensitive by its type
+  // (ADR-0102 §5, Amendment 4).
+  let names = $state.raw<SceneNameSet[] | null>(null);
   // #2352: read each input through a $derived, so the fetch re-runs only when a
   // VALUE it depends on changes. The accessors read reactive objects (`scene?.id`
   // subscribes to the whole scene), and a metadata keystroke (the summary field)
@@ -54,7 +56,7 @@ export function createSceneEffectiveMatcher(opts: {
       .then((effective) => {
         if (cancelled) return;
         matcher = compileMatcher(entries, schema, effective);
-        names = Object.values(effective);
+        names = Object.entries(effective);
       })
       .catch(() => {
         if (cancelled) return;

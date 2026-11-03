@@ -45,6 +45,12 @@ export type EntryTypeDefinition = {
   // Pre-inheritance icon — mirrors `own_color`. Distinguishes "set on this
   // type" from "inherited from parent".
   own_icon?: string | null;
+  // Whether this type's names are proper nouns (#2658): true keeps a title's
+  // words case-sensitive in the proofreading dictionary. Inherits from parent
+  // unless set.
+  proper_names?: boolean | null;
+  // Pre-inheritance proper_names — mirrors `own_icon`.
+  own_proper_names?: boolean | null;
   default_body?: string;
   default_inputs?: PromptInputDefinition[];
   // Reusable group applications (L2). Each expands into generated prefixed

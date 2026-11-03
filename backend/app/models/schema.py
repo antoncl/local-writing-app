@@ -461,6 +461,13 @@ class EntryTypeDefinition(BaseModel):
     # The pre-inheritance summary_fields value (mirrors `own_color`/`own_icon`).
     # Computed by the schema inheritance resolver; not authored directly.
     own_summary_fields: list[str] | None = None
+    # Whether this type's names are proper nouns (#2658): true keeps the title's
+    # words case-sensitive in the proofreading dictionary; false also accepts
+    # lower case. Inherited like `color`; an explicit `null` clears a layer's value.
+    proper_names: bool | None = None
+    # The pre-inheritance proper_names value (mirrors `own_color`/`own_icon`).
+    # Computed by the schema inheritance resolver; not authored directly.
+    own_proper_names: bool | None = None
     # Soft-deprecation flag. Set on entry_types that are kept readable for
     # legacy projects but should not be offered when creating new entries.
     # Schemas keep their definition (so existing files still validate); UI

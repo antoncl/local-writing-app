@@ -174,6 +174,7 @@
                       label={member.name || member.key}
                       showLabel={!field.item_scalar}
                       {view}
+                      {older}
                       onResolved={(v) => onSettleUnit(unitKey, v ?? false)}
                     />
                   {:else if settled !== undefined}

@@ -154,9 +154,12 @@ export class AiSuggestionController {
   // on every sync so the bar's A / S / B buttons and the Alt keys agree.
   lineEditView: ReviewView = $state("both");
 
+  // The text a selection replace removed, restored on reject. Reactive, since
+  // `replacesSelection` (the toolbar's Reject title) reads it.
+  #suggestionOriginal: string | null = $state(null);
+
   // Non-reactive bookkeeping.
   #nextSuggestionId = 1;
-  #suggestionOriginal: string | null = null;
   #anchorPos: number | null = null;
   #lastInvokedEntryId: string | null = null;
   #lastInvokedInputs: Record<string, unknown> = {};

@@ -179,7 +179,7 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
     "She remarks on the wound, a remark and never a question.",
   ];
 
-  function scalarProps(view: "both" | "now") {
+  function scalarProps(view: "both" | "now", older?: "was" | "now") {
     const pairing = pairListItems(scalarField, sL, sO);
     return {
       field: scalarField,
@@ -190,9 +190,24 @@ describe("ListReviewSection — a scalar beat list reads as rows (#2599)", () =>
       O: sO,
       resolution: {},
       view,
+      ...(older ? { older } : {}),
       onSettleUnit: vi.fn(),
     };
   }
+
+  // #2530: a prose member's own diff follows the section's older side too.
+  const firstChanged = (c: HTMLElement) =>
+    [...c.querySelectorAll(".lrs-edited .r-now, .lrs-edited .r-was")].map((el) => (el.classList.contains("r-now") ? "now" : "was"))[0];
+
+  it("an edited item's diff puts the snapshot's words first in a snapshot compare", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both") });
+    await waitFor(() => expect(firstChanged(container)).toBe("was"));
+  });
+
+  it("an edited item's diff puts the current words first in a proposal review", async () => {
+    const { container } = render(ListReviewSection, { props: scalarProps("both", "now") });
+    await waitFor(() => expect(firstChanged(container)).toBe("now"));
+  });
 
   it("an edited item is its diff alone, with no title line or member heading", async () => {
     const { container } = render(ListReviewSection, { props: scalarProps("both") });

@@ -39,7 +39,7 @@ Every character sees the whole Dynamics block on every invocation — mirror wha
 1. Put the cursor on a blank line in the scene body.
 2. Type `/roleplay Bob` (or `/rol` then Tab to autocomplete, then the name).
 3. If the name resolves to exactly one character, the generation fires immediately. If ambiguous or unresolved, an inputs dialog opens so you can pick.
-4. The AI proposes Bob's next beat as a tracked suggestion. **Accept** wraps it in a `data-character` mark and a coloured underline; **Retry** regenerates; **Discard** removes it.
+4. The AI proposes Bob's next beat as a tracked suggestion. **Accept** wraps it in a `data-character` mark and a coloured underline; **Retry** regenerates; **Reject** removes it.
 5. Write narration between beats. Type `/roleplay Alice` for the next turn.
 
 Slash conveniences:

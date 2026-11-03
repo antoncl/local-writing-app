@@ -150,11 +150,16 @@ function canonicalizeEmphasis(line: string): string {
  * `now` side and the proposed body on the `was` side, the same invariant every
  * consumer of these runs relies on.
  */
-export function reviewBodyProposal(currentBody: string, proposedBody: string): BodyRevision {
-  // The current body is the older text: it shows first, the proposal after it (#2533).
+export function reviewBodyProposal(
+  currentBody: string,
+  proposedBody: string,
+  older: "was" | "now" = "now",
+): BodyRevision {
+  // The older text shows first (#2533): for a proposal that is the current body.
+  // A snapshot compare's list member passes `was`, its stored side being the older.
   const runs = olderFirst(
     diffRuns(normalizeReviewMarkdown(proposedBody), normalizeReviewMarkdown(currentBody)),
-    "now",
+    older,
   );
   return { runs, regions: groupRuns(runs).regions };
 }

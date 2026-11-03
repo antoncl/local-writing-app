@@ -4,13 +4,17 @@
   // inserts close;ref=<unit-id> — index-expanded to end every live row — while
   // a multi-row unit expands so one row can be closed on its own (the
   // werewolf's mid-transform clue outlives the transform). Base values aren't
-  // listed — they have no marker to close.
+  // listed — they have no marker to close. `position` (the cursor's markdown
+  // offset) pins the live set; units/rows note later same-field appends still
+  // in play (#73, advisory only).
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
   import {
     groupMutationUnits,
+    laterAppendCount,
+    laterAppendNote,
     mutationUnitGroupLabel,
   } from "@/lib/editor-core/mutationUnits";
   import { api } from "@/lib/api";
@@ -29,6 +33,7 @@
     researchStructure = null,
     sceneId = "",
     presetEntityId = "",
+    position = null,
     onPick,
     onCancel,
   }: {
@@ -38,6 +43,7 @@
     researchStructure?: StructureDocument | null;
     sceneId: string;
     presetEntityId?: string;
+    position?: number | null;
     // ADR-0095 §1: a whole-unit close names only its anchor; a per-row close
     // (the multi-row expansion below) also names the row within that anchor's
     // set.
@@ -47,6 +53,7 @@
 
   let entityId = $state(untrack(() => presetEntityId ?? ""));
   let records = $state<MutationMarkerRecord[]>([]);
+  let laterAppends = $state<Record<string, string[]>>({});
   let loading = $state(false);
   // Multi-row units expanded to show their individually-closeable rows.
   let expandedUnits = $state<Set<string>>(new Set());
@@ -69,19 +76,25 @@
 
   $effect(() => {
     const id = entityId;
+    const pos = position;
     if (!id || !sceneId) {
       records = [];
+      laterAppends = {};
       return;
     }
     loading = true;
     let cancelled = false;
     api
-      .getLiveEntityMutations(id, sceneId)
+      .getLiveEntityMutations(id, sceneId, pos ?? undefined)
       .then((res) => {
-        if (!cancelled) records = res.items;
+        if (cancelled) return;
+        records = res.items;
+        laterAppends = res.later_appends ?? {};
       })
       .catch(() => {
-        if (!cancelled) records = [];
+        if (cancelled) return;
+        records = [];
+        laterAppends = {};
       })
       .finally(() => {
         if (!cancelled) loading = false;
@@ -100,6 +113,17 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} />
+
+{#snippet laterNote(count: number)}
+  <p class="close-note">
+    {laterAppendNote(count)}
+    <a
+      href="https://github.com/antoncl/local-writing-app/blob/master/docs/mutations.md#appending-and-why-fragments-must-stand-alone"
+      target="_blank"
+      rel="noopener"
+    >Why fragments should stand alone ↗</a>
+  </p>
+{/snippet}
 
 <div class="mutation-overlay" role="presentation" onclick={onCancel}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -137,6 +161,7 @@
           <li class="muted">No open changes here to close.</li>
         {:else}
           {#each units as unit (unit.unitId)}
+            {@const unitLater = laterAppendCount(unit.records, laterAppends)}
             <li>
               <div class="close-unit">
                 <button type="button" class="close-row" onclick={() => onPick(unit.unitId)}>
@@ -160,9 +185,11 @@
                   </button>
                 {/if}
               </div>
+              {#if unitLater > 0}{@render laterNote(unitLater)}{/if}
               {#if unit.records.length > 1 && expandedUnits.has(unit.unitId)}
                 <ul class="close-rows">
                   {#each unit.records as m (m.marker_id)}
+                    {@const rowLater = laterAppendCount([m], laterAppends)}
                     <li>
                       <button
                         type="button"
@@ -171,6 +198,7 @@
                       >
                         <span class="close-name">{mutationRecordLabel({ ...m, name: "" })}</span>
                       </button>
+                      {#if rowLater > 0}{@render laterNote(rowLater)}{/if}
                     </li>
                   {/each}
                 </ul>
@@ -298,6 +326,16 @@
   .close-row-sub {
     padding: 5px 9px;
     font-size: var(--fs-md);
+  }
+  .close-note {
+    margin: 4px 2px 0;
+    font-size: var(--fs-sm);
+    line-height: 1.35;
+    color: var(--text-3);
+  }
+  .close-note a {
+    color: var(--accent);
+    white-space: nowrap;
   }
   .muted {
     color: var(--text-3);

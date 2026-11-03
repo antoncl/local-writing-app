@@ -779,14 +779,13 @@
           const match = name
             ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
             : null;
-          if (closing) mutationDialogs?.openClose(match?.id ?? "");
-          else {
-            // The insertion point after clearSlashTrigger() has removed the
-            // "/mutate …" text (ADR-0089 §4): the dialog's baseline resolves
-            // here, not at the end of the scene.
-            const pos = editor?.state.selection.from;
-            void mutationDialogs?.openAuthoring(match?.id ?? "", pos !== undefined ? markdownOffsetAt(pos) : undefined);
-          }
+          // The insertion point after clearSlashTrigger() has removed the
+          // "/mutate …" text (ADR-0089 §4): the dialog's baseline resolves
+          // here, not at the end of the scene.
+          const pos = editor?.state.selection.from;
+          const offset = pos !== undefined ? markdownOffsetAt(pos) : undefined;
+          if (closing) void mutationDialogs?.openClose(match?.id ?? "", offset);
+          else void mutationDialogs?.openAuthoring(match?.id ?? "", offset);
         },
       },
       ...(speechAvailable() ? [{

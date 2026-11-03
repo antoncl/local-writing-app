@@ -596,7 +596,8 @@ class LoreMutationsMixin(MarkerMixin):
     ) -> MutationMarkerList:
         """The entity's start records still **open** (live, not yet closed) at
         (scene, position) — the source for the `/mutate close` picker (#59). Base
-        records have no marker id and aren't included (they're not closeable)."""
+        records have no marker id and aren't included (they're not closeable).
+        `later_appends` carries the advisory #73 close-time note."""
         idx = index or self.build_mutations_index()
         records = idx.by_entity.get(entity_id) or []
         target_pos = idx.scene_order.get(scene_id)
@@ -613,7 +614,66 @@ class LoreMutationsMixin(MarkerMixin):
                 idx.closes_by_start.get(marker.marker_id),
             )
         ]
-        return MutationMarkerList(items=live)
+        return MutationMarkerList(
+            items=live,
+            later_appends=self._later_appends(idx, records, live, target_pos, position),
+        )
+
+    def _later_appends(
+        self,
+        idx: MutationsIndex,
+        records: list[MutationMarker],
+        live: list[MutationMarker],
+        target_pos: int,
+        position: int | None,
+    ) -> dict[str, list[str]]:
+        """#73 — for each live text add/replace record, the later text appends on
+        the same field still in play at the close point (they were written
+        against its text; see docs/mutations.md "Appending, and why fragments
+        must stand alone"). Advisory only: never blocks a close. A later replace
+        supersedes the record, so the walk stops there; rows of the same anchor
+        (unit) are authored together and skipped. Appends starting after the
+        close point are included — they read this text as their base until it
+        closes."""
+        if not live:
+            return {}
+        field_types = self._mutation_field_types()
+        index_of = {id(r): i for i, r in enumerate(records)}
+        out: dict[str, list[str]] = {}
+        for m in live:
+            if field_types.get(m.field, "text") not in TEXT_APPEND_FIELD_TYPES:
+                continue
+            if m.op not in {"add", "replace"}:
+                continue
+            later = self._appends_after(
+                idx, records[index_of[id(m)] + 1 :], m, target_pos, position
+            )
+            if later:
+                out[m.marker_id] = later
+        return out
+
+    def _appends_after(
+        self,
+        idx: MutationsIndex,
+        following: list[MutationMarker],
+        m: MutationMarker,
+        target_pos: int,
+        position: int | None,
+    ) -> list[str]:
+        later: list[str] = []
+        for r in following:
+            if r.scene_id not in idx.scene_order or r.field != m.field:
+                continue
+            close = idx.closes_by_start.get(r.marker_id)
+            if close is not None and not self._target_before_close(
+                close, target_pos, position
+            ):
+                continue
+            if r.op == "replace":
+                break
+            if r.op == "add" and r.anchor_id != m.anchor_id:
+                later.append(r.marker_id)
+        return later
 
     def effective_state(
         self,

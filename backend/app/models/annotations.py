@@ -161,6 +161,11 @@ class MutationMarker(BaseModel):
 
 class MutationMarkerList(BaseModel):
     items: list[MutationMarker] = Field(default_factory=list)
+    # #73 — set only by the close picker's live-mutations read: maps a live
+    # record's marker_id to the marker_ids of later text appends on the same
+    # field that would lose the text they were written against if it closed.
+    # Advisory only.
+    later_appends: dict[str, list[str]] = Field(default_factory=dict)
 
 
 ChangeCandidateTier = Literal["declared", "marker_untouched", "mention"]

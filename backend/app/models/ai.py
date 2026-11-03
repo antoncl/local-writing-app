@@ -284,9 +284,6 @@ class AIPreviewRequest(BaseModel):
     text_before: str = ""
     text_after: str = ""
     selection: str = ""
-    # #2669: the cursor's offset in the scene's saved markdown body. A roleplay
-    # turn inserted mid-scene reads only the body before it. None = no cursor.
-    cursor_offset: int | None = None
     commit: bool = False
     # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
     # the frontend resolves the input value here. Overrides target_scene_id.
@@ -661,8 +658,9 @@ class AIGenerateRequest(BaseModel):
     # the lore as it stands where the selection starts. None = the caller didn't
     # say (no selection); [] = nothing precedes the selection.
     markers_before_selection: list[str] | None = None
-    # #2669: the cursor's offset in the scene's saved markdown body (see
-    # AIPreviewRequest). None = no cursor.
+    # #2669: the cursor's offset in the scene's saved markdown body, sent with
+    # `markers_before_selection` by a cursor run. A roleplay turn inserted
+    # mid-scene reads only the body before it. None = no cursor.
     cursor_offset: int | None = None
     commit: bool = False
     # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);

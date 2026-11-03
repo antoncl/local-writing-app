@@ -325,7 +325,6 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     text_before=request.text_before,
                     text_after=request.text_after,
                     selection=request.selection,
-                    cursor_offset=request.cursor_offset,
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     subject=request.subject,

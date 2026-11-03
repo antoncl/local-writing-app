@@ -35,6 +35,8 @@ export type MutationMarkerRecord = {
 
 export type MutationMarkerList = {
   items: MutationMarkerRecord[];
+  // #73 — close picker only: live marker_id -> later live text appends on the same field.
+  later_appends?: Record<string, string[]>;
 };
 
 // One field-change row of a mutation set (ADR-0095 §3): a `(field, op,

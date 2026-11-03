@@ -155,5 +155,91 @@ class IntervalCloseTests(unittest.TestCase):
         self.assertEqual(self.service.live_mutations(self.remus, s3).items, [])
 
 
+    # --- later-append advisory (#73) --------------------------------------
+
+    def _add(self, field: str, value: str, mid: str) -> str:
+        return (
+            f"<!-- mutate:entity={self.remus};field={field};op=add;value={value};id={mid} -->"
+        )
+
+    def _later(self, ids: dict[str, tuple[str, str]], scene_id: str, pos: int | None = None):
+        kwargs = {} if pos is None else {"position": pos}
+        return self.service.live_mutations(self.remus, scene_id, **kwargs).later_appends
+
+    @staticmethod
+    def _mid(ids: dict[str, tuple[str, str]], key: str) -> str:
+        return f"{ids[key][1]}.{key}"
+
+    def test_later_append_is_listed_against_earlier_append(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        ids = self._convert(
+            {s2: self._add("title", "A", "a1"), s3: self._add("title", "B", "b1")}
+        )
+        later = self._later(ids, s3)
+        self.assertEqual(later, {self._mid(ids, "a1"): [self._mid(ids, "b1")]})
+
+    def test_later_replace_supersedes_earlier_append(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        s4 = self._new_scene("Four")
+        ids = self._convert(
+            {
+                s2: self._add("title", "A", "a1"),
+                s3: self._start("title", "R", "r1"),
+                s4: self._add("title", "B", "b1"),
+            }
+        )
+        later = self._later(ids, s4)
+        self.assertNotIn(self._mid(ids, "a1"), later)
+        self.assertEqual(later.get(self._mid(ids, "r1")), [self._mid(ids, "b1")])
+
+    def test_closed_later_append_is_not_listed(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        s4 = self._new_scene("Four")
+        ids = self._convert(
+            {
+                s2: self._add("title", "A", "a1"),
+                s3: self._add("title", "B", "b1") + self._close("b1", "bc1"),
+                s4: "Later.",
+            }
+        )
+        self.assertNotIn(self._mid(ids, "a1"), self._later(ids, s4))
+
+    def test_collection_fields_have_no_later_appends(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        ids = self._convert(
+            {s2: self._add("aliases", "X", "a1"), s3: self._add("aliases", "Y", "b1")}
+        )
+        self.assertEqual(self._later(ids, s3), {})
+
+    def test_later_append_listed_against_earlier_replace(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        ids = self._convert(
+            {s2: self._start("title", "R", "r1"), s3: self._add("title", "B", "b1")}
+        )
+        self.assertEqual(
+            self._later(ids, s3), {self._mid(ids, "r1"): [self._mid(ids, "b1")]}
+        )
+
+    def test_append_after_the_cursor_in_the_same_scene_still_counts(self) -> None:
+        self._new_scene("One")
+        s2 = self._new_scene("Two")
+        s3 = self._new_scene("Three")
+        ids = self._convert(
+            {s2: self._add("title", "A", "a1"), s3: "Before. " + self._add("title", "B", "b1")}
+        )
+        later = self._later(ids, s3, pos=0)
+        self.assertEqual(later, {self._mid(ids, "a1"): [self._mid(ids, "b1")]})
+
+
 if __name__ == "__main__":
     unittest.main()

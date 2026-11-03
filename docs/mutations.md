@@ -113,9 +113,10 @@ just one of its rows (the werewolf's mid-transform clue can outlive the transfor
 Collections are safer: adds and removes combine as set operations, so closing any one of them
 still leaves a coherent set. The stand-alone rule matters mainly for appended prose.
 
-> A real fix (declared dependencies between changes, cascading closes) is deliberately deferred to
-> the v2 linked-mutations design — tracked in
-> [#73](https://github.com/antoncl/local-writing-app/issues/73).
+The close picker now notes when later appends to the same field are still in play ("may lean on
+this text"). It is advisory only and never blocks a close. The real fix (declared dependencies
+between changes, cascading closes) stays deferred to the v2 linked-mutations design — tracked in
+[#73](https://github.com/antoncl/local-writing-app/issues/73).
 
 ## Reusing a set of changes
 

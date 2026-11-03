@@ -47,6 +47,9 @@
   let authoringPosition = $state<number | null | undefined>(undefined);
   let closeOpen = $state(false);
   let closePresetEntityId = $state("");
+  // Where the close lands (#73): the cursor's scene-markdown offset, so the
+  // picker's live set + later-append note resolve there. Undefined = end of scene.
+  let closePosition = $state<number | null | undefined>(undefined);
 
   // The list-edit baseline (#71) reads the saved mutation index, so the scene
   // is flushed before either dialog opens (the GH-#45 spine) — unsaved pills
@@ -82,8 +85,9 @@
     authoringOpen = true;
   }
 
-  export function openClose(preset = "") {
+  export function openClose(preset = "", position?: number | null) {
     closePresetEntityId = preset;
+    closePosition = position;
     closeOpen = true;
   }
 
@@ -136,6 +140,7 @@
     {loreEntries}
     {sceneId}
     presetEntityId={closePresetEntityId}
+    position={closePosition}
     onPick={handleClosePick}
     onCancel={() => (closeOpen = false)}
   />

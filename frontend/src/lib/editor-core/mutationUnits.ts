@@ -13,6 +13,27 @@ export interface MutationUnitGroup {
   records: MutationMarkerRecord[];
 }
 
+/** #73 — how many distinct later text appends (other than the records
+ *  themselves) lean on `records`' text: the union of their `laterAppends`. */
+export function laterAppendCount(
+  records: MutationMarkerRecord[],
+  laterAppends: Record<string, string[]>,
+): number {
+  const own = new Set(records.map((r) => r.marker_id));
+  const union = new Set<string>();
+  for (const r of records) {
+    for (const id of laterAppends[r.marker_id] ?? []) if (!own.has(id)) union.add(id);
+  }
+  return union.size;
+}
+
+/** The advisory close-picker note for `count` later appends ("" for none). */
+export function laterAppendNote(count: number): string {
+  if (count <= 0) return "";
+  if (count === 1) return "1 later append to the same field remains live and may lean on this text.";
+  return `${count} later appends to the same field remain live and may lean on this text.`;
+}
+
 /** Group manuscript-ordered records into units, first-occurrence order (a
  *  unit sits at its first record's position; carrier rows share one). */
 export function groupMutationUnits(records: MutationMarkerRecord[]): MutationUnitGroup[] {

@@ -592,6 +592,17 @@ export function sameSummaryFields(a: string[] | null, b: string[] | null): boole
   return a.length === b.length && a.every((key, i) => key === b[i]);
 }
 
+// What the type editor sends for `proper_names` (#2658): the checkbox value only
+// when it differs from the parent's resolved value; null clears this layer's own
+// value back to inherited. `lore`-only: any other kind has no such control.
+// A built-in type always sends its value: its own default can differ from its
+// parent's (Character is on, `lore:base` off), so "matches the parent" would
+// clear an untick back to the built-in's on.
+export function properNamesPayload(kind: string, draft: boolean, inherited: boolean, builtin = false): boolean | null {
+  if (kind !== "lore") return null;
+  return builtin || draft !== inherited ? draft : null;
+}
+
 // The Types cascade as ONE pure step: the selected entry type resolves to
 // its schema kind, and that single kind drives BOTH the tree roster AND the
 // context heading. Extracted from SchemaPanes so this wiring is unit-testable —

@@ -444,3 +444,57 @@ describe("SchemaTypeEditor per-type field description override (#2389)", () => {
     });
   });
 });
+
+describe("SchemaTypeEditor proper-names checkbox (#2658)", () => {
+  const props = (extra: Record<string, unknown> = {}) => ({
+    schemaTypeKind: "lore" as const,
+    initialName: "Note",
+    initialTypeId: "lore:note",
+    selectedSchemaTypeId: "lore:note",
+    schemaTypeLayerId: "proj",
+    ...extra,
+  });
+
+  it("sends null while the box matches the parent's value (clears to inherited)", async () => {
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, { props: props({ onSaveType }) });
+    expect((screen.getByLabelText(/Names are proper nouns/) as HTMLInputElement).checked).toBe(false);
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ properNames: null }));
+  });
+
+  it("sends true once ticked against a parent that is not proper", async () => {
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, { props: props({ onSaveType }) });
+    await fireEvent.click(screen.getByLabelText(/Names are proper nouns/));
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ properNames: true }));
+  });
+
+  it("sends false when a built-in proper type is unticked", async () => {
+    const onSaveType = vi.fn();
+    render(SchemaTypeEditor, {
+      props: props({
+        onSaveType,
+        initialName: "Character",
+        initialTypeId: "lore:character",
+        selectedSchemaTypeId: "lore:character",
+        schemaTypeReadonly: true,
+        initialProperNames: true,
+      }),
+    });
+    await fireEvent.click(screen.getByLabelText(/Names are proper nouns/));
+    await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
+    expect(onSaveType).toHaveBeenCalledWith(expect.objectContaining({ properNames: false }));
+  });
+
+  it("seeds from the type's effective value", () => {
+    render(SchemaTypeEditor, { props: props({ initialProperNames: true }) });
+    expect((screen.getByLabelText(/Names are proper nouns/) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("is lore-only", () => {
+    render(SchemaTypeEditor, { props: props({ schemaTypeKind: "prompt" as const }) });
+    expect(screen.queryByLabelText(/Names are proper nouns/)).toBeNull();
+  });
+});

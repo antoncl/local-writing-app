@@ -20,9 +20,11 @@ import { untrack } from "svelte";
 import { api } from "@/lib/api";
 import { scopeHeaders } from "@/lib/api/core";
 import { loreEntriesStore } from "@/lib/stores/lore";
-import { autoDictionary, withPossessives } from "@/lib/proofread/dictionary";
+import { metadataSchemaStore } from "@/lib/stores/schema";
+import { firstInEntryTypeChain } from "@/lib/utils/colors";
+import { autoDictionary, withPossessives, type SceneNameSet } from "@/lib/proofread/dictionary";
 import type { EngineConfig, Finding, ProofreadEngine, RuleGroup } from "@/lib/proofread/findings";
-import type { LoreEntrySummary, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
+import type { LoreEntrySummary, MetadataSchema, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
 
 const CACHE_LIMIT = 4000;
 
@@ -61,6 +63,9 @@ export interface ProofreadingDeps {
   loadEngine: () => Promise<ProofreadEngine>;
   /** Subscribe to the lore roster; returns the unsubscribe. */
   subscribeLore: (run: (entries: LoreEntrySummary[]) => void) => () => void;
+  /** Subscribe to the merged metadata schema (its entry types' `proper_names`);
+   *  returns the unsubscribe. */
+  subscribeSchema: (run: (schema: MetadataSchema | null) => void) => () => void;
   backend: ProofreadingBackend;
   /** The open project's root, to tell a project switch from a lore edit. */
   projectRoot: () => string | null;
@@ -71,6 +76,7 @@ export interface ProofreadingDeps {
 const defaultDeps: ProofreadingDeps = {
   loadEngine: async () => (await import("@/lib/proofread/harperEngine")).createHarperEngine(),
   subscribeLore: (run) => loreEntriesStore.subscribe(run),
+  subscribeSchema: (run) => metadataSchemaStore.subscribe(run),
   backend: {
     read: () => api.getProofreading(),
     addWord: (word, layerId) => api.addProofreadingWord(word, layerId),
@@ -156,9 +162,11 @@ export class ProofreadingController implements ProofreadLens {
   private pending = new Map<string, Promise<Finding[]>>();
   private lore: LoreEntrySummary[] = [];
   private stopLore: (() => void) | null = null;
+  private schema: MetadataSchema | null = null;
+  private stopSchema: (() => void) | null = null;
   /** As-of-scene name sets per editor (a scene's mid-story renames, #61),
-   *  each `[title, ...aliases]`. */
-  private viewNames = new Map<string, string[][]>();
+   *  each `[entityId, [title, ...aliases]]`. */
+  private viewNames = new Map<string, SceneNameSet[]>();
   private words: EngineSlot;
   private config: EngineSlot;
   /** Bumped whenever the words or config change, so a lint that started
@@ -210,7 +218,7 @@ export class ProofreadingController implements ProofreadLens {
   }
 
   /** The as-of-scene name sets an editor's scene uses; null when it has none. */
-  setViewNames(viewKey: string, names: string[][] | null): void {
+  setViewNames(viewKey: string, names: SceneNameSet[] | null): void {
     if (names && names.length > 0) this.viewNames.set(viewKey, names);
     else if (!this.viewNames.delete(viewKey)) return;
     this.reloadWords().catch(() => undefined);
@@ -307,6 +315,13 @@ export class ProofreadingController implements ProofreadLens {
           // A lore edit within the project doesn't change it.
           if (this.deps.projectRoot() !== this.setupRoot) this.refresh().catch(() => undefined);
         });
+        // Names are case-sensitive until the schema says an entry's type
+        // isn't a proper noun, so nothing loosens before it arrives.
+        this.stopSchema = this.deps.subscribeSchema((schema) => {
+          this.schema = schema;
+          if (starting) return;
+          this.reloadWords().catch(() => undefined);
+        });
         starting = false;
         await this.refresh();
         // Started for the settings tab alone, the lens stays off ("ready" is
@@ -317,6 +332,8 @@ export class ProofreadingController implements ProofreadLens {
         // (one lore subscription, not one more per attempt).
         this.stopLore?.();
         this.stopLore = null;
+        this.stopSchema?.();
+        this.stopSchema = null;
         this.words.reset();
         this.config.reset();
         this.engine = null;
@@ -366,7 +383,11 @@ export class ProofreadingController implements ProofreadLens {
   private async reloadWords(): Promise<void> {
     const engine = this.engine;
     if (!engine) return;
-    const auto = autoDictionary(this.lore, [...this.viewNames.values()].flat(1));
+    const schema = this.schema;
+    // No schema yet → every type is a proper name (case-sensitive titles).
+    const properName = (entryType: string) =>
+      schema ? (firstInEntryTypeChain(entryType, schema, (t) => t.proper_names) ?? false) : true;
+    const auto = autoDictionary(this.lore, [...this.viewNames.values()].flat(1), properName);
     // A word the writer added is spelled as written, possessives included.
     const own = (this.setup?.words ?? []).flatMap(withPossessives);
     const words = [...new Set([...auto, ...own])].sort();
@@ -386,6 +407,9 @@ export class ProofreadingController implements ProofreadLens {
   reset(): void {
     this.stopLore?.();
     this.stopLore = null;
+    this.stopSchema?.();
+    this.stopSchema = null;
+    this.schema = null;
     this.engine = null;
     this.loading = null;
     this.cache.clear();
@@ -411,7 +435,7 @@ let viewCounter = 0;
 
 /** Call during a prose editor's init: while it lives, its scene's as-of-scene
  *  names (a mid-story rename, #61) are in the dictionary too. */
-export function trackProofreadNames(names: () => string[][] | null, lens: ProofreadingController = proofreading): void {
+export function trackProofreadNames(names: () => SceneNameSet[] | null, lens: ProofreadingController = proofreading): void {
   const key = `view-${++viewCounter}`;
   $effect(() => {
     const current = names();

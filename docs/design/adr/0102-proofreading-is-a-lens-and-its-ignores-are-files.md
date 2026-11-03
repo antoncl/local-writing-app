@@ -2,7 +2,8 @@
 
 - **Status:** Accepted — 2026-11-02, Anton Lauridsen (PR #2654). Text by Claude from the design in
   epic #2653 and the four decisions Anton recorded there on 2026-11-02. Amendment 1 (slice 1,
-  same day) corrects the span unit and adds lowercase dictionary forms.
+  same day) corrects the span unit and adds lowercase dictionary forms. Amendment 4 (2026-11-03,
+  #2658) sets the fiction default from real chapters and makes a name's case follow its type.
 - **Feature:** spelling and grammar feedback in the scene editor that works out of the box, stays
   on the machine, and doesn't drown a fiction writer in false positives. This ADR covers **step 1**:
   the Harper engine running in the browser. Step 2 (LanguageTool) gets its own ADR.
@@ -532,3 +533,47 @@ The lens, the pipeline, the ignores and their storage, and the slices.
    (`getStructuredLintConfig`, `getLintDescriptions`) comes from the engine. A rule offered as one
    of several exclusive choices (Harper's `OneOfMany`, e.g. Oxford comma or no Oxford comma) is
    listed as its own rule.
+
+## Amendment 4 — The fiction default after trying real chapters, and a name's case follows its entry type
+
+2026-11-03, from Anton's trials of the lens on real chapters (#2658). It settles the two calls
+§5 and Amendment 1 left open. Nothing else changes.
+
+### What prompted it
+
+- **Two more rules fight fiction.** `MassNouns` ("`coffee` is a mass noun") flags the counted
+  mass nouns fiction uses all the time, mostly in dialogue: "two coffees", "a beer". `LongSentences`
+  ("This sentence is n words long") treats sentence length as an error. In fiction it is a style.
+- **`doorframe` is flagged.** It isn't the spell checker: Harper's `SplitWords` rule wants
+  `door frame`. *doorframe*, *door frame* and the OED's *door-frame* are all correct.
+  `SplitWords` itself is worth keeping, and a word in the dictionary silences it for that word.
+  Reported upstream as Automattic/harper#4794.
+- **A capitalised title is not always a proper noun.** Amendment 1 made every title case-sensitive,
+  so `katadesis` in prose is flagged for the entry *Katadesis*. That is right for a character
+  (*Kael*, never *kael*) and a place, but wrong for a concept, a term of art or a material whose
+  title is only capitalised because it is a title.
+
+### Decision
+
+1. **The fiction default also switches off `MassNouns` and `LongSentences`.** The shipped list is
+   `AvoidContractions`, `BoringWords`, `DisjointPrefixes`, `Hedging`, `LongSentences`, `MassNouns`,
+   `MissingPreposition` and `OxfordComma`. Each stays switchable at the machine or a project.
+2. **The Library's `proofreading.yaml` ships `words`**: correct closed compounds that `SplitWords`
+   flags, each inflected form listed (Harper has no inflection). It starts with `doorframe` and
+   `doorframes`, and grows as trials find more. A writer's own additions still go to a writable
+   layer through *Add to dictionary*.
+3. **Whether a title is case-sensitive is an entry-type setting, `proper_names`**, inherited down
+   the type tree like `color` or `summary_fields`, and switchable per type in the schema editor
+   ("Names are proper nouns").
+   - **On** for the built-in Character and Location: a title's words go in as written, as in
+     Amendment 1.
+   - **Off** at `lore:base`, so every other type, the writer's own included, accepts the title in
+     lower case too, as an alias always is.
+   - The as-of-scene names keep their entry's id, so a renamed entry's title follows its type.
+   - Until the schema has loaded, every title is case-sensitive, so nothing loosens early.
+   - The setting is an optional key that defaults to inheriting, so no stored file changes shape
+     and no migration is owed.
+
+### Not changed
+
+An alias is case-insensitive everywhere. The lens, the pipeline, the ignores and their storage.

@@ -52,7 +52,7 @@ CLEARABLE_GROUP_KEYS = _optional_keys(MetadataGroupDefinition, frozenset())
 CLEARABLE_ENTRY_TYPE_KEYS = tuple(
     key
     for key in _optional_keys(EntryTypeDefinition, RESOLVER_STAMPED_ENTRY_TYPE_KEYS)
-    if key in ("color", "icon", "summary_fields")
+    if key in ("color", "icon", "summary_fields", "proper_names")
 )
 
 

@@ -5,10 +5,22 @@
 // ignores write through the backend and load its answer.
 import { describe, expect, it, vi } from "vitest";
 import type { EngineConfig, Finding, ProofreadEngine } from "@/lib/proofread/findings";
-import type { LoreEntrySummary, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
+import type { LoreEntrySummary, MetadataSchema, ProofreadingDialect, ProofreadingSetup } from "@/lib/types";
 import { ProofreadingController, type ProofreadingBackend } from "./proofreading.svelte";
 
-const entry = (title: string) => ({ id: `lore_${title}`, title, metadata: {} }) as unknown as LoreEntrySummary;
+const entry = (title: string, entryType = "lore:character") =>
+  ({ id: `lore_${title}`, title, metadata: {}, entry_type: entryType }) as unknown as LoreEntrySummary;
+
+/** A schema where lore:base is not proper and lore:character is `proper`. */
+const schemaWith = (proper: boolean): MetadataSchema =>
+  ({
+    fields: {},
+    entry_types: {
+      "lore:base": { name: "Entry", kind: "lore", fields: [], proper_names: false },
+      "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: [] },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [], proper_names: proper },
+    },
+  }) as unknown as MetadataSchema;
 
 /** The hash the fake engine gives a finding: its text and position. */
 const hashFor = (text: string, finding: Finding) => String(text.length * 1000 + finding.from);
@@ -95,11 +107,16 @@ function fakeBackend(initial: Partial<ProofreadingSetup> = {}) {
   return backend;
 }
 
-function setup(lore: LoreEntrySummary[] = [], files: Partial<ProofreadingSetup> = {}) {
+function setup(
+  lore: LoreEntrySummary[] = [],
+  files: Partial<ProofreadingSetup> = {},
+  schema: MetadataSchema | null = null,
+) {
   const { engine, log } = fakeEngine();
   const backend = fakeBackend(files);
   const project = { root: "D:/writing/book01" as string | null };
   let pushLore: (entries: LoreEntrySummary[]) => void = () => undefined;
+  let pushSchema: (schema: MetadataSchema | null) => void = () => undefined;
   const loadEngine = vi.fn(async () => engine);
   const lens = new ProofreadingController({
     loadEngine,
@@ -108,11 +125,25 @@ function setup(lore: LoreEntrySummary[] = [], files: Partial<ProofreadingSetup> 
       run(lore);
       return () => undefined;
     },
+    subscribeSchema: (run) => {
+      pushSchema = run;
+      run(schema);
+      return () => undefined;
+    },
     backend,
     projectRoot: () => project.root,
     startTimeoutMs: 1000,
   });
-  return { lens, engine, log, backend, project, loadEngine, pushLore: (e: LoreEntrySummary[]) => pushLore(e) };
+  return {
+    lens,
+    engine,
+    log,
+    backend,
+    project,
+    loadEngine,
+    pushLore: (e: LoreEntrySummary[]) => pushLore(e),
+    pushSchema: (m: MetadataSchema | null) => pushSchema(m),
+  };
 }
 
 // Generous: the fake engine waits per step, and Windows timers round up to ~15 ms.
@@ -176,10 +207,34 @@ describe("ProofreadingController", () => {
     const { lens } = setup();
     lens.toggle();
     await settle();
-    lens.setViewNames("view-1", [["Ashcombe"]]);
+    lens.setViewNames("view-1", [["lore_x", ["Ashcombe"]]]);
     expect(await lens.lint("Ashcombe")).toEqual([]);
     lens.setViewNames("view-1", null);
     expect(await lens.lint("Ashcombe")).toHaveLength(1);
+  });
+
+  it("keeps a lore:note title case-sensitive before the schema arrives, then accepts lower case", async () => {
+    const { lens, pushSchema } = setup([entry("Katadesis", "lore:note")]);
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("katadesis")).toHaveLength(1);
+    pushSchema(schemaWith(true));
+    await settle();
+    expect(await lens.lint("katadesis")).toEqual([]);
+    expect(await lens.lint("Katadesis")).toEqual([]);
+  });
+
+  it("reloads the words when the schema changes", async () => {
+    const { lens, pushSchema } = setup([entry("Kael")], {}, schemaWith(true));
+    lens.toggle();
+    await settle();
+    expect(await lens.lint("kael")).toHaveLength(1);
+    pushSchema(schemaWith(false));
+    await settle();
+    expect(await lens.lint("kael")).toEqual([]);
+    pushSchema(schemaWith(true));
+    await settle();
+    expect(await lens.lint("kael")).toHaveLength(1);
   });
 
   it("reports a failed start and switches itself off", async () => {
@@ -188,6 +243,7 @@ describe("ProofreadingController", () => {
         throw new Error("no wasm");
       },
       subscribeLore: () => () => undefined,
+      subscribeSchema: () => () => undefined,
       backend: fakeBackend(),
       projectRoot: () => null,
       startTimeoutMs: 1000,
@@ -219,6 +275,7 @@ describe("ProofreadingController", () => {
     let subscriptions = 0;
     const lens = new ProofreadingController({
       loadEngine: async () => engine,
+      subscribeSchema: () => () => undefined,
       subscribeLore: (run) => {
         subscriptions++;
         run([]);
@@ -377,6 +434,7 @@ describe("ProofreadingController", () => {
         throw new Error("no binary");
       },
       subscribeLore: () => () => undefined,
+      subscribeSchema: () => () => undefined,
       backend: fakeBackend(),
       projectRoot: () => null,
       startTimeoutMs: 1000,
@@ -390,6 +448,7 @@ describe("ProofreadingController", () => {
     const lens = new ProofreadingController({
       loadEngine: () => new Promise<never>(() => undefined),
       subscribeLore: () => () => undefined,
+      subscribeSchema: () => () => undefined,
       backend: fakeBackend(),
       projectRoot: () => null,
       startTimeoutMs: 10,

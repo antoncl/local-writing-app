@@ -26,6 +26,7 @@ from app.services.machine_settings import touch_recent_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.ai_trace import AITraceMixin
 from app.services.project.assistants import AssistantEntriesMixin
+from app.services.project.beat_marker_validation import BeatMarkerValidationMixin
 from app.services.project.card_scene import CardSceneMixin
 from app.services.project.card_story_time import CardStoryTimeMixin
 from app.services.project.change_candidates import ChangeCandidatesMixin
@@ -106,6 +107,7 @@ class ProjectService(
     AiInvocationsMixin,
     AITraceMixin,
     AssistantEntriesMixin,
+    BeatMarkerValidationMixin,
     ChangeCandidatesMixin,
     ChangePropagationMixin,
     ChangePropagationValidationMixin,

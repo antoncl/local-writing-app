@@ -77,6 +77,7 @@ import {
 } from "@/lib/editor-core/mutationMarkers";
 import { joinAtCursor } from "@/lib/editor-core/cursorJoin";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
+import { BEAT_CLOSE, BEAT_OPEN, beatAt, insideBeatReason } from "@/lib/editor-core/beats";
 import type {
   ChatUsage,
   CheckedEntry,
@@ -357,7 +358,7 @@ export class AiSuggestionController {
     }
     const lastEntry = findPromptEntry(promptCtx, this.#lastInvokedEntryId);
     // The prompt's type may DECLARE an accept-time mark-stamp (#954): roleplay
-    // stamps the `character` mark from its `character` input. Read off the declared
+    // brackets the reply as a beat of its `character` input. Read off the declared
     // capability, not an `entry_type == roleplay` branch.
     const onAccept = promptOnAccept(promptCtx, lastEntry);
     const characterId =
@@ -366,13 +367,19 @@ export class AiSuggestionController {
         : null;
     if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
-      if (characterId && onAccept) {
-        // ADR-0070: bind the beat's private interiority to the same character
-        // mark, so it rides with the beat (and dies with it on rewind).
+      let end = range.to;
+      if (characterId && onAccept?.mark === "character") {
+        // ADR-0070 Amendment 1: the reply becomes one beat, however many
+        // paragraphs it has: an open marker before it and a close marker after
+        // it carrying the interiority once. The close goes in first so `range.from`
+        // stays put.
         const internal = this.#pendingInternal ?? "";
-        chain = chain.setMark(onAccept.mark, { characterId, internal });
+        chain = chain
+          .insertContentAt(range.to, { type: BEAT_CLOSE, attrs: { internal } })
+          .insertContentAt(range.from, { type: BEAT_OPEN, attrs: { characterId } });
+        end = range.to + 2;
       }
-      chain.setTextSelection(range.to).run();
+      chain.setTextSelection(end).run();
     }
     this.#persistAcceptedInvocation(lastEntry, characterId);
     this.suggestionId = null;
@@ -548,6 +555,16 @@ export class AiSuggestionController {
     // ""), re-resolving against the prompt and roster as they are then.
     const runAssistantId = assistantId || assistantForPrompt(entry, get(assistantEntriesStore));
     const ctx = this.#deps.getPromptCtx();
+    // Beats never nest (ADR-0070 Amendment 1, decision 5): a turn that would be
+    // bracketed as a beat can't start inside one, whichever path started it.
+    const enclosing = promptOnAccept(ctx, entry)?.mark === "character"
+      ? beatAt(editor.state.doc, editor.state.selection.from)
+      : null;
+    if (enclosing) {
+      const title = ctx.loreEntries.find((e) => e.id === enclosing.characterId)?.title || "a character";
+      this.#deps.onNotice?.(insideBeatReason(title));
+      return;
+    }
     const surface = promptSurfaceFor(ctx, entry);
     if (surface === "cursor" || surface === "selection") {
       const run: OutputRun = { entry, inputs, assistantId: runAssistantId, scene };

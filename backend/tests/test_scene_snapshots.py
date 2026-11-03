@@ -408,7 +408,7 @@ class RestoreTests(SnapshotTestCase):
         """Finalize is destructive but safe: it captures a `kept` snapshot of the
         pre-finalize scene (beats + interiority markers intact), then overwrites
         the body with the AI's clean prose."""
-        self._save("A beat. <!-- character:id=annie;internal=x -->She fired.<!-- /character -->")
+        self._save("A beat. <!-- character:id=annie -->She fired.<!-- /character;internal=x -->")
         result = self.service.finalize_scene(self.scene_id, "She fired, and did not look back.")
 
         self.assertEqual(result.scene.body.strip(), "She fired, and did not look back.")

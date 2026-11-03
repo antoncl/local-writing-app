@@ -1,18 +1,19 @@
-// Headless tests for the interiority reveal plugin (ADR-0070 S2). Like the
-// document-boundary tests, these drive a real prosemirror EditorState with a
-// minimal character-mark schema — no TipTap mount, no DOM. The widget DOM and
-// textarea write-back are exercised by live verification instead.
+// Headless tests for beat pairing and the beat decoration plugin (ADR-0070,
+// Amendment 1). Like the document-boundary tests, these drive a real
+// prosemirror EditorState with a minimal two-marker schema — no TipTap mount.
+// The close marker's node view is covered in beatCloseView.test.ts.
 import { describe, expect, it } from "vitest";
 import { Schema, type Node as PMNode } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 
+import { beatAt, scanBeats } from "./beats";
 import {
   createInteriorityPlugin,
-  findBeats,
   interiorityHasBeats,
   interiorityAnyRevealed,
   interiorityDecorations,
   INTERIORITY_META,
+  type BeatMarkerSpec,
 } from "./interiorityReveal";
 
 const schema = new Schema({
@@ -20,115 +21,172 @@ const schema = new Schema({
     doc: { content: "block+" },
     paragraph: { group: "block", content: "inline*", toDOM: () => ["p", 0] },
     text: { group: "inline" },
-  },
-  marks: {
-    character: {
-      attrs: { characterId: { default: null }, internal: { default: "" } },
-      toDOM: (m) => ["span", { "data-character": m.attrs.characterId }, 0],
+    characterOpen: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      attrs: { characterId: { default: "" } },
+      toDOM: () => ["span", { "data-character-open": "" }],
+    },
+    characterClose: {
+      group: "inline",
+      inline: true,
+      atom: true,
+      attrs: { internal: { default: "" } },
+      toDOM: () => ["span", { "data-character-close": "" }],
     },
   },
 });
 
-const markType = schema.marks.character;
-
-function beat(id: string, text: string, internal = "") {
-  return schema.text(text, [markType.create({ characterId: id, internal })]);
-}
+const open = (id: string) => schema.node("characterOpen", { characterId: id });
+const close = (internal = "") => schema.node("characterClose", { internal });
+const text = (t: string) => schema.text(t);
 function para(...inline: PMNode[]) {
   return schema.node("paragraph", null, inline);
 }
 function stateOf(doc: PMNode): EditorState {
-  return EditorState.create({ doc, plugins: [createInteriorityPlugin(() => "")] });
+  return EditorState.create({
+    doc,
+    plugins: [createInteriorityPlugin({ colorForId: () => "", titleForId: (id) => id })],
+  });
 }
 
-// Narration, then an Annie beat; a second paragraph is a Bill beat.
+/** The marker specs of every node decoration, in document order. */
+function markerSpecs(state: EditorState): (BeatMarkerSpec & { pos: number })[] {
+  return interiorityDecorations(state)
+    .find()
+    .filter((d) => (d.spec as { beatMarker?: BeatMarkerSpec }).beatMarker)
+    .map((d) => ({ ...(d.spec as { beatMarker: BeatMarkerSpec }).beatMarker, pos: d.from }));
+}
+const underlines = (state: EditorState) =>
+  interiorityDecorations(state)
+    .find()
+    .filter((d) => !(d.spec as { beatMarker?: BeatMarkerSpec }).beatMarker);
+
+// Narration, then an Annie beat across two paragraphs, then a Bill beat.
 function sampleDoc(): PMNode {
   return schema.node("doc", null, [
-    para(schema.text("Narration. "), beat("annie", "She fired.", "Steady now.")),
-    para(beat("bill", "He grins.", "She'll miss.")),
+    para(text("Narration. "), open("annie"), text("She fired.")),
+    para(text("Then ran."), close("Steady now.")),
+    para(open("bill"), text("He grins."), close("She'll miss.")),
   ]);
 }
 
-describe("findBeats", () => {
-  it("coalesces contiguous same-character text and captures interiority", () => {
-    // "She " bold + "fired." plain, both Annie → one beat.
-    const doc = schema.node("doc", null, [
-      para(beat("annie", "She "), beat("annie", "fired.", "Steady.")),
+describe("scanBeats", () => {
+  it("pairs markers in order, a beat spanning paragraphs, its interiority from the close", () => {
+    const { beats, orphans } = scanBeats(sampleDoc());
+    expect(beats.map((b) => [b.characterId, b.internal])).toEqual([
+      ["annie", "Steady now."],
+      ["bill", "She'll miss."],
     ]);
-    const beats = findBeats(doc, markType);
-    expect(beats).toHaveLength(1);
-    expect(beats[0].id).toBe("annie");
-    expect(doc.textBetween(beats[0].from, beats[0].to)).toBe("She fired.");
-    expect(beats[0].internal).toBe("Steady.");
+    expect(orphans).toEqual([]);
   });
 
-  it("splits a new beat on narration and on a different character", () => {
-    const beats = findBeats(sampleDoc(), markType);
-    expect(beats.map((b) => b.id)).toEqual(["annie", "bill"]);
-    expect(beats[1].internal).toBe("She'll miss.");
+  it("treats an open marker followed by another open as an orphan (beats never nest)", () => {
+    const doc = schema.node("doc", null, [para(open("annie"), text("a "), open("bill"), text("b"), close())]);
+    const { beats, orphans } = scanBeats(doc);
+    expect(beats.map((b) => b.characterId)).toEqual(["bill"]);
+    expect(orphans).toEqual([1]);
   });
 
-  it("finds nothing in un-marked prose", () => {
-    const doc = schema.node("doc", null, [para(schema.text("Just narration."))]);
-    expect(findBeats(doc, markType)).toHaveLength(0);
+  it("treats a close with no open, and an unclosed open, as orphans", () => {
+    const doc = schema.node("doc", null, [para(text("a"), close(), text("b "), open("annie"), text("c"))]);
+    const { beats, orphans } = scanBeats(doc);
+    expect(beats).toEqual([]);
+    expect(orphans).toHaveLength(2);
+  });
+
+  it("finds the beat around a position, and none just after its close", () => {
+    const doc = sampleDoc();
+    const [annie] = scanBeats(doc).beats;
+    expect(beatAt(doc, annie.open + 1)?.characterId).toBe("annie");
+    expect(beatAt(doc, annie.close)?.characterId).toBe("annie");
+    expect(beatAt(doc, annie.close + 1)).toBeNull();
+    expect(beatAt(doc, annie.open)).toBeNull();
+  });
+});
+
+describe("beat decorations", () => {
+  it("underlines each beat once and marks both of its markers", () => {
+    const state = stateOf(sampleDoc());
+    expect(interiorityHasBeats(state)).toBe(true);
+    expect(interiorityAnyRevealed(state)).toBe(false);
+    // One inline decoration per beat, spanning from after the open to the close.
+    const [annie, bill] = scanBeats(state.doc).beats;
+    expect(underlines(state).map((d) => [d.from, d.to])).toEqual([
+      [annie.open + 1, annie.close],
+      [bill.open + 1, bill.close],
+    ]);
+    expect(markerSpecs(state).map((s) => [s.characterId, s.broken])).toEqual([
+      ["annie", false],
+      ["annie", false],
+      ["bill", false],
+      ["bill", false],
+    ]);
+  });
+
+  it("marks an orphan broken and underlines nothing for it", () => {
+    const state = stateOf(schema.node("doc", null, [para(open("annie"), text("Alone."))]));
+    expect(interiorityHasBeats(state)).toBe(false);
+    expect(underlines(state)).toHaveLength(0);
+    expect(markerSpecs(state)).toEqual([{ characterId: "", revealed: false, broken: true, pos: 1 }]);
+  });
+
+  it("puts the state a node view reacts to in the decoration's attrs", () => {
+    // ProseMirror compares node decorations by attrs only.
+    const state = stateOf(sampleDoc());
+    const [, annieClose] = interiorityDecorations(state).find().filter((d) => d.spec.beatMarker);
+    const toggled = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, annieClose.from));
+    const after = interiorityDecorations(toggled).find(annieClose.from, annieClose.to).find((d) => d.spec.beatMarker);
+    expect((annieClose as unknown as { type: { attrs: object } }).type.attrs).not.toEqual(
+      (after as unknown as { type: { attrs: object } }).type.attrs,
+    );
   });
 });
 
 describe("reveal state machine", () => {
-  it("reports beats present and none revealed initially, one handle per beat", () => {
-    const state = stateOf(sampleDoc());
-    expect(interiorityHasBeats(state)).toBe(true);
-    expect(interiorityAnyRevealed(state)).toBe(false);
-    // Two beats → two handles, no blocks yet.
-    expect(interiorityDecorations(state).find()).toHaveLength(2);
-  });
-
-  it("has no beats in un-marked prose", () => {
-    const state = stateOf(schema.node("doc", null, [para(schema.text("nada"))]));
-    expect(interiorityHasBeats(state)).toBe(false);
-  });
+  const closes = (state: EditorState) => scanBeats(state.doc).beats.map((b) => b.close);
+  const revealedCloses = (state: EditorState) =>
+    markerSpecs(state)
+      .filter((s) => s.revealed)
+      .map((s) => s.pos);
 
   it("reveal-all opens every beat; collapse-all closes them", () => {
     let state = stateOf(sampleDoc());
     state = state.apply(state.tr.setMeta(INTERIORITY_META.revealAll, true));
-    expect(interiorityAnyRevealed(state)).toBe(true);
-    // 2 handles + 2 blocks.
-    expect(interiorityDecorations(state).find()).toHaveLength(4);
-
+    expect(revealedCloses(state)).toEqual(closes(state));
     state = state.apply(state.tr.setMeta(INTERIORITY_META.collapseAll, true));
     expect(interiorityAnyRevealed(state)).toBe(false);
-    expect(interiorityDecorations(state).find()).toHaveLength(2);
   });
 
-  it("toggles a single beat by its anchor position", () => {
+  it("toggles a single beat by its close marker", () => {
     let state = stateOf(sampleDoc());
-    const anchor = findBeats(state.doc, markType)[0].to;
-    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, anchor));
-    expect(interiorityAnyRevealed(state)).toBe(true);
-    expect(interiorityDecorations(state).find()).toHaveLength(3); // 2 handles + 1 block
-    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, anchor));
+    const [first] = closes(state);
+    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, first));
+    expect(revealedCloses(state)).toEqual([first]);
+    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, first));
     expect(interiorityAnyRevealed(state)).toBe(false);
   });
 
-  it("keeps a beat revealed when text is inserted before it (position mapping)", () => {
+  it("reveals a given set of close markers", () => {
     let state = stateOf(sampleDoc());
-    state = state.apply(state.tr.setMeta(INTERIORITY_META.revealAll, true));
-    expect(interiorityAnyRevealed(state)).toBe(true);
-    // Insert at the very start of the doc — every beat shifts right.
-    state = state.apply(state.tr.insertText("X", 1));
-    expect(interiorityAnyRevealed(state)).toBe(true);
-    expect(interiorityDecorations(state).find()).toHaveLength(4);
+    state = state.apply(state.tr.setMeta(INTERIORITY_META.reveal, closes(state)));
+    expect(revealedCloses(state)).toEqual(closes(state));
   });
 
-  it("prunes a reveal whose beat was deleted", () => {
+  it("keeps a beat revealed when text is typed inside it, right before its close", () => {
     let state = stateOf(sampleDoc());
-    const bill = findBeats(state.doc, markType)[1];
-    state = state.apply(state.tr.setMeta(INTERIORITY_META.revealAll, true));
-    expect(interiorityAnyRevealed(state)).toBe(true);
-    // Delete Bill's beat text; its anchor no longer lands on a beat end.
-    state = state.apply(state.tr.delete(bill.from, bill.to));
-    const stillOpen = findBeats(state.doc, markType).length;
-    expect(stillOpen).toBe(1); // only Annie remains
-    expect(interiorityDecorations(state).find()).toHaveLength(2); // 1 handle + 1 block for Annie
+    const [first] = closes(state);
+    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, first));
+    state = state.apply(state.tr.insertText("!", first));
+    expect(revealedCloses(state)).toEqual([first + 1]);
+  });
+
+  it("prunes a reveal whose close marker was deleted", () => {
+    let state = stateOf(sampleDoc());
+    const [first] = closes(state);
+    state = state.apply(state.tr.setMeta(INTERIORITY_META.toggleOne, first));
+    state = state.apply(state.tr.delete(first, first + 1));
+    expect(interiorityAnyRevealed(state)).toBe(false);
   });
 });

@@ -59,10 +59,11 @@ REFERENCE_DEF = re.compile(r"\[[^\]\n]+\]:[ \t]*\S+")
 # The marker pairs `sceneMarkdownToHtml` rewrites as a UNIT. Protecting each
 # comment on its own kept every comment whole and still let a boundary fall
 # BETWEEN an anchor's two markers, so the preprocessing then matched across the
-# injected wrapper and stranded its closing tag.
+# injected wrapper and stranded its closing tag. A roleplay beat's open and close
+# markers are NOT a pair here: they are independent inline atoms the frontend
+# rewrites one comment at a time, and a beat may span blocks (ADR-0070 A1).
 MARKER_PAIRS = (
     ("<!-- embedded-todo:", "<!-- /embedded-todo -->"),
-    ("<!-- character:", "<!-- /character -->"),
 )
 
 

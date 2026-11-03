@@ -71,8 +71,8 @@ describe("#2546: a prompt's summary is a display-only hint, never a filter key",
       { label: "Draft scene", description: "General", hint: "Writes a first draft of the scene from its brief.", group: "AI" },
       { label: "Table", description: "Insert a table", group: "Insert" },
     ];
-    expect(filterSlashCommands(commands, "brief", false)).toEqual([]);
-    expect(filterSlashCommands(commands, "draft", false).map((c) => c.label)).toEqual(["Draft scene"]);
+    expect(filterSlashCommands(commands, { command: "brief", args: "" })).toEqual([]);
+    expect(filterSlashCommands(commands, { command: "draft", args: "" }).map((c) => c.label)).toEqual(["Draft scene"]);
   });
 });
 
@@ -86,7 +86,26 @@ describe("#1215: the completed token keeps its AI command visible in the filter"
     const token = slashCommandToken("Roleplay"); // "roleplay"
     const parsed = parseSlashBody(`${token} Irene`);
     expect(parsed).not.toBeNull();
-    const matches = filterSlashCommands(commands, parsed!.command, parsed!.args.length > 0);
+    const matches = filterSlashCommands(commands, parsed!);
     expect(matches.map((c) => c.label)).toContain("Roleplay");
+  });
+});
+
+describe("a multi-word label beats the one-word command it starts with", () => {
+  const commands = [
+    { label: "Roleplay", description: "General", group: "AI" },
+    { label: "Roleplay split", description: "Split this beat at the cursor", group: "AI" },
+  ];
+
+  it("/roleplay split picks the split command, not a roleplay turn for 'split'", () => {
+    expect(filterSlashCommands(commands, parseSlashBody("roleplay  split ")!).map((c) => c.label)).toEqual([
+      "Roleplay split",
+    ]);
+  });
+
+  it("/roleplay Irene still picks Roleplay", () => {
+    expect(filterSlashCommands(commands, parseSlashBody("roleplay Irene")!).map((c) => c.label)).toEqual([
+      "Roleplay",
+    ]);
   });
 });

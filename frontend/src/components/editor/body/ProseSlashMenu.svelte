@@ -93,17 +93,19 @@
           {/if}
           <button
             class:active={index === menu.selectedIndex}
+            class:disabled={Boolean(command.disabled)}
             type="button"
             data-index={index}
+            aria-disabled={command.disabled ? "true" : undefined}
             onmouseenter={() => onHoverCommand(index)}
             onmousedown={() => onRunCommand(command)}
           >
-            {command.label}
+            {command.label}{#if command.disabled}{" "}<span class="slash-disabled">(disabled)</span>{/if}
           </button>
         {/each}
       </div>
       {#if activeCommand}
-        <div class="slash-hint">{activeCommand.hint || activeCommand.description}</div>
+        <div class="slash-hint">{activeCommand.disabled || activeCommand.hint || activeCommand.description}</div>
       {/if}
     {/if}
   </div>
@@ -184,6 +186,15 @@
     font-family: var(--mono);
     font-style: normal;
     color: var(--text-2);
+  }
+
+  /* Listed so the author learns why, never run (the host refuses it). */
+  .slash-list button.disabled {
+    color: var(--text-3);
+  }
+
+  .slash-disabled {
+    font-style: italic;
   }
 
   .slash-list button {

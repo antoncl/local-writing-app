@@ -1008,6 +1008,9 @@ class ProjectLifecycleMixin:
             self._validate_mutation_anchors_and_sets(node_index, self._mutation_set_views(node_index))
         )
 
+        # ADR-0070 A1: a roleplay beat's open or close marker with no partner.
+        warnings.extend(self._validate_beat_markers(node_index))
+
         lore_errors, lore_warnings, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
         errors.extend(lore_errors)
         warnings.extend(lore_warnings)

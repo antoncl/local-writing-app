@@ -133,16 +133,10 @@ describe("markdown round-trip — scene breaks (horizontalRule)", () => {
 });
 
 describe("markdown round-trip — content-bearing markers stay byte-stable", () => {
-  // Todo and character markers wrap prose, so they survive the serializer alone.
+  // Todo markers wrap prose, so they survive the serializer alone.
   const markers = [
     ["an embedded todo", "<!-- embedded-todo:id=todo1;status=open;note= -->fix this line<!-- /embedded-todo -->"],
     ["a done todo with a note", "<!-- embedded-todo:id=todo2;status=done;note=check%20the%20date -->the date<!-- /embedded-todo -->"],
-    ["a character mark", "<!-- character:id=lore_1 -->Mira<!-- /character -->"],
-    [
-      // The canonical on-disk encoding — encodeURIComponent leaves `'` literal.
-      "a character beat carrying interiority",
-      "<!-- character:id=lore_1;internal=I%20can't%20miss. -->She fired.<!-- /character -->",
-    ],
   ] as const;
 
   for (const [label, md] of markers) {
@@ -150,20 +144,38 @@ describe("markdown round-trip — content-bearing markers stay byte-stable", () 
       expect(await roundTrip(md)).toBe(md);
     });
   }
+});
 
-  it("keeps a character mark intact when it sits inside a sentence", async () => {
-    const md = "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character --> awake.";
-    expect(await roundTrip(md)).toBe(md);
+// Beat markers (ADR-0070 Amendment 1) are empty-atom point comments, like the
+// mutation markers below: each direction is locked here, and the full loop runs
+// through a real editor in editor-core/proseRoundTrip.test.ts.
+describe("beat markers — each direction", () => {
+  it("loads each marker as its own empty atom span, interiority on the close", async () => {
+    const html = await sceneMarkdownToHtml(
+      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=I%20can't%20miss. -->",
+    );
+    expect(html).toContain('<span data-character-open="lore_1"></span>She fired.');
+    expect(html).toContain('Then ran.<span data-character-close data-internal="I can\'t miss."></span>');
   });
 
-  it("decodes a beat's interiority onto data-internal (ADR-0070)", async () => {
-    // The payload rides the mark hidden — no UI until S2 — but must be present
-    // for the backend's per-character privacy filter to find it.
-    const html = await sceneMarkdownToHtml(
-      "<!-- character:id=lore_1;internal=I%20can%27t%20miss. -->She fired.<!-- /character -->",
+  it("loads a close marker with no interiority", async () => {
+    const html = await sceneMarkdownToHtml("<!-- character:id=lore_1 -->Mira<!-- /character -->");
+    expect(html).toContain("Mira<span data-character-close></span>");
+  });
+
+  it("saves the markers from the editor's spans, the interiority url-encoded once", () => {
+    const md = editorHtmlToSceneMarkdown(
+      '<p><span data-character-open="lore_1" class="beat-open">⌜</span>She fired.</p>' +
+        '<p>Then ran.<span data-character-close="" data-internal="I can\'t miss." class="beat-close">⌟</span></p>',
     );
-    expect(html).toContain('data-character="lore_1"');
-    expect(html).toContain('data-internal="I can\'t miss."');
+    expect(md).toBe(
+      "<!-- character:id=lore_1 -->She fired.\n\nThen ran.<!-- /character;internal=I%20can't%20miss. -->",
+    );
+  });
+
+  it("saves a close marker with no interiority bare", () => {
+    const md = editorHtmlToSceneMarkdown('<p>Mira<span data-character-close="" class="beat-close">⌟</span></p>');
+    expect(md).toBe("Mira<!-- /character -->");
   });
 });
 

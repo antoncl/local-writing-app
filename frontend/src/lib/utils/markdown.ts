@@ -55,21 +55,21 @@ turndown.addRule("todoAnchor", {
     return `<!-- embedded-todo:id=${todoId};status=${status};note=${note} -->${content}<!-- /embedded-todo -->`;
   },
 });
-turndown.addRule("characterMark", {
-  filter: (node: Node) => {
-    if (!(node instanceof HTMLElement)) return false;
-    return node.tagName === "SPAN" && Boolean(node.dataset.character);
+turndown.addRule("characterOpen", {
+  filter: (node: Node) => node instanceof HTMLElement && node.tagName === "SPAN" && node.hasAttribute("data-character-open"),
+  replacement: (_content: string, node: Node) => {
+    // ADR-0070 Amendment 1: a beat is two point markers. The open one names the
+    // character; the close one carries the interiority.
+    const id = (node as HTMLElement).getAttribute("data-character-open") ?? "";
+    return `<!-- character:id=${id} -->`;
   },
-  replacement: (content: string, node: Node) => {
-    const element = node as HTMLElement;
-    const id = element.dataset.character;
-    if (!id) return content;
-    // ADR-0070: a beat may carry its character's private interiority as an
-    // optional `;internal=<url-encoded>` field. Absent when empty, so plain
-    // beats keep their old marker shape.
-    const internal = element.dataset.internal ?? "";
-    const suffix = internal ? `;internal=${encodeURIComponent(internal)}` : "";
-    return `<!-- character:id=${id}${suffix} -->${content}<!-- /character -->`;
+});
+turndown.addRule("characterClose", {
+  filter: (node: Node) => node instanceof HTMLElement && node.tagName === "SPAN" && node.hasAttribute("data-character-close"),
+  replacement: (_content: string, node: Node) => {
+    // The interiority is stored once per beat, url-encoded; absent when empty.
+    const internal = (node as HTMLElement).dataset.internal ?? "";
+    return internal ? `<!-- /character;internal=${encodeURIComponent(internal)} -->` : "<!-- /character -->";
   },
 });
 turndown.addRule("mutationMark", {
@@ -185,18 +185,18 @@ function markEmbeddedTodos(markdown: string): string {
 }
 
 function markEmbeddedCharacters(markdown: string): string {
-  return markdown.replace(
-    /<!--\s*character:id=([A-Za-z0-9_-]+)(?:;internal=(\S*))?\s*-->([\s\S]*?)<!--\s*\/character\s*-->/g,
-    (_match, characterId: string, internal: string | undefined, content: string) => {
-      // ADR-0070: decode the optional interiority payload onto data-internal so
-      // the character mark carries it back into the editor (kept hidden — no UI
-      // until S2). Mirrors the turndown rule above.
-      const internalAttr = internal
-        ? ` data-internal="${escapeAttribute(decodeNote(internal))}"`
-        : "";
-      return `<span data-character="${escapeAttribute(characterId)}"${internalAttr}>${content}</span>`;
-    },
-  );
+  // ADR-0070 Amendment 1: each beat marker is a self-contained point comment →
+  // an empty atom span (the BeatOpenMarker / BeatCloseMarker nodes parse it).
+  // Mirrors the turndown rules above.
+  return markdown
+    .replace(
+      /<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->/g,
+      (_match, characterId: string) => `<span data-character-open="${escapeAttribute(characterId)}"></span>`,
+    )
+    .replace(/<!--\s*\/character(?:;internal=(\S*?))?\s*-->/g, (_match, internal: string | undefined) => {
+      const internalAttr = internal ? ` data-internal="${escapeAttribute(decodeNote(internal))}"` : "";
+      return `<span data-character-close${internalAttr}></span>`;
+    });
 }
 
 function mutationSpan(setId: string, anchorId: string): string {

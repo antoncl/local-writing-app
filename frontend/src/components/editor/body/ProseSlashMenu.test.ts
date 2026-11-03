@@ -57,4 +57,27 @@ describe("ProseSlashMenu", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(onRunCommand).toHaveBeenCalledWith(COMMANDS[1]);
   });
+
+  it("lists a disabled command as disabled, with its reason on the hint line (ADR-0070 Amendment 1)", () => {
+    const commands: SlashCommand[] = [
+      { group: "AI", label: "Roleplay", description: "General", disabled: "Inside Elias's beat: move the cursor outside it, or split the beat.", run: () => {} },
+    ];
+    const { container } = render(ProseSlashMenu, {
+      props: {
+        menu: menu(0),
+        filterText: "rol",
+        commands,
+        onRunCommand: vi.fn(),
+        onInsertTable: vi.fn(),
+        onHoverCommand: vi.fn(),
+        onHoverGrid: vi.fn(),
+      },
+    });
+    const row = container.querySelector<HTMLButtonElement>('[data-index="0"]')!;
+    expect(row.textContent?.trim()).toBe("Roleplay (disabled)");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(container.querySelector(".slash-hint")?.textContent).toBe(
+      "Inside Elias's beat: move the cursor outside it, or split the beat.",
+    );
+  });
 });

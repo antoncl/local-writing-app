@@ -17,7 +17,7 @@ from app.services.ai.templates import render_template
 _HONOR_INTERNAL = "c2VjcmV0"  # url-encoded payload of a beat's private interiority
 _MARKED = (
     "Dawn <!-- mutate:set=mutation_set_1;id=a1 -->broke.\n\n"
-    f"<!-- character:id=ID;internal={_HONOR_INTERNAL} -->She spoke.<!-- /character -->\n\n"
+    f"<!-- character:id=ID -->She spoke.<!-- /character;internal={_HONOR_INTERNAL} -->\n\n"
     "<!-- embedded-todo:id=t1 -->Anchored<!-- /embedded-todo --> end."
 )
 

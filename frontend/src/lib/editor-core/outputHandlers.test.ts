@@ -17,6 +17,10 @@ import {
   type InlineHost,
 } from "./outputHandlers";
 
+// The fake doc can't be serialized to markdown; the offset itself is pinned in
+// markdownOffset.test.ts - here only that the cursor gather carries it (#2669).
+vi.mock("./markdownOffset", () => ({ markdownOffsetAt: () => 42 }));
+
 // ADR-0065 S2: the OutputHandler registry + the generic base. S2a lifted the
 // inline source-gather out of AiSuggestionController; S2b registers
 // extract_to_node (the brainstorm commit) and unifies produce/apply onto the
@@ -151,6 +155,8 @@ describe("inlineHandler.produce — the gather", () => {
       to: 10,
       textBefore: "T[0,10]",
       textAfter: "T[10,100]",
+      markersBefore: [],
+      cursorOffset: 42,
     });
     expect(host.errors).toEqual([]);
   });
@@ -291,6 +297,12 @@ describe("gatheredRequestFields (#2491)", () => {
     expect(
       gatheredRequestFields({ ...base, destination: "selection", selectionText: "sel", markersBefore: [] }),
     ).toMatchObject({ markers_before_selection: [] });
+  });
+
+  it("a cursor run sends its markers and offset (#2669)", () => {
+    expect(
+      gatheredRequestFields({ ...base, destination: "cursor", markersBefore: ["a1"], cursorOffset: 42 }),
+    ).toEqual({ text_before: "before", text_after: "after", markers_before_selection: ["a1"], cursor_offset: 42 });
   });
 
   it("a cursor run names no selection and no markers", () => {

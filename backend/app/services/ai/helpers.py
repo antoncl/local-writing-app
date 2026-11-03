@@ -740,8 +740,12 @@ def register_helpers(
     env.globals["type_name"] = lambda value: _type_name(schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
-    env.globals["character_turns"] = (
-        lambda scene, character: _character_turns(project, schema, scene, character)
+    # #2669: `@pass_context` hands the helper the render's `cursor_offset`, so a
+    # turn inserted mid-scene reads only the body before the cursor.
+    env.globals["character_turns"] = pass_context(
+        lambda ctx, scene, character: _character_turns(
+            project, schema, scene, character, ctx.get("cursor_offset")
+        )
     )
     env.globals["roleplay_beats"] = lambda scene: _roleplay_beats(project, scene)
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
@@ -1166,6 +1170,7 @@ def _character_turns(
     schema: Any,
     scene: Any,
     character_input: Any,
+    cursor_offset: Any = None,
 ) -> str:
     """Build a per-character chat thread from the scene's body markers.
 
@@ -1183,12 +1188,15 @@ def _character_turns(
     If the last message in the thread would be assistant (scene
     ended on the focus character's own turn), a short user nudge is
     appended so the chat API has a turn to respond to.
+
+    With an int `cursor_offset` (#2669) only the body BEFORE the cursor is read:
+    a turn inserted mid-scene knows nothing of what follows its insertion point.
     """
     from app.services.ai.templates import ROLE_START
 
     focus_ref = _coerce_entry_ref(project, schema, character_input)
     focus_id = focus_ref.id if focus_ref else None
-    body = _scene_body_text(scene)
+    body = _body_before_cursor(_scene_body_text(scene), cursor_offset)
     segments = _split_body_by_character_markers(body)
 
     # First invocation: no markers anywhere, the whole body is one
@@ -1213,6 +1221,28 @@ def _character_turns(
         parts.append(_role_block("user", nudge))
 
     return "".join(parts)
+
+
+_CHARACTER_OPEN = re.compile(r"<!--\s*character:id=")
+_CHARACTER_CLOSE = re.compile(r"<!--\s*/character\s*-->")
+
+
+def _body_before_cursor(body: str, cursor_offset: Any) -> str:
+    """`body` cut at `cursor_offset` (clamped); the whole body when there is no
+    int offset. A cut inside a beat leaves its opening marker unclosed, so the
+    closing marker is appended: the partial beat still counts as that
+    character's span.
+    """
+    if not isinstance(cursor_offset, int) or isinstance(cursor_offset, bool):
+        return body
+    cut = body[: max(0, cursor_offset)]
+    opens = list(_CHARACTER_OPEN.finditer(cut))
+    if not opens:
+        return cut
+    closes = list(_CHARACTER_CLOSE.finditer(cut))
+    if closes and closes[-1].start() > opens[-1].start():
+        return cut
+    return cut + "<!-- /character -->"
 
 
 def _role_block(role: str, text: str) -> str:

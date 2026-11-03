@@ -44,6 +44,7 @@
 
 import type { Editor } from "@tiptap/core";
 import { markerIdsBefore } from "@/lib/editor-core/markersBefore";
+import { markdownOffsetAt } from "@/lib/editor-core/markdownOffset";
 import type {
   AIEntryPatch,
   EditableDocument,
@@ -118,6 +119,9 @@ export interface InlineGathered {
   /** The ids of the mutation pills before the selection, in document order, so
    *  `lore_as_of("selection")` reads lore where the selection starts (#2491). */
   markersBefore?: string[];
+  /** The cursor's offset in the scene's markdown body (cursor destination), so a
+   *  turn inserted mid-scene reads only what precedes it (#2669). */
+  cursorOffset?: number;
 }
 
 // What the editor handlers (`inline`, `inline_edits`) need from their activation
@@ -172,6 +176,7 @@ export function gatheredRequestFields(g: InlineGathered) {
     text_after: g.textAfter,
     ...(g.selectionText !== undefined ? { selection: g.selectionText } : {}),
     ...(g.markersBefore !== undefined ? { markers_before_selection: g.markersBefore } : {}),
+    ...(g.cursorOffset !== undefined ? { cursor_offset: g.cursorOffset } : {}),
   };
 }
 
@@ -191,7 +196,14 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
     const docSize = editor.state.doc.content.size;
     const textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
     const textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
-    return { destination: "cursor", from, to, textBefore, textAfter };
+    const markersBefore = markerIdsBefore(editor.state.doc, from);
+    let cursorOffset: number | undefined;
+    try {
+      cursorOffset = markdownOffsetAt(editor.state.doc, editor.state.schema, from);
+    } catch {
+      cursorOffset = undefined; // a doc shape the serializer can't walk: no cursor
+    }
+    return { destination: "cursor", from, to, textBefore, textAfter, markersBefore, cursorOffset };
   },
 
   apply(gathered, host) {

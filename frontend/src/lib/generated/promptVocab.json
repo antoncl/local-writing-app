@@ -2,6 +2,12 @@
   "_generated": "GENERATED from docs/prompts/reference.md by scripts/gen_prompt_vocab.py — do not edit by hand. Run `python scripts/gen_prompt_vocab.py` after changing the reference.",
   "symbols": [
     {
+      "name": "cursor_offset",
+      "kind": "variable",
+      "signature": "cursor_offset",
+      "summary": "Where the cursor sits in the scene's saved text (a number), or `None` outside the editor. Hand it to `entry(x, position=cursor_offset)`."
+    },
+    {
       "name": "date",
       "kind": "variable",
       "signature": "date",

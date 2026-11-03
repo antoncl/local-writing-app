@@ -70,6 +70,7 @@ Values the prompt starts with. Each is described [in detail](#values) below.
 | `inputs` | What the prompt asked you for when it ran, by name — `inputs.tone`. |
 | `selection` | The selected prose (a string), or `""` when nothing is selected. |
 | `text_before` / `text_after` | The prose before / after the cursor (strings), or `""` outside the editor. |
+| `cursor_offset` | Where the cursor sits in the scene's saved text (a number), or `None` outside the editor. Hand it to `entry(x, position=cursor_offset)`. |
 | `date` | Today's date — `date.year`, `date.month`, `date.day`. |
 
 ## Helpers
@@ -242,6 +243,13 @@ plain strings, `""` when the prompt wasn't run from the editor.
 
 - **Watch out:** `text_before` and `text_after` still carry the app's markers. Run
   them through [`prose()`](#prose) before showing them to the AI.
+
+#### cursor_offset
+
+Where the cursor sits in the scene's saved text, as a number of characters from
+its start; `None` when the prompt wasn't run at a cursor. Pair it with
+`lore_as_of("selection")` and `entry(x, position=cursor_offset)` to read your
+story as it stands at the cursor.
 
 #### date
 

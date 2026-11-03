@@ -566,6 +566,9 @@ class PreviewRequest:
     # `lore_as_of("selection")` resolves the scene's lore at the last one saved.
     # None = the run named no selection (resolves as the scene opened).
     markers_before_selection: list[str] | None = None
+    # #2669: the cursor's offset in the scene's saved markdown body, handed to
+    # the template as `cursor_offset`. None = no cursor (the whole scene).
+    cursor_offset: int | None = None
 
 
 def build_preview(
@@ -664,6 +667,7 @@ def build_preview(
         "text_before": text_before,
         "text_after": text_after,
         "selection": selection,
+        "cursor_offset": request.cursor_offset,
         "date": _DateProxy(_date_cls.today()),
     }
 

@@ -390,6 +390,9 @@ export type AIGenerateRequest = {
   // document order, so `lore_as_of("selection")` reads the lore as it stands
   // where the selection starts. Omitted = no selection; [] = nothing precedes it.
   markers_before_selection?: string[];
+  // The cursor's offset in the scene's saved markdown (#2669): a turn inserted
+  // mid-scene reads only what precedes it. Omitted = no cursor.
+  cursor_offset?: number;
   commit?: boolean;
   // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
   // overrides target_scene_id for effective-state resolution.

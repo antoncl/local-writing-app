@@ -42,19 +42,19 @@ Every character sees the whole Dynamics block on every invocation — mirror wha
 4. The AI proposes Bob's next beat as a tracked suggestion (what a beat is: see below). **Accept** wraps it in a `data-character` mark and a coloured underline; **Retry** regenerates; **Reject** removes it.
 5. Write narration between beats. Type `/roleplay Alice` for the next turn.
 
-### What a turn is
-
-A turn is **one beat of the played character**: their reaction to the last thing that happened, meaning what they notice, what they feel and what they do or say about it. Writers call this a motivation-reaction unit (MRU). If you don't write in MRUs, think of it as one paragraph.
-
-- **Only that character.** Bob's turn never makes Alice act or speak, even when Alice has no lore entry of her own. When someone else would respond, the beat stops, and the response is yours to write or that character's own `/roleplay` turn.
-- **It continues from the last line.** The beat picks up where the scene stands. It doesn't retell what you already wrote or run ahead to finish the scene.
-
 Slash conveniences:
 - `/roleplay` (no name) → the inputs dialog, to pick the character.
 - `/rol` + Tab → expands to `/roleplay ` so you can keep typing.
 - `/roleplay Annie Oakley` → an unquoted multi-word name resolves fine (the character slot absorbs the trailing words).
 - `/roleplay "Honor Harrington"` → quotes also work, and are handy to disambiguate.
 - `/roleplay Nobody` (unresolved) → the dialog opens with the field cleared and a red error naming the failed token.
+
+## What a turn is
+
+A turn is **one beat of the played character**: their reaction to the last thing that happened, meaning what they notice, what they feel and what they do or say about it. Writers call this a motivation-reaction unit (MRU). If you don't write in MRUs, think of it as one paragraph.
+
+- **Only that character.** Bob's turn never makes Alice act or speak, even when Alice has no lore entry of her own. When someone else would respond, the beat stops, and the response is yours to write or that character's own `/roleplay` turn.
+- **It continues from the last line.** The beat picks up where the scene stands. It doesn't retell what you already wrote or run ahead to finish the scene.
 
 ## How marks behave in the editor
 

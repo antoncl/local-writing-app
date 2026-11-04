@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { reactive } from "@/lib/test/reactive.svelte";
 
@@ -18,7 +18,12 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/lib/stores/projectSession.svelte", () => ({
+  projectSession: { saveBeforeUpdate: vi.fn(), reloadAfterUpdate: vi.fn() },
+}));
+
 import type { Mock } from "vitest";
+import { projectSession } from "@/lib/stores/projectSession.svelte";
 import type { MachineSettingsDraft, MachineSettingsView, OllamaHostHealth, UpdateCheck } from "@/lib/types";
 import type { AIHealthResponse } from "@/lib/aiTypes";
 import { api } from "@/lib/api";
@@ -298,23 +303,80 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     expect(link.href).toContain("v9.9.10");
   });
 
-  it("offers 'Install and restart' when the build can apply in-app (#2083)", async () => {
-    (api.checkForUpdate as Mock).mockResolvedValue({
-      ...UP_TO_DATE,
-      update_available: true,
-      latest: "v9.9.10",
-      latest_url: "https://example.test/releases/v9.9.10",
-      can_apply: true,
+  describe("Install and restart (#2083, #2677)", () => {
+    const STATUS = (state: string) => ({ state, progress: 1, detail: null });
+
+    async function startInstall(): Promise<void> {
+      (api.checkForUpdate as Mock).mockResolvedValue({
+        ...UP_TO_DATE,
+        update_available: true,
+        latest: "v9.9.10",
+        latest_url: "https://example.test/releases/v9.9.10",
+        can_apply: true,
+      });
+      mount("off");
+      await openUpdatesTab();
+      await fireEvent.click(checkBtn());
+      await fireEvent.click(await screen.findByRole("button", { name: /Install and restart/ }));
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      (api.applyUpdate as Mock).mockReset().mockResolvedValue(STATUS("downloading"));
+      (api.updateApplyStatus as Mock).mockReset();
+      (projectSession.saveBeforeUpdate as Mock).mockReset().mockResolvedValue(true);
+      (projectSession.reloadAfterUpdate as Mock).mockReset().mockResolvedValue(undefined);
     });
-    (api.applyUpdate as Mock).mockResolvedValue({ state: "downloading", progress: 0, detail: null });
-    // End the poll immediately so no real 1s timer lingers past the test.
-    (api.updateApplyStatus as Mock).mockResolvedValue({ state: "idle", progress: 1, detail: null });
-    mount("off");
-    await openUpdatesTab();
-    await fireEvent.click(checkBtn());
-    const installBtn = await screen.findByRole("button", { name: /Install and restart/ });
-    await fireEvent.click(installBtn);
-    expect(api.applyUpdate as Mock).toHaveBeenCalled();
+    afterEach(() => vi.useRealTimers());
+
+    it("saves first, and doesn't start when that fails", async () => {
+      (projectSession.saveBeforeUpdate as Mock).mockResolvedValue(false);
+      await startInstall();
+      expect(await screen.findByText(/update didn't start/)).toBeInTheDocument();
+      expect(api.applyUpdate as Mock).not.toHaveBeenCalled();
+    });
+
+    it("waits through the server going away, then reloads when the new one answers", async () => {
+      (api.updateApplyStatus as Mock)
+        .mockResolvedValueOnce(STATUS("applying"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValue(STATUS("idle"));
+      await startInstall();
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(screen.getByText(/this window will reload shortly/)).toBeInTheDocument();
+      expect(projectSession.reloadAfterUpdate as Mock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(projectSession.reloadAfterUpdate as Mock).toHaveBeenCalledTimes(1);
+    });
+
+    it("doesn't reload for a blip: the old server still reports its state", async () => {
+      (api.updateApplyStatus as Mock)
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValue(STATUS("downloading"));
+      await startInstall();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(projectSession.reloadAfterUpdate as Mock).not.toHaveBeenCalled();
+      expect(screen.getByText(/Downloading/)).toBeInTheDocument();
+    });
+
+    it("reports a failed update and doesn't reload", async () => {
+      (api.updateApplyStatus as Mock).mockResolvedValue({ state: "error", progress: 0, detail: "Bad checksum" });
+      await startInstall();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(screen.getByText("Bad checksum")).toBeInTheDocument();
+      expect(projectSession.reloadAfterUpdate as Mock).not.toHaveBeenCalled();
+    });
+
+    it("says so when the app never comes back", async () => {
+      (api.updateApplyStatus as Mock).mockRejectedValue(new TypeError("Failed to fetch"));
+      await startInstall();
+      await vi.advanceTimersByTimeAsync(301_000);
+      expect(screen.getByText(/hasn't restarted yet/)).toBeInTheDocument();
+      expect(projectSession.reloadAfterUpdate as Mock).not.toHaveBeenCalled();
+    });
   });
 
   it("shows only the release link (no install button) when the build can't apply", async () => {

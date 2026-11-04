@@ -196,6 +196,45 @@ describe("recoverFromOutdatedProject (#2675)", () => {
     expect(pane()?.dirty).toBe(true);
   });
 
+  it("after an in-app update, saves what is dirty before reloading (#2677)", async () => {
+    seedDirtyPane();
+    const save = vi.spyOn(api, "saveLoreEntry").mockResolvedValue({ ...LORE, body: `${OLD_BODY}\n\nThe edit.`, revision: "r2" });
+    editorPanes.run = async (action) => {
+      await action();
+      return true;
+    };
+
+    await projectSession.reloadAfterUpdate();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.invocationCallOrder[0]).toBeLessThan(reloadPage.mock.invocationCallOrder[0]);
+    expect(pane()?.dirty).toBe(false);
+  });
+
+  it("does not reload after an update over a draft that could not be saved (#2677)", async () => {
+    vi.useFakeTimers();
+    seedDirtyPane();
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("invalid", 422, null));
+    editorPanes.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const reload = projectSession.reloadAfterUpdate();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(reloadPage).not.toHaveBeenCalled();
+    expect(pane()?.draftMarkdown).toContain("The edit.");
+
+    editorPanes.panes = editorPanes.panes.map((candidate) => ({ ...candidate, dirty: false }));
+    await vi.advanceTimersByTimeAsync(1000);
+    await reload;
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
   it("does not offer to force a levels change the backend refused as outdated", async () => {
     vi.spyOn(api, "updateProjectSettings").mockRejectedValue(REFUSED);
     expect(await projectSession.setLevels("manuscript", [])).toEqual({ status: "failed" });

@@ -22,6 +22,7 @@
   import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
   import MachineAssistantsSection from "@/components/widgets/MachineAssistantsSection.svelte";
   import ProofreadingSection from "@/components/widgets/ProofreadingSection.svelte";
+  import { projectSession } from "@/lib/stores/projectSession.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 
   // Live-preview the display prefs as the user edits — the master text scaler is
@@ -149,8 +150,11 @@
   });
 
   // In-app install (ADR-0072 S6, #2083) — only offered when the check reports
-  // `can_apply`. Start the download+swap, then poll status; when the server
-  // stops to be replaced the poll fails, which is the expected "restarting" end.
+  // `can_apply`. Save, start the download+swap, then poll status. When the server
+  // stops to be replaced the poll fails, which is expected, and it keeps polling:
+  // only a fresh process reports `idle`, since starting moves the state off it, so
+  // that is the new server, and this tab reloads onto its bundle (#2677).
+  const MAX_FAILED_UPDATE_POLLS = 300;
   let updateApplying = $state(false);
   let applyStatus = $state<UpdateApplyStatus | null>(null);
   let applyError = $state<string | null>(null);
@@ -160,31 +164,44 @@
     applyError = null;
     applyStatus = null;
     try {
+      if (!(await projectSession.saveBeforeUpdate())) {
+        applyError = "Unsaved changes could not be saved, so the update didn't start.";
+        return;
+      }
       const started = await api.applyUpdate();
       applyStatus = started;
       if (started.state === "unsupported") {
         applyError = started.detail ?? "In-app install isn't available here.";
         return;
       }
+      let failedPolls = 0;
       while (true) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         let status: UpdateApplyStatus;
         try {
           status = await api.updateApplyStatus();
         } catch {
-          // The server going away mid-apply is the expected end: the installer
-          // is replacing it and will relaunch. Show the restarting state.
+          // The server going away mid-apply is expected: the installer is replacing
+          // it and will relaunch. Show the restarting state and wait for it.
           applyStatus = { state: "applying", progress: 1, detail: null };
-          break;
+          failedPolls += 1;
+          if (failedPolls >= MAX_FAILED_UPDATE_POLLS) {
+            applyError = "The app hasn't restarted yet. Reload this window once it has.";
+            return;
+          }
+          continue;
+        }
+        failedPolls = 0;
+        if (status.state === "idle") {
+          await projectSession.reloadAfterUpdate();
+          return;
         }
         applyStatus = status;
         if (status.state === "error") {
           applyError = status.detail ?? "The update failed.";
-          break;
+          return;
         }
-        if (status.state === "idle") break;
-        // downloading / verifying / applying: keep polling (applying ends when
-        // the poll above starts failing as the server stops).
+        // downloading / verifying / applying: keep polling.
       }
     } catch {
       applyError = "Couldn't start the update.";

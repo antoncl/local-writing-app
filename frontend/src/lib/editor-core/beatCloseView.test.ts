@@ -134,9 +134,25 @@ describe("where the cursor goes (#2673)", () => {
 
   it("revealing every beat leaves the cursor where it is", async () => {
     const editor = await mountScene(BEAT);
-    reveal(editor);
+    editor.view.dispatch(editor.state.tr.setMeta(INTERIORITY_META.revealAll, true));
+    flushSync();
     await innerEditor(editor, "Steady.");
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // TipTap moves focus on an animation frame: wait past one.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).not.toBe(innerDom(editor));
+  });
+
+  it("an eye click that opens nothing doesn't make a later reveal take the cursor", async () => {
+    const editor = await mountScene("Narration.<!-- /character:id=lore_1;internal=Lost. -->");
+    handle(editor).click(); // a broken end marker: nothing opens
+    flushSync();
+    expect(innerDom(editor)).toBeNull();
+    // The author adds its partner, then reveals every beat.
+    editor.commands.insertContentAt(1, { type: "characterOpen", attrs: { characterId: "lore_1" } });
+    editor.view.dispatch(editor.state.tr.setMeta(INTERIORITY_META.revealAll, true));
+    flushSync();
+    await innerEditor(editor, "Lost.");
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(document.activeElement).not.toBe(innerDom(editor));
   });
 
@@ -149,7 +165,7 @@ describe("where the cursor goes (#2673)", () => {
     handle(editor).click();
     flushSync();
     expect(innerDom(editor)).toBeNull();
-    expect(document.activeElement).toBe(editor.view.dom);
+    await vi.waitFor(() => expect(document.activeElement).toBe(editor.view.dom));
   });
 });
 

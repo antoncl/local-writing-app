@@ -57,8 +57,10 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
     if (pos == null) return;
     // This eye opens this one box to type in it, so the cursor goes there (#2673).
     // Reveal-all and split open several, and leave the cursor where it is.
+    // The dispatch is synchronous, so the flag can't outlive this click.
     focusWhenOpened = !block;
     view.dispatch(view.state.tr.setMeta(INTERIORITY_META.toggleOne, pos));
+    focusWhenOpened = false;
   });
   dom.appendChild(handle);
 
@@ -100,18 +102,22 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
       });
       editorProps.proofreadNodeId = options.proofreadNodeId();
       editorProps.focusOnLoad = focusWhenOpened;
-      focusWhenOpened = false;
       mounted = mount(MetadataLongTextEditor, { target: block, props: editorProps });
       dom.appendChild(block);
     } else if (!open && block) {
       // Every keystroke already reached the atom, so closing loses nothing.
-      // The cursor goes back to the prose rather than to nowhere.
+      // The cursor goes back to the prose rather than to nowhere, once this view
+      // update has finished: this runs inside it, and focusing writes the selection.
       const hadFocus = block.contains(document.activeElement);
       if (mounted) void unmount(mounted);
       mounted = null;
       block.remove();
       block = null;
-      if (hadFocus) view.focus();
+      if (hadFocus) {
+        queueMicrotask(() => {
+          if (!view.isDestroyed) view.focus();
+        });
+      }
     }
   }
 

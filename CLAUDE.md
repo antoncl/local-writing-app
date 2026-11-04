@@ -73,36 +73,11 @@ concurrent work there. → `docs/development/worktrees.md`
 - **Clean up when the PR merges**: `ExitWorktree` with `remove`. Stale worktrees
   are not free — each with a `node_modules` adds ~24k files under the repo root.
 
-### Running the app from a worktree — start the servers yourself
+### Running the app from a worktree
 
-**`preview_start` by config *name* runs the PRIMARY tree's code from any
-worktree** (#360) — which is Anton's WIP and his live projects. So in a worktree,
-start the servers by hand (an approved exception to the "never use Bash for dev
-servers" guidance) and open the Browser pane on the URL:
-
-```bash
-python scripts/dev_backend.py                  # background it; publishes the port
-npm run dev --prefix frontend -- --mode claude # background it, AFTER the backend's verified line
-```
-
-Then `preview_start {url: "<Vite's Local: URL>"}` and verify with `read_page`,
-`read_network_requests`, and the console.
-
-- **Never pick either port by hand.** Both derive from this checkout's path
-  (`dev_backend.py`; `vite.config.js` in `--mode claude` without `PORT`). A
-  hand-picked backend port silently shares on Windows (#364); a hand-picked
-  frontend port collides with another session's, which opens the *other*
-  tree's UI and — storage being per origin — its last-opened project. The one
-  exception: if a derived port is already taken (a hash collision with a
-  sibling — the start fails loudly), rerun that server with `PORT=<free port>`.
-- Read the startup lines rather than assuming isolation: `dev_backend: verified
-  <path> is serving 127.0.0.1:<port>` names the checkout actually being served,
-  and Vite's `Local:` line names the frontend's port.
-- **To stop a server, kill the process *tree*, and don't trust the PID the OS
-  reports** — `taskkill /F /T /PID <reloader pid>`. → `docs/development/worktrees.md`
-- A `SessionEnd` hook now stops this worktree's own dev servers automatically
-  (#452). It never touches another tree's, so killing one by hand mid-session is
-  still yours to do.
+**In a worktree, never `preview_start` by config *name*** — it runs the PRIMARY
+tree's code, Anton's WIP and live projects (#360). **Never pick a port by hand**
+(#364). Start the servers by hand with the `run-from-worktree` skill.
 
 ## Quality gates
 
@@ -168,33 +143,18 @@ a Node kind; resist making any new thing "special enough to need its own
 subsystem" (`memory/feedback_chat_as_node_validation.md`).
 
 ### Backend layout (`backend/app/`)
-- `main.py` — app assembly only (~160 LOC): builds the FastAPI app, mounts the
-  routers and the built frontend.
-- `routers/` — the HTTP routes, one thin module per area (12: `ai`, `entries`,
-  `lore`, `project`, `scenes`, `plot`, …); they delegate to services.
-- `models/` — the Pydantic request/response models, one module per area.
 - `services/project_service.py` — `ProjectService`: project CRUD, scenes, schema,
   search, structure. Cohesive slices live in ~90 mixins under `services/project/`
   (`chats`, `lore`, `prompts`, `assistants`, `node_index`, …), composed via MRO;
   the tree walker is `services/tree_structure.py`. The import path
   `app.services.project_service.ProjectService` stays stable.
-- `services/ai/` — provider abstraction. `profiles/` holds per-provider profiles
-  (anthropic/openai/openrouter/ollama) + a `registry` and baked-in
-  capability/price data; `templates.py` (Jinja2 prompts), `context_expander.py`,
-  `sessions.py`, `tokens.py`, `preview.py`.
 - `services/migrations.py` — the migration ladder (ADR-0071). **Every
   storage-shape change ships a migration** and a `CURRENT_VERSION` bump, not a
   defensive read (`docs/development/code-standards.md` §Storage changes owe a
   migration).
 
 ### Frontend layout (`frontend/src/`)
-`App.svelte` is the root shell; every other component lives under
-`components/{chrome,dialogs,editor,panes,schema,widgets,workspace}/`, and domain
-state in `lib/stores/*.svelte.ts`. `lib/api.ts` composes the single HTTP client
-(`api`) from the per-domain modules in `lib/api/` (network primitives in
-`lib/api/core.ts`; all network I/O goes through it — gate-enforced). Core
-reusable widgets: `NodeRow`, `NodeList`, `NodeEditor` (+ body views
-`ProseBodyView`/`CodeBodyView`/`ChatBodyView`). **Read
+**Read
 `memory/decisions_ui_widget_taxonomy.md` before adding any list/row/color
 treatment**, and the NodeEditor/metadata decision memos before touching those.
 
@@ -207,8 +167,6 @@ treatment**, and the NodeEditor/metadata decision memos before touching those.
   `active` (display over `MutationSetEntry.placed`); verbs `stage`/`place`.
   **Never** call story info "Codex", and **never** soften `mutation set` to
   "change" / "staged change" / "pending change" (that is how the term drifts).
-- **No monolithic files**: split before any file passes ~1500 LOC
-  (`docs/development/code-standards.md` §No monolithic source files).
 - **No compile errors, minimal warnings**: never wave off `svelte-check` issues as
   pre-existing — fix or explicitly flag
   (`docs/development/code-standards.md` §No compile errors, minimal warnings).

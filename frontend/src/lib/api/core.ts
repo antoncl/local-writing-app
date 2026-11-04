@@ -75,9 +75,11 @@ function readStored(key: string): string | null {
 let projectScopeRoot: string | null = readStored(SCOPE_STORAGE_KEY);
 let projectSchemaVersion: string | null = readStored(SCHEMA_VERSION_STORAGE_KEY);
 
-export function setProjectScopeRoot(root: string | null, schemaVersion: number | null = null): void {
+export function setProjectScopeRoot(root: string | null, schemaVersion?: number | null): void {
   projectScopeRoot = root;
-  projectSchemaVersion = schemaVersion === null ? null : String(schemaVersion);
+  // Loose on purpose: a backend from before #2675 answers an open with no version at
+  // all, and "undefined" in the header would fail every request once it is restarted.
+  projectSchemaVersion = schemaVersion == null ? null : String(schemaVersion);
   try {
     if (root === null) sessionStorage.removeItem(SCOPE_STORAGE_KEY);
     else sessionStorage.setItem(SCOPE_STORAGE_KEY, root);

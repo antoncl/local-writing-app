@@ -72,6 +72,17 @@ describe("api wire scope (#965)", () => {
     expect(new Headers((mock.mock.calls[2][1] as RequestInit).headers).get("X-Project-Schema-Version")).toBe("17");
   });
 
+  it("sends no version when the backend's open reported none", async () => {
+    // A backend from before #2675, still running when the new bundle loaded. The
+    // literal "undefined" would fail every request after that backend restarts.
+    const mock = stubFetch({ root_path: ROOT });
+    const { api } = await import("@/lib/api");
+    await api.openProject(ROOT);
+    await api.listTagEntries();
+    expect(new Headers((mock.mock.calls[1][1] as RequestInit).headers).get("X-Project-Schema-Version")).toBeNull();
+    expect(sessionStorage.getItem("lwa.projectSchemaVersion")).toBeNull();
+  });
+
   it.each(["request", "stream"])("announces a project_outdated refusal, from a %s too", async (via) => {
     const detail = { message: "needs reopening", code: "project_outdated" };
     vi.stubGlobal(

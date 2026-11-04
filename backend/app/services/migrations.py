@@ -1199,10 +1199,15 @@ MIGRATIONS: list[MigrationStep] = [
 
 def stated_project_version(root: Path) -> int | None:
     """The manifest's version, 0 when a readable manifest states none, and None
-    when there is no manifest to read — which is not the same as an old project."""
+    when there is no manifest or it does not parse — which is not the same as an old
+    project. A manifest that exists and cannot be read raises: on the open path, a
+    transient lock must fail the open rather than run the ladder from v0."""
+    manifest_path = root / "project.yaml"
+    if not manifest_path.exists():
+        return None
     try:
-        data = load_yaml((root / "project.yaml").read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        data = load_yaml(manifest_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
         return None
     if not isinstance(data, dict):
         return None

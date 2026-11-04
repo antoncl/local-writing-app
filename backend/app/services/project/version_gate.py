@@ -37,14 +37,21 @@ _memo: dict[Path, tuple[int, int, int | None]] = {}
 def _version_on_disk(root: Path) -> int | None:
     try:
         stat = (root / MANIFEST_FILENAME).stat()
+        remembered = _memo.get(root)
+        if remembered is not None and remembered[:2] == (stat.st_mtime_ns, stat.st_size):
+            return remembered[2]
+        version = migrations.stated_project_version(root)
     except OSError:
         return None
-    remembered = _memo.get(root)
-    if remembered is not None and remembered[:2] == (stat.st_mtime_ns, stat.st_size):
-        return remembered[2]
-    version = migrations.stated_project_version(root)
     _memo[root] = (stat.st_mtime_ns, stat.st_size, version)
     return version
+
+
+def forget_version(root: Path) -> None:
+    """Drop what is remembered for `root`, once its open has stamped it. On a
+    coarse-mtime drive the stamp can land in the tick of a version read mid-migration,
+    at the same size; the memo would then refuse the project after every open."""
+    _memo.pop(root, None)
 
 
 def require_current_version(root: Path, tab_version: int | None) -> None:

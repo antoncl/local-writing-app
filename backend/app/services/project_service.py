@@ -94,6 +94,7 @@ from app.services.project.snapshot_witness import SnapshotWitnessMixin
 from app.services.project.tag_nodes import TagNodesMixin
 from app.services.project.todos import TodosMixin
 from app.services.project.tree_nodes import TreeNodesMixin
+from app.services.project.version_gate import forget_version
 from app.services.project.views import ViewsMixin
 from app.services.yaml_io import load_yaml
 
@@ -232,6 +233,7 @@ class ProjectService(
                 applied = service._run_migrations()
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
+        forget_version(root)
         return cls(WorkScope(root=root, migrations_applied=tuple(applied)))
 
     @classmethod

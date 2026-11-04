@@ -149,4 +149,55 @@ describe("recoverFromOutdatedProject (#2675)", () => {
     expect(openProject).toHaveBeenCalledTimes(1);
     expect(reloadPage).toHaveBeenCalledTimes(1);
   });
+
+  it("leaves a self-persisting pane out of the ladder, and waits for it to save itself", async () => {
+    vi.useFakeTimers();
+    editorPanes.panes = [
+      {
+        ...createEmptyEditorPane("pane_1"),
+        document: { type: "view" as const, id: "view_1" },
+        scene: { ...LORE, id: "view_1" },
+        draftMarkdown: "not the view's source of truth",
+        dirty: true,
+      },
+    ];
+    const dialog = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
+    const fetchView = vi.spyOn(api, "getView");
+
+    const recovery = projectSession.recoverFromOutdatedProject("/book");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchView).not.toHaveBeenCalled();
+    expect(dialog).not.toHaveBeenCalled();
+    expect(reloadPage).not.toHaveBeenCalled();
+
+    editorPanes.setViewSaveState("pane_1", "saved");
+    await vi.advanceTimersByTimeAsync(1000);
+    await recovery;
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not take the refusal for a change on disk when a review commits", async () => {
+    seedDirtyPane();
+    const dialog = vi.spyOn(conflictDiffService, "request").mockImplementation(() => {});
+    const fetchRemote = vi.spyOn(api, "getLoreEntry");
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(REFUSED);
+    editorPanes.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    expect(await editorPanes.flushReviewCommit(LORE.id)).toBe(false);
+    expect(fetchRemote).not.toHaveBeenCalled();
+    expect(dialog).not.toHaveBeenCalled();
+    expect(pane()?.dirty).toBe(true);
+  });
+
+  it("does not offer to force a levels change the backend refused as outdated", async () => {
+    vi.spyOn(api, "updateProjectSettings").mockRejectedValue(REFUSED);
+    expect(await projectSession.setLevels("manuscript", [])).toEqual({ status: "failed" });
+  });
 });

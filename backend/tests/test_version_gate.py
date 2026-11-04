@@ -21,6 +21,7 @@ from app.services.migrations import (
     read_project_version,
     write_project_version,
 )
+from app.services.project import version_gate
 
 
 def _old(char: str, text: str, enc: str) -> str:
@@ -179,6 +180,36 @@ def test_a_header_naming_no_project_is_not_policed(tmp_path: Path, client) -> No
     )
     detail = response.json().get("detail") if response.status_code == 409 else None
     assert not (isinstance(detail, dict) and detail.get("code") == "project_outdated")
+
+
+def test_a_locked_manifest_fails_the_open_rather_than_migrating_from_zero(book, client, monkeypatch) -> None:
+    # Windows: antivirus holding project.yaml for a moment. The ladder must not run
+    # from v0 over a current project, and a request is not refused as outdated either.
+    root, _service = book
+    real_read_text = Path.read_text
+
+    def locked(path: Path, *args, **kwargs) -> str:
+        if path.name == "project.yaml":
+            raise PermissionError("locked")
+        return real_read_text(path, *args, **kwargs)
+
+    # A changed stat, so the memo cannot answer and the file has to be read.
+    _downgrade(root, CURRENT_VERSION)
+    monkeypatch.setattr(Path, "read_text", locked)
+    with pytest.raises(PermissionError):
+        read_project_version(root)
+    assert version_gate._version_on_disk(root) is None
+
+
+def test_opening_forgets_a_version_remembered_mid_migration(book, client) -> None:
+    # A coarse-mtime drive: the stamp landed in the tick of a read made before it,
+    # at the same size, so the stat alone cannot tell the memo it is stale.
+    root, _service = book
+    stat = (root / "project.yaml").stat()
+    version_gate._memo[root] = (stat.st_mtime_ns, stat.st_size, CURRENT_VERSION - 1)
+    _assert_refused(client.get("/api/project"))
+    assert client.post("/api/project/open", json={"root_path": str(root)}).status_code == 200
+    assert client.get("/api/project").status_code == 200
 
 
 def test_an_unreadable_manifest_is_not_treated_as_an_old_project(book, client) -> None:

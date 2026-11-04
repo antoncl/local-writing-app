@@ -15,7 +15,7 @@
 // the same boundary the editorPanes controller draws for orchestration that's
 // irreducibly coupled to App's many subsystems.
 
-import { HttpError, api } from "@/lib/api";
+import { HttpError, api, isProjectOutdated } from "@/lib/api";
 import { setPalette } from "@/lib/utils/colors";
 import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 import { get } from "svelte/store";
@@ -514,7 +514,8 @@ class ProjectSession {
       try {
         updatedProject = await api.updateProjectSettings({ ...body, force_levels: force });
       } catch (error) {
-        if (!force && error instanceof HttpError && error.status === 409) {
+        // A project_outdated 409 is not the levels conflict: nothing to force (#2675).
+        if (!force && error instanceof HttpError && error.status === 409 && !isProjectOutdated(error)) {
           conflict = error.message;
           return;
         }

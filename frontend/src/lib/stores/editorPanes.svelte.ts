@@ -537,8 +537,9 @@ class EditorPanesController {
         await this.saveEditorPane(pane.id);
       } catch (error) {
         // Key on the status, not the message (the canonical 409 signal the autosave
-        // classifier uses) — robust to wording and what the api layer surfaces.
-        if (error instanceof HttpError && error.status === 409) {
+        // classifier uses) — robust to wording and what the api layer surfaces. A
+        // project_outdated 409 is no change on disk; the review simply stays open (#2675).
+        if (error instanceof HttpError && error.status === 409 && !isProjectOutdated(error)) {
           conflict = true;
           return;
         }
@@ -1323,9 +1324,14 @@ class EditorPanesController {
   /** Bring every dirty pane onto a project that was just migrated under it (#2675):
    *  each draft goes through the reconcile ladder against its re-fetched document, the
    *  same as a changed-on-disk 409, and an overlap asks the author. A pane frozen for
-   *  an AI review is skipped; its one write belongs to the review transaction (#634). */
+   *  an AI review is skipped; its one write belongs to the review transaction (#634).
+   *  So are chat and view panes: they persist themselves, and their draft fields are
+   *  not the source of truth a merge could work from. */
   async reconcileDirtyPanes(): Promise<void> {
-    const dirty = this.panes.filter((pane) => pane.dirty && !this.#reviewLocks.has(pane.id));
+    const selfPersisting = new Set(["chat", "view"]);
+    const dirty = this.panes.filter(
+      (pane) => pane.dirty && !this.#reviewLocks.has(pane.id) && !selfPersisting.has(pane.document?.type ?? ""),
+    );
     for (const pane of dirty) {
       this.#autosave.cancel(pane.id);
       await resolveAutosaveConflict(this, pane.id);

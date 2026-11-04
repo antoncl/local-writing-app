@@ -186,6 +186,7 @@
           applyStatus = { state: "applying", progress: 1, detail: null };
           failedPolls += 1;
           if (failedPolls >= MAX_FAILED_UPDATE_POLLS) {
+            applyStatus = null;
             applyError = "The app hasn't restarted yet. Reload this window once it has.";
             return;
           }

@@ -438,9 +438,11 @@ class ProjectSession {
   }
 
   // The new server is up, and this tab is still running the old bundle. A save the
-  // new server refuses as outdated starts the recovery above, which reloads too.
+  // new server refuses as outdated starts the recovery above, which reloads too. The
+  // AI call's flush, because it keeps autosave's recovery: a server still starting up
+  // answers 5xx, and the retry is what lets the wait below end.
   async reloadAfterUpdate(): Promise<void> {
-    await editorPanes.flushDirtyPanes();
+    await editorPanes.flushBeforeAICall();
     await this.#reloadOnceSaved();
   }
 

@@ -317,11 +317,14 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
       mount("off");
       await openUpdatesTab();
       await fireEvent.click(checkBtn());
-      await fireEvent.click(await screen.findByRole("button", { name: /Install and restart/ }));
+      const install = await screen.findByRole("button", { name: /Install and restart/ });
+      // Fake from here on, so only the test moves the polling clock.
+      vi.useFakeTimers();
+      await fireEvent.click(install);
+      await vi.advanceTimersByTimeAsync(0);
     }
 
     beforeEach(() => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
       (api.applyUpdate as Mock).mockReset().mockResolvedValue(STATUS("downloading"));
       (api.updateApplyStatus as Mock).mockReset();
       (projectSession.saveBeforeUpdate as Mock).mockReset().mockResolvedValue(true);
@@ -332,8 +335,15 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     it("saves first, and doesn't start when that fails", async () => {
       (projectSession.saveBeforeUpdate as Mock).mockResolvedValue(false);
       await startInstall();
-      expect(await screen.findByText(/update didn't start/)).toBeInTheDocument();
+      expect(screen.getByText(/update didn't start/)).toBeInTheDocument();
       expect(api.applyUpdate as Mock).not.toHaveBeenCalled();
+    });
+
+    it("starts the install only once the save has landed", async () => {
+      (api.updateApplyStatus as Mock).mockResolvedValue(STATUS("downloading"));
+      await startInstall();
+      const saved = (projectSession.saveBeforeUpdate as Mock).mock.invocationCallOrder[0];
+      expect(saved).toBeLessThan((api.applyUpdate as Mock).mock.invocationCallOrder[0]);
     });
 
     it("waits through the server going away, then reloads when the new one answers", async () => {
@@ -375,6 +385,7 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
       await startInstall();
       await vi.advanceTimersByTimeAsync(301_000);
       expect(screen.getByText(/hasn't restarted yet/)).toBeInTheDocument();
+      expect(screen.queryByText(/this window will reload shortly/)).not.toBeInTheDocument();
       expect(projectSession.reloadAfterUpdate as Mock).not.toHaveBeenCalled();
     });
   });

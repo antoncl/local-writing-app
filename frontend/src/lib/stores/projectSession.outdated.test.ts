@@ -211,6 +211,25 @@ describe("recoverFromOutdatedProject (#2675)", () => {
     expect(pane()?.dirty).toBe(false);
   });
 
+  it("retries a save the restarting server answers with a 503, then reloads (#2677)", async () => {
+    vi.useFakeTimers();
+    seedDirtyPane();
+    const save = vi
+      .spyOn(api, "saveLoreEntry")
+      .mockRejectedValueOnce(new HttpError("starting up", 503, null))
+      .mockResolvedValue({ ...LORE, body: `${OLD_BODY}\n\nThe edit.`, revision: "r2" });
+
+    const reload = projectSession.reloadAfterUpdate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reloadPage).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await reload;
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(pane()?.dirty).toBe(false);
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
   it("does not reload after an update over a draft that could not be saved (#2677)", async () => {
     vi.useFakeTimers();
     seedDirtyPane();

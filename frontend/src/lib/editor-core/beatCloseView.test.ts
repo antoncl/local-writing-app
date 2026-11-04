@@ -103,6 +103,56 @@ describe("the close marker's node view", () => {
   });
 });
 
+describe("where the cursor goes (#2673)", () => {
+  const handle = (editor: Editor) => closeDom(editor).querySelector<HTMLButtonElement>(".interiority-handle")!;
+  const innerDom = (editor: Editor) => closeDom(editor).querySelector<HTMLElement>(".interiority-block .ProseMirror");
+
+  it("the eye opens the box with the cursor at the end of its text, so Enter stays in the box", async () => {
+    const editor = await mountScene(BEAT);
+    const before = editor.state.doc;
+    handle(editor).click();
+    flushSync();
+    const inner = await innerEditor(editor, "Steady.");
+    await vi.waitFor(() => expect(document.activeElement).toBe(innerDom(editor)));
+    expect(inner.state.selection.from).toBe("Steady.".length + 1);
+    inner.commands.enter();
+    expect(inner.state.doc.childCount).toBe(2);
+    expect(editor.state.doc.eq(before)).toBe(true);
+  });
+
+  it("a click on the box's padding moves the cursor into the box", async () => {
+    const editor = await mountScene(BEAT);
+    reveal(editor);
+    await innerEditor(editor, "Steady.");
+    expect(document.activeElement).not.toBe(innerDom(editor));
+    const block = closeDom(editor).querySelector<HTMLElement>(".interiority-block")!;
+    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    block.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(document.activeElement).toBe(innerDom(editor)));
+  });
+
+  it("revealing every beat leaves the cursor where it is", async () => {
+    const editor = await mountScene(BEAT);
+    reveal(editor);
+    await innerEditor(editor, "Steady.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.activeElement).not.toBe(innerDom(editor));
+  });
+
+  it("closing the box from inside it returns the cursor to the prose", async () => {
+    const editor = await mountScene(BEAT);
+    handle(editor).click();
+    flushSync();
+    await innerEditor(editor, "Steady.");
+    await vi.waitFor(() => expect(document.activeElement).toBe(innerDom(editor)));
+    handle(editor).click();
+    flushSync();
+    expect(innerDom(editor)).toBeNull();
+    expect(document.activeElement).toBe(editor.view.dom);
+  });
+});
+
 describe("a read-only body", () => {
   it("opens the interiority read-only, and an edit there never reaches the marker", async () => {
     const editor = await mountScene(BEAT);

@@ -44,6 +44,9 @@
     // "Ignore here" is saved against it. Null = not proofread (e.g. the
     // create-project wizard, where no node exists yet).
     proofreadNodeId = null,
+    // Put the cursor at the end of the text once the first value has loaded:
+    // the host opened this editor in order to type in it (#2673).
+    focusOnLoad = false,
   }: {
     value?: string;
     ariaLabel?: string;
@@ -52,6 +55,7 @@
     neighbours?: (() => SectionNeighbours) | null;
     onEditorReady?: (editor: Editor, phase: "ready" | "destroy") => void;
     proofreadNodeId?: string | null;
+    focusOnLoad?: boolean;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
@@ -214,7 +218,9 @@
     const mounted = editor;
     onEditorReady(mounted, "ready");
 
-    void loadValue(value);
+    void loadValue(value).then(() => {
+      if (focusOnLoad && !mounted.isDestroyed) mounted.commands.focus("end");
+    });
     return () => {
       onEditorReady(mounted, "destroy");
       mounted.destroy();

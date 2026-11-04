@@ -55,13 +55,19 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
     e.preventDefault();
     const pos = getPos();
     if (pos == null) return;
+    // This eye opens this one box to type in it, so the cursor goes there (#2673).
+    // Reveal-all and split open several, and leave the cursor where it is.
+    // The dispatch is synchronous, so the flag can't outlive this click.
+    focusWhenOpened = !block;
     view.dispatch(view.state.tr.setMeta(INTERIORITY_META.toggleOne, pos));
+    focusWhenOpened = false;
   });
   dom.appendChild(handle);
 
   const editorProps = $state({
     value: String(props.node.attrs.internal ?? ""),
     ariaLabel: "Interiority for this beat",
+    focusOnLoad: false,
     proofreadNodeId: options.proofreadNodeId(),
     // A frozen or scrubbed body is read-only, and so is its interiority.
     onEditorReady: (editor: Editor, phase: "ready" | "destroy") => {
@@ -80,6 +86,7 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
   });
 
   let block: HTMLElement | null = null;
+  let focusWhenOpened = false;
   let inner: Editor | null = null;
   let mounted: Record<string, unknown> | null = null;
 
@@ -87,15 +94,30 @@ export function createBeatCloseView(props: ViewProps, options: BeatCloseViewOpti
     if (open && !block) {
       block = document.createElement("span");
       block.className = "interiority-block";
+      // A click on the box's padding means the box, not the prose behind it.
+      block.addEventListener("mousedown", (e) => {
+        if (e.target !== block) return;
+        e.preventDefault();
+        inner?.commands.focus("end");
+      });
       editorProps.proofreadNodeId = options.proofreadNodeId();
+      editorProps.focusOnLoad = focusWhenOpened;
       mounted = mount(MetadataLongTextEditor, { target: block, props: editorProps });
       dom.appendChild(block);
     } else if (!open && block) {
       // Every keystroke already reached the atom, so closing loses nothing.
+      // The cursor goes back to the prose rather than to nowhere, once this view
+      // update has finished: this runs inside it, and focusing writes the selection.
+      const hadFocus = block.contains(document.activeElement);
       if (mounted) void unmount(mounted);
       mounted = null;
       block.remove();
       block = null;
+      if (hadFocus) {
+        queueMicrotask(() => {
+          if (!view.isDestroyed) view.focus();
+        });
+      }
     }
   }
 

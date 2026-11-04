@@ -37,7 +37,8 @@ class WorkScope:
     it is what `migrate_project` did when this scope was resolved, and
     `validate_project` reports it. A scope resolved straight from the wire (a
     request that never went through `/open`) carries none, which is correct —
-    nothing migrated on that path.
+    nothing migrated on that path, and the resolver refuses such a request when
+    the project still needs it (#2675).
     """
 
     root: Path

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { api } from "@/lib/api";
+  import { api, isProjectOutdated, PROJECT_OUTDATED_EVENT } from "@/lib/api";
   import { installGlobalErrorLogging, reportClientError } from "@/lib/errorLog";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
@@ -321,6 +321,11 @@
     const onReturn = () => {
       if (appState.name === "projectOpen") void projectSession.refreshFromDisk();
     };
+    // Before the first open there is nothing to recover: rehydrate's open is next.
+    const onProjectOutdated = () => {
+      if (appState.name === "projectOpen") void projectSession.recoverFromOutdatedProject(appState.project.root_path);
+    };
+    window.addEventListener(PROJECT_OUTDATED_EVENT, onProjectOutdated);
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") void flushDirtyPanesOnHide(editorPanes);
       else onReturn();
@@ -331,6 +336,7 @@
     return () => {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("focus", onReturn);
+      window.removeEventListener(PROJECT_OUTDATED_EVENT, onProjectOutdated);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       editorPanes.dispose();
       cleanupThemeWiring?.();
@@ -510,6 +516,8 @@
       await action();
       return true;
     } catch (caught) {
+      // Handled, not a fault: the status line reports the recovery under way (#2675).
+      if (isProjectOutdated(caught)) return false;
       error = caught instanceof Error ? caught.message : String(caught);
       // The on-screen string is erased by the next action; also record it durably
       // so a failure the author didn't read in time isn't lost forever (#386).

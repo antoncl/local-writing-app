@@ -290,3 +290,21 @@ reader (branch behavior on an ancestor's stamped `schema_version` instead of mig
 for the same reason every other content-shaped reader in this ADR stays version-blind: it is the
 `RootMigration`/`ChainMigration`/`DocumentMigration` framework's whole point that a live reader never has
 to know a format's history.
+
+## Amendment 2 — a request that predates the migration is refused (2026-11-04, #2675)
+
+§4 says migration runs "on open, before it serves any request", but that held only for the tab doing the
+opening. A tab that outlived a backend upgrade kept reading and writing with no open in between: on
+2026-11-04 a project stayed on v16 under the v17 code until the page was reloaded, and the new editor
+reads an old-format beat as plain text, so its next save would have dropped the attribution.
+
+**The scope resolver now refuses such a request with `409 {"code": "project_outdated"}`, reads included**
+(`services/project/version_gate.py`, called from `runtime.resolve_current_project`), when the project's
+`schema_version` is below `CURRENT_VERSION` or the tab opened it under a version other than
+`CURRENT_VERSION`. The second check exists for the packaged update: its relaunch opens a new tab whose
+open migrates the project, so the disk is already current while the old tab still runs the old bundle.
+
+The client's answer is to re-open the project, run each unsaved draft through the reconcile ladder
+(ADR-0077) against the migrated document, and reload once no pane is dirty. Migration stays on the open
+path. Running it from the resolver was rejected: the tab would never learn to reload, and a plain GET
+could start a backup and a rewrite of the whole chain.

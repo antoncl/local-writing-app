@@ -1197,20 +1197,28 @@ MIGRATIONS: list[MigrationStep] = [
 ]
 
 
-def read_project_version(root: Path) -> int:
+def stated_project_version(root: Path) -> int | None:
+    """The manifest's version, 0 when a readable manifest states none, and None
+    when there is no manifest or it does not parse — which is not the same as an old
+    project. A manifest that exists and cannot be read raises: on the open path, a
+    transient lock must fail the open rather than run the ladder from v0."""
     manifest_path = root / "project.yaml"
     if not manifest_path.exists():
-        return 0
+        return None
     try:
         data = load_yaml(manifest_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
-        return 0
+        return None
     if not isinstance(data, dict):
-        return 0
+        return None
     value = data.get("schema_version")
     if isinstance(value, int) and value >= 0:
         return value
     return 0
+
+
+def read_project_version(root: Path) -> int:
+    return stated_project_version(root) or 0
 
 
 def write_project_version(root: Path, version: int) -> None:
@@ -1219,7 +1227,9 @@ def write_project_version(root: Path, version: int) -> None:
     if not isinstance(data, dict):
         raise RuntimeError("project.yaml is not a YAML mapping; refusing to stamp schema_version.")
     data["schema_version"] = version
-    manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    # Atomic: the scope resolver reads this file concurrently (#2675), and a torn
+    # read would refuse a request or wave one through.
+    atomic_write_text(manifest_path, yaml.safe_dump(data, sort_keys=False))
 
 
 def pending_migrations(current: int) -> list[MigrationStep]:

@@ -347,6 +347,7 @@ class ProjectLifecycleMixin:
         return ProjectInfo(
             title=self._project_title(root) or root.name,
             root_path=str(root),
+            schema_version=PROJECT_SCHEMA_VERSION,
             # The machine root (#429), reported as `None` when none is set
             # rather than falling back to `root.parent`. That fallback was a
             # lie the moment the bound stopped being per project: the walk

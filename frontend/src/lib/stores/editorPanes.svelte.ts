@@ -23,7 +23,7 @@
 // store — a controller with traceable methods (see docs/frontend-architecture.md).
 
 import { get } from "svelte/store";
-import { api, HttpError } from "@/lib/api";
+import { api, HttpError, isProjectOutdated } from "@/lib/api";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type EditorPaneState,
@@ -81,6 +81,7 @@ import { itemIdentityKey } from "@/lib/editor-core/listItemIdentity";
 import {
   refreshAfterSave,
   autosaveOnce,
+  resolveAutosaveConflict,
   offerCloseConflictRecovery,
   offerCloseSaveFailureRecovery,
   offerAutosaveConflictRecovery,
@@ -468,7 +469,9 @@ class EditorPanesController {
       return;
     }
     if (ok) this.tearDown(id);
-    else if (failure !== null) offerCloseSaveFailureRecovery(this, id, failure);
+    // Not a failure the pane can only be discarded over: the tab's recovery is about to
+    // save this draft (#2675), so the pane just stays open with it.
+    else if (failure !== null && !isProjectOutdated(failure)) offerCloseSaveFailureRecovery(this, id, failure);
   }
 
   // ---- AI-review freeze (#634 / ADR-0046 slice 3b) --------------------------
@@ -534,8 +537,9 @@ class EditorPanesController {
         await this.saveEditorPane(pane.id);
       } catch (error) {
         // Key on the status, not the message (the canonical 409 signal the autosave
-        // classifier uses) — robust to wording and what the api layer surfaces.
-        if (error instanceof HttpError && error.status === 409) {
+        // classifier uses) — robust to wording and what the api layer surfaces. A
+        // project_outdated 409 is no change on disk; the review simply stays open (#2675).
+        if (error instanceof HttpError && error.status === 409 && !isProjectOutdated(error)) {
           conflict = true;
           return;
         }
@@ -1314,6 +1318,23 @@ class EditorPanesController {
     for (const pane of dirty) {
       this.#autosave.cancel(pane.id);
       await autosaveOnce(this, pane.id);
+    }
+  }
+
+  /** Bring every dirty pane onto a project that was just migrated under it (#2675):
+   *  each draft goes through the reconcile ladder against its re-fetched document, the
+   *  same as a changed-on-disk 409, and an overlap asks the author. A pane frozen for
+   *  an AI review is skipped; its one write belongs to the review transaction (#634).
+   *  So are chat and view panes: they persist themselves, and their draft fields are
+   *  not the source of truth a merge could work from. */
+  async reconcileDirtyPanes(): Promise<void> {
+    const selfPersisting = new Set(["chat", "view"]);
+    const dirty = this.panes.filter(
+      (pane) => pane.dirty && !this.#reviewLocks.has(pane.id) && !selfPersisting.has(pane.document?.type ?? ""),
+    );
+    for (const pane of dirty) {
+      this.#autosave.cancel(pane.id);
+      await resolveAutosaveConflict(this, pane.id);
     }
   }
 

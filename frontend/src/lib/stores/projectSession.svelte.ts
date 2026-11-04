@@ -15,7 +15,7 @@
 // the same boundary the editorPanes controller draws for orchestration that's
 // irreducibly coupled to App's many subsystems.
 
-import { HttpError, api } from "@/lib/api";
+import { HttpError, api, isProjectOutdated } from "@/lib/api";
 import { setPalette } from "@/lib/utils/colors";
 import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 import { get } from "svelte/store";
@@ -89,6 +89,7 @@ class ProjectSession {
   // stays in App (the aiSettings controller injects the same hook), and a
   // declaration change returns a fresh enumeration the breadcrumb reads.
   onProjectUpdated: (project: ProjectInfo) => void = () => {};
+  reloadPage: () => void = () => window.location.reload();
 
   // ---- Last-opened-project persistence ----
   rememberLastProject(path: string): void {
@@ -395,6 +396,35 @@ class ProjectSession {
     });
   }
 
+  // The backend refused a request because the project or this tab predates the
+  // running code (#2675). Re-open, which migrates; bring the unsaved drafts across
+  // through the reconcile ladder; then reload, so this tab runs the new bundle. The
+  // drafts come first because a reload would drop them, and a refused save left them
+  // only in the panes. A failed open keeps everything in place and the next refusal
+  // tries again. Every refused request announces itself, hence the guard.
+  #recoveringOutdated = false;
+
+  async recoverFromOutdatedProject(path: string): Promise<void> {
+    if (this.#recoveringOutdated) return;
+    this.#recoveringOutdated = true;
+    try {
+      this.setStatus("The app was updated. Upgrading this project…");
+      const opened = await this.run(async () => {
+        await api.openProject(path);
+      });
+      if (!opened) return;
+      await editorPanes.reconcileDirtyPanes();
+      // An overlap is waiting on the author's choice in the diff dialog.
+      while (editorPanes.panes.some((pane) => pane.dirty)) {
+        this.setStatus("The app was updated. It will reload once your changes are saved.");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      this.reloadPage();
+    } finally {
+      this.#recoveringOutdated = false;
+    }
+  }
+
   // Catch up with files added, edited or deleted outside the app (#2170). The
   // backend's index does no disk work while warm, so a lore file dropped in from
   // Explorer stayed invisible until a reopen (ADR-0040's accepted exposure). App
@@ -484,7 +514,8 @@ class ProjectSession {
       try {
         updatedProject = await api.updateProjectSettings({ ...body, force_levels: force });
       } catch (error) {
-        if (!force && error instanceof HttpError && error.status === 409) {
+        // A project_outdated 409 is not the levels conflict: nothing to force (#2675).
+        if (!force && error instanceof HttpError && error.status === 409 && !isProjectOutdated(error)) {
           conflict = error.message;
           return;
         }

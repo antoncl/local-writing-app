@@ -35,7 +35,7 @@ export const projectApi = {
       body: JSON.stringify({ root_path: rootPath, title, inherits }),
     });
     // The wire scope for every subsequent request is this project's root (#413).
-    setProjectScopeRoot(info.root_path);
+    setProjectScopeRoot(info.root_path, info.schema_version);
     return info;
   },
   // The inheritable ancestors of a *prospective* project path — the wizard's
@@ -71,7 +71,7 @@ export const projectApi = {
       body: JSON.stringify({ root_path: rootPath }),
     });
     // Switching projects is just another open; overwrite the wire scope (#413).
-    setProjectScopeRoot(info.root_path);
+    setProjectScopeRoot(info.root_path, info.schema_version);
     return info;
   },
   // Ship a caught client-side error to the backend so it lands in the open

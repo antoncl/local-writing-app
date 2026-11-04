@@ -16,7 +16,7 @@ import { refreshTagNodes } from "@/lib/stores/tagNodes";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
-import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
+import { HttpError, isProjectOutdated, setKeepaliveSaves, api } from "@/lib/api";
 import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import {
@@ -237,7 +237,11 @@ export async function autosaveOnce(host: SaveFailureHost, id: string): Promise<v
 //   - 5xx / no status -> retryable transport: re-arm a bounded retry. A raw
 //     network failure rejects as a TypeError with no status, so "no status" is
 //     the transport bucket.
+//   - 409 project_outdated -> nothing here: the file is untouched, the draft stays in
+//     the pane, and the tab's recovery reconciles every dirty pane once the project
+//     has been re-opened (#2675). It is not a change on disk, so no dialog.
 export function handleSaveFailure(host: SaveFailureHost, id: string, error: unknown): void {
+  if (isProjectOutdated(error)) return;
   const status = error instanceof HttpError ? error.status : undefined;
   if (status === 409) {
     void resolveAutosaveConflict(host, id);
@@ -301,7 +305,7 @@ export function offerCloseSaveFailureRecovery(host: SaveFailureHost, id: string,
 // A 409 changed-on-disk, resolved through the reconcile ladder before any dialog.
 // Fire-and-forget from handleSaveFailure: the prompt is async user interaction
 // anyway, and every rung degrades to the dialog on failure.
-async function resolveAutosaveConflict(host: SaveFailureHost, id: string): Promise<void> {
+export async function resolveAutosaveConflict(host: SaveFailureHost, id: string): Promise<void> {
   const { outcome, remote } = await reconcileOn409(host, id);
   if (outcome === "conflict") offerAutosaveConflictRecovery(host, id, remote);
 }

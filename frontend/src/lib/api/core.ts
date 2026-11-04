@@ -57,23 +57,34 @@ export function openSessionPresenceSocket(): WebSocket {
 // opens a project, and since the app never returns to a no-project state after the
 // first open (a switch just overwrites), the stored value always names the tab's
 // currently-open project.
+//
+// The schema version travels with it: the version this tab's open ran under. A
+// backend upgraded since then refuses the request even when another tab has already
+// migrated the project (#2675).
 const SCOPE_STORAGE_KEY = "lwa.projectScopeRoot";
+const SCHEMA_VERSION_STORAGE_KEY = "lwa.projectSchemaVersion";
 
-function readStoredScopeRoot(): string | null {
+function readStored(key: string): string | null {
   try {
-    return sessionStorage.getItem(SCOPE_STORAGE_KEY);
+    return sessionStorage.getItem(key);
   } catch {
     return null; // sessionStorage unavailable (some test / SSR environments)
   }
 }
 
-let projectScopeRoot: string | null = readStoredScopeRoot();
+let projectScopeRoot: string | null = readStored(SCOPE_STORAGE_KEY);
+let projectSchemaVersion: string | null = readStored(SCHEMA_VERSION_STORAGE_KEY);
 
-export function setProjectScopeRoot(root: string | null): void {
+export function setProjectScopeRoot(root: string | null, schemaVersion?: number | null): void {
   projectScopeRoot = root;
+  // Loose on purpose: a backend from before #2675 answers an open with no version at
+  // all, and "undefined" in the header would fail every request once it is restarted.
+  projectSchemaVersion = schemaVersion == null ? null : String(schemaVersion);
   try {
     if (root === null) sessionStorage.removeItem(SCOPE_STORAGE_KEY);
     else sessionStorage.setItem(SCOPE_STORAGE_KEY, root);
+    if (projectSchemaVersion === null) sessionStorage.removeItem(SCHEMA_VERSION_STORAGE_KEY);
+    else sessionStorage.setItem(SCHEMA_VERSION_STORAGE_KEY, projectSchemaVersion);
   } catch {
     // sessionStorage unavailable — the module variable still carries scope for
     // this instance's lifetime; only cross-re-instantiation recovery is lost.
@@ -83,8 +94,13 @@ export function setProjectScopeRoot(root: string | null): void {
 export function scopeHeaders(): Record<string, string> {
   // Fall back to the stored value when the module variable was reset out from
   // under us (module re-eval) but the tab still has a project open (#965).
-  const root = projectScopeRoot ?? readStoredScopeRoot();
-  return root === null ? {} : { "X-Project-Root": encodeURIComponent(root) };
+  const root = projectScopeRoot ?? readStored(SCOPE_STORAGE_KEY);
+  if (root === null) return {};
+  const schemaVersion = projectSchemaVersion ?? readStored(SCHEMA_VERSION_STORAGE_KEY);
+  return {
+    "X-Project-Root": encodeURIComponent(root),
+    ...(schemaVersion === null ? {} : { "X-Project-Schema-Version": schemaVersion }),
+  };
 }
 
 /** Error subclass that carries the raw response detail so structured callers
@@ -99,6 +115,28 @@ export class HttpError extends Error {
     this.status = status;
     this.detail = detail;
   }
+}
+
+// The backend refused a request because the project or this tab predates the
+// running code (#2675). Announced as a window event rather than through a registered
+// callback, because a hot update re-evaluates this module and a callback would be
+// lost with it, and a hot update is how a tab comes to outlive an upgrade.
+export const PROJECT_OUTDATED_EVENT = "lwa:project-outdated";
+
+export function isProjectOutdated(error: unknown): boolean {
+  return (
+    error instanceof HttpError &&
+    error.status === 409 &&
+    (error.detail as { code?: unknown } | null | undefined)?.code === "project_outdated"
+  );
+}
+
+async function failedResponse(response: Response): Promise<HttpError> {
+  const payload = await response.json().catch(() => null);
+  const detail = payload?.detail;
+  const error = new HttpError(formatErrorDetail(detail) ?? response.statusText, response.status, detail);
+  if (isProjectOutdated(error)) window.dispatchEvent(new Event(PROJECT_OUTDATED_EVENT));
+  return error;
 }
 
 /** A caught client-side failure shipped to the backend error log (#386).
@@ -133,15 +171,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       ...(options.headers ?? {}),
     },
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const detail = payload?.detail;
-    throw new HttpError(
-      formatErrorDetail(detail) ?? response.statusText,
-      response.status,
-      detail,
-    );
-  }
+  if (!response.ok) throw await failedResponse(response);
   // 204 No Content (e.g. the dedicated tag-entry delete, ADR-0082 slice 1
   // review fix; the unified `/api/nodes/{id}` delete) has no body to parse —
   // `response.json()` throws on an empty body.
@@ -240,10 +270,7 @@ export async function* streamNdjson(
     body: JSON.stringify(body),
     signal,
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail ?? response.statusText);
-  }
+  if (!response.ok) throw await failedResponse(response);
   if (!response.body) {
     throw new Error("Streaming not supported by this response.");
   }

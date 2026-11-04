@@ -22,7 +22,7 @@ import { tagNodesApi } from "./api/tagNodes";
 import { todosApi } from "./api/todos";
 import { viewsApi } from "./api/views";
 
-export { HttpError, setKeepaliveSaves, openSessionPresenceSocket } from "./api/core";
+export { HttpError, isProjectOutdated, PROJECT_OUTDATED_EVENT, setKeepaliveSaves, openSessionPresenceSocket } from "./api/core";
 export type { AIStreamEvent } from "./api/core";
 export type { ClientErrorReport } from "./api/core";
 

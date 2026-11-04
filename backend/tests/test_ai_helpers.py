@@ -421,6 +421,7 @@ class ProjectInfoRefTests(unittest.TestCase):
         info = ProjectInfo(
             title="My Book",
             root_path="/x",
+            schema_version=1,
             metadata={"measurement_system": "metric", "title": "SHADOW"},
         )
         return ProjectInfoRef(info, project=None, schema=None)
@@ -1202,7 +1203,7 @@ class JsonFilterTests(_HelperFixtureBase):
         self.assertEqual(out.messages[0].text, f"{self.nimitz['id']}|Nimitz")
 
     def test_the_project_dumps_its_title_and_authored_fields(self) -> None:
-        info = ProjectInfo(title="Saga", root_path="/x", metadata={"measurement_system": "metric"})
+        info = ProjectInfo(title="Saga", root_path="/x", schema_version=1, metadata={"measurement_system": "metric"})
         env = create_environment_for_project(self.service)
         out = render_template(
             '{% role "system" %}{{ project | json }}{% endrole %}',
@@ -1220,7 +1221,7 @@ class JsonFilterTests(_HelperFixtureBase):
         env = create_environment_for_project(self.service)
         out = render_template(
             '{% role "system" %}{{ value | json }}{% endrole %}',
-            context={"value": [ProjectInfo(title="Saga", root_path="/x")]},
+            context={"value": [ProjectInfo(title="Saga", root_path="/x", schema_version=1)]},
             env=env,
         )
         dumped = json.loads(out.messages[0].text)

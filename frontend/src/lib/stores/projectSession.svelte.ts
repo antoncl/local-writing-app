@@ -414,15 +414,36 @@ class ProjectSession {
       });
       if (!opened) return;
       await editorPanes.reconcileDirtyPanes();
-      // An overlap is waiting on the author's choice in the diff dialog.
-      while (editorPanes.panes.some((pane) => pane.dirty)) {
-        this.setStatus("The app was updated. It will reload once your changes are saved.");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-      this.reloadPage();
+      await this.#reloadOnceSaved();
     } finally {
       this.#recoveringOutdated = false;
     }
+  }
+
+  // A reload drops anything still only in a pane, and on a save that fails, such as
+  // an overlap waiting in the diff dialog, the author has to act first.
+  async #reloadOnceSaved(): Promise<void> {
+    while (editorPanes.panes.some((pane) => pane.dirty)) {
+      this.setStatus("The app was updated. It will reload once your changes are saved.");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    this.reloadPage();
+  }
+
+  // The in-app update (#2677). The server stops mid-install, so what is still only in
+  // a pane goes to disk first; the caller doesn't start when this returns false, the
+  // same rule as a project switch.
+  saveBeforeUpdate(): Promise<boolean> {
+    return editorPanes.flushDirtyPanes();
+  }
+
+  // The new server is up, and this tab is still running the old bundle. A save the
+  // new server refuses as outdated starts the recovery above, which reloads too. The
+  // AI call's flush, because it keeps autosave's recovery: a server still starting up
+  // answers 5xx, and the retry is what lets the wait below end.
+  async reloadAfterUpdate(): Promise<void> {
+    await editorPanes.flushBeforeAICall();
+    await this.#reloadOnceSaved();
   }
 
   // Catch up with files added, edited or deleted outside the app (#2170). The

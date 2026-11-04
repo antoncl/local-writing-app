@@ -56,4 +56,54 @@ describe("api wire scope (#965)", () => {
     await api.listTagEntries();
     expect(scopeHeaderOf(mock, 0)).toBe(encodeURIComponent(ROOT));
   });
+
+  // #2675: the version the tab's open ran under, so a backend upgraded since then can
+  // refuse it. It survives a module re-eval for the same reason the root does.
+  it("sends back the schema version its open returned, across a re-instantiation", async () => {
+    const mock = stubFetch({ root_path: ROOT, schema_version: 17 });
+    const { api } = await import("@/lib/api");
+    await api.openProject(ROOT);
+    await api.listTagEntries();
+    expect(new Headers((mock.mock.calls[1][1] as RequestInit).headers).get("X-Project-Schema-Version")).toBe("17");
+
+    vi.resetModules();
+    const fresh = await import("@/lib/api");
+    await fresh.api.listTagEntries();
+    expect(new Headers((mock.mock.calls[2][1] as RequestInit).headers).get("X-Project-Schema-Version")).toBe("17");
+  });
+
+  it.each(["request", "stream"])("announces a project_outdated refusal, from a %s too", async (via) => {
+    const detail = { message: "needs reopening", code: "project_outdated" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ detail }) } as Response),
+    );
+    const { api, isProjectOutdated, PROJECT_OUTDATED_EVENT } = await import("@/lib/api");
+    const { streamNdjson } = await import("@/lib/api/core");
+    const announced = vi.fn();
+    window.addEventListener(PROJECT_OUTDATED_EVENT, announced);
+
+    const caught = await (via === "request"
+      ? api.listTagEntries()
+      : streamNdjson("/ai/x", {}).next()
+    ).catch((error: unknown) => error);
+
+    window.removeEventListener(PROJECT_OUTDATED_EVENT, announced);
+    expect(announced).toHaveBeenCalledTimes(1);
+    expect(isProjectOutdated(caught)).toBe(true);
+  });
+
+  it("does not take any other 409 for a refusal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ detail: "changed on disk" }) } as Response),
+    );
+    const { api, isProjectOutdated, PROJECT_OUTDATED_EVENT } = await import("@/lib/api");
+    const announced = vi.fn();
+    window.addEventListener(PROJECT_OUTDATED_EVENT, announced);
+    const caught = await api.listTagEntries().catch((error: unknown) => error);
+    window.removeEventListener(PROJECT_OUTDATED_EVENT, announced);
+    expect(announced).not.toHaveBeenCalled();
+    expect(isProjectOutdated(caught)).toBe(false);
+  });
 });

@@ -84,6 +84,8 @@ export type ProjectChainLayer = {
 export type ProjectInfo = {
   title: string;
   root_path: string;
+  // The version the backend migrates to; sent back on every request (#2675).
+  schema_version: number;
   projects_base_folder?: string | null;
   ai_policy: AIPolicy;
   /**

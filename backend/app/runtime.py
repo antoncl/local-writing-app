@@ -21,6 +21,10 @@ does need a root already says so through `_require_project()`'s 409. A header
 that names something that is not a project is not policed either — there is no
 ambient scope left to silently fall back to, so its downstream reads simply fail,
 the same way editing a project whose files were deleted mid-session does.
+
+A project or tab older than the running code is refused here (#2675,
+`services/project/version_gate.py`): this is the one seam every scoped route
+passes through, and `/open`, which migrates, is not among them.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from urllib.parse import unquote
 from fastapi import Depends, Header, HTTPException
 
 from app.scope import WorkScope
+from app.services.project.version_gate import require_current_version
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -48,19 +53,6 @@ def root_from_header(x_project_root: str | None) -> Path | None:
     return Path(unquote(x_project_root)).expanduser().resolve()
 
 
-def resolve_current_project(
-    x_project_root: Annotated[str | None, Header()] = None,
-) -> ProjectService:
-    """Bind a service to this request's scope — once, here, and nowhere else."""
-    root = root_from_header(x_project_root)
-    if root is None:
-        return ProjectService(None)
-    return ProjectService(WorkScope(root=root))
-
-
-CurrentProject = Annotated[ProjectService, Depends(resolve_current_project)]
-
-
 @contextmanager
 def translate_errors():
     try:
@@ -68,3 +60,19 @@ def translate_errors():
     except ProjectServiceError as exc:
         detail = {"message": exc.message, **exc.detail} if exc.detail else exc.message
         raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def resolve_current_project(
+    x_project_root: Annotated[str | None, Header()] = None,
+    x_project_schema_version: Annotated[int | None, Header()] = None,
+) -> ProjectService:
+    """Bind a service to this request's scope — once, here, and nowhere else."""
+    root = root_from_header(x_project_root)
+    if root is None:
+        return ProjectService(None)
+    with translate_errors():
+        require_current_version(root, x_project_schema_version)
+    return ProjectService(WorkScope(root=root))
+
+
+CurrentProject = Annotated[ProjectService, Depends(resolve_current_project)]

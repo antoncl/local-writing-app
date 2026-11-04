@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import threading
 import time
 import uuid
 from copy import deepcopy
@@ -97,6 +98,8 @@ from app.services.project.views import ViewsMixin
 from app.services.yaml_io import load_yaml
 
 logger = logging.getLogger(__name__)
+
+_MIGRATION_LOCK = threading.Lock()
 
 # The derived snapshot's filename — skipped by the write hook so writing it does
 # not re-enter the change-gate (#392).
@@ -222,7 +225,11 @@ class ProjectService(
             raise ProjectServiceError("No project.yaml found in that folder.", 404)
         service = cls(WorkScope(root=root))  # lightweight; seams for the doc pass (ADR-0071 §4)
         try:
-            applied = service._run_migrations()
+            # Two tabs refused at once both re-open (#2675): the second waits, then
+            # finds nothing pending. One lock, not per root, since a chain's
+            # ancestors are shared between projects and migrating is rare.
+            with _MIGRATION_LOCK:
+                applied = service._run_migrations()
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
         return cls(WorkScope(root=root, migrations_applied=tuple(applied)))

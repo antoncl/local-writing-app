@@ -185,6 +185,10 @@ class ProjectChainLayer(BaseModel):
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
+    # The version the running code migrates to. The tab keeps what its `/open`
+    # returned and sends it back on every request, so a tab that outlives an
+    # upgrade is refused even once another tab has migrated the project (#2675).
+    schema_version: int
     # The machine root — the outer bound of this project's layer walk (#429).
     # Reported, never accepted: it is machine settings, one folder for every
     # project. `None` when no root is configured, which means no bound and so a

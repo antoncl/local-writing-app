@@ -332,15 +332,9 @@ class LoreMutationValidationMixin:
 
     # ----- ADR-0095 §Verify: anchor / close / set problems -----------------
 
-    def _validate_mutation_anchors_and_sets(
-        self, node_index: object, sets: dict[str, _SetView]
-    ) -> list[str]:
-        """One warning per offending anchor, close or set — problems the
-        per-record validator above can't see, since it only walks records
-        that already resolved (a dangling anchor or a duplicate never
-        produces one). Scans every manuscript scene's raw body a second time
-        (cheap: front-matter-only reads); `sets` is the whole-project lookup
-        (`_mutation_set_views`), built once per validation pass."""
+    def _manuscript_bodies(self, node_index: object) -> dict[str, str]:
+        """Every manuscript scene's raw body by id, read once per validation pass
+        for the checks that scan prose for markers (mutation anchors, beats)."""
         scene_entries = sorted(
             (e for e in getattr(node_index, "by_id", {}).values() if e.kind == "manuscript"),
             key=lambda e: e.id,
@@ -352,6 +346,17 @@ class LoreMutationValidationMixin:
             except OSError:
                 continue
             bodies[entry.id] = body
+        return bodies
+
+    def _validate_mutation_anchors_and_sets(
+        self, node_index: object, sets: dict[str, _SetView], bodies: dict[str, str]
+    ) -> list[str]:
+        """One warning per offending anchor, close or set — problems the
+        per-record validator above can't see, since it only walks records
+        that already resolved (a dangling anchor or a duplicate never
+        produces one). `bodies` is every manuscript scene's raw body
+        (`_manuscript_bodies`) and `sets` the whole-project lookup
+        (`_mutation_set_views`), both built once per validation pass."""
         warnings, anchor_set = self._validate_anchors(bodies, node_index, sets)
         warnings.extend(self._validate_closes(bodies, anchor_set, sets))
         warnings.extend(self._validate_set_rows_project_wide(node_index, sets))

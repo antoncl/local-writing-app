@@ -31,6 +31,10 @@ export type SlashCommand = {
    *  makes sense in a scene): offered in a manuscript body only. Unscoped
    *  commands (e.g. Table) belong to every prose body (#1893). */
   scope?: "manuscript";
+  /** Why the command can't run here, shown on the hint line in place of the
+   *  description. A disabled command is still listed, so the author learns why,
+   *  but never runs (ADR-0070 Amendment 1, decision 5). */
+  disabled?: string;
   run: (args?: string[]) => void | Promise<void>;
 };
 

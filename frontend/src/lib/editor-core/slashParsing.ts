@@ -44,7 +44,10 @@ interface InlineContainer {
  * paragraph that begins with an atom never reads as a slash context.
  */
 export function slashParagraphText(paragraph: InlineContainer): string {
-  return paragraph.textBetween(0, paragraph.content.size, undefined, "￼");
+  // Trailing atoms (a beat's close marker on its own line) are not part of the
+  // typed query: dropped, so the filter reads `/roleplay split`, not
+  // `/roleplay split￼`, and clearing the query stops before the atom.
+  return paragraph.textBetween(0, paragraph.content.size, undefined, "￼").replace(/￼+$/, "");
 }
 
 /** Split a "/command args" body (the "/" already stripped) into command + raw args. */
@@ -93,20 +96,25 @@ export function matchesSlashFilter(haystack: string, needle: string): boolean {
 }
 
 /**
- * Filter a slash-command list by the typed command text. With args present an
- * exact label match wins; otherwise fall back to prefix-matching label /
- * description / group.
+ * Filter a slash-command list by the parsed "/command args" text. With args
+ * present an exact label match wins — the whole text first, so a multi-word
+ * label ("Roleplay split") beats the one-word command it starts with — and
+ * otherwise fall back to prefix-matching label / description / group.
  */
 export function filterSlashCommands<T extends { label: string; description: string; group: string }>(
   commands: T[],
-  command: string,
-  argsPresent: boolean,
+  parsed: { command: string; args: string },
 ): T[] {
+  const { command } = parsed;
   if (!command) return commands;
   const lower = command.toLowerCase();
-  if (argsPresent) {
-    const exact = commands.filter((cmd) => cmd.label.toLowerCase() === lower);
-    if (exact.length > 0) return exact;
+  const args = parsed.args.trim();
+  if (args) {
+    const whole = `${lower} ${args.toLowerCase().replace(/\s+/g, " ")}`;
+    for (const label of [whole, lower]) {
+      const exact = commands.filter((cmd) => cmd.label.toLowerCase() === label);
+      if (exact.length > 0) return exact;
+    }
   }
   return commands.filter((cmd) =>
     matchesSlashFilter(cmd.label, command) ||

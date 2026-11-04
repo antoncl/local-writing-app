@@ -63,7 +63,6 @@ const INDENTED_CODE = /^(?: {4}|\t)/;
 
 const MARKER_PAIRS: [string, string][] = [
   ["<!-- embedded-todo:", "<!-- /embedded-todo -->"],
-  ["<!-- character:", "<!-- /character -->"],
 ];
 
 type Scanned = { end: number; span?: Interval; delimiter?: [number, number, string] };

@@ -1,7 +1,7 @@
 <!--
   ProseBodyView — body region for entry types with body_shape === "prose"
   (today: scenes and lore). Owns the TipTap editor, all custom extensions
-  (AISuggestion / CharacterMark / TodoAnchor), the slash menu, selection
+  (AISuggestion / beat markers / TodoAnchor), the slash menu, selection
   toolbar, table toolbar, and embedded TODO mark reconciliation.
 
   The inline AI-suggestion pipeline (fire a prompt → stream deltas into the
@@ -64,10 +64,11 @@
   import {
     AISuggestion,
     TodoAnchor,
-    createCharacterMark,
     createMutationMark,
     createMutationCloseMark,
   } from "@/lib/editor-core/proseMarks";
+  import { BeatCloseMarker, BeatOpenMarker, roleplaySplitCommand, splitBeatAtCursor } from "@/lib/editor-core/beatMarkers";
+  import { beatAt, insideBeatReason } from "@/lib/editor-core/beats";
   import { MutationEditorBridge } from "@/lib/editor-core/mutationEditorBridge";
   import MutationDialogs from "./MutationDialogs.svelte";
   import {
@@ -108,6 +109,7 @@
     promptEntryDescription,
     promptSummary,
     defaultPromptForSurface,
+    promptBracketsBeat,
     resolvePromptPositionalArgs,
   } from "@/lib/editor-core/promptResolution";
   import { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
@@ -225,8 +227,8 @@
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
-  // AISuggestion / TodoAnchor are imported verbatim. CharacterMark needs the
-  // reactive lore/schema lookups below, so it's built from the factory.
+  // AISuggestion / TodoAnchor are imported verbatim. The beat markers and their
+  // decorations need the reactive lore/schema lookups below.
 
   // Per-character mark color. Walks the full resolver: instance
   // (metadata.color on the lore entry) → entry-type color → parent
@@ -266,10 +268,11 @@
     return summaryValues(def, metadataSchema, entry.metadata, resolveTitle);
   }
 
-  const CharacterMark = createCharacterMark({
-    colorForId: characterColorFromId,
-    titleForId: characterTitleFromId,
-  });
+  // ADR-0070 Amendment 1: a beat is two marker atoms. The close marker's view
+  // hosts the interiority, proofread against this scene like the body is.
+  const proofreadNodeId = () =>
+    proofreadable(documentKind) && !readOnlyInPlace(scene) ? (scene?.id ?? null) : null;
+  const BeatClose = BeatCloseMarker.configure({ colorForId: characterColorFromId, proofreadNodeId });
 
   // ADR-0095 §1: the pill's label now reads the mutation-sets STORE live (a
   // NodeView inside proseMarks.ts), not a resolver threaded in here — so
@@ -719,6 +722,7 @@
   }
 
   function runSlashCommand(command: SlashCommand) {
+    if (command.disabled) return;
     const parsed = parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" };
     const args = tokenizeSlashArgs(parsed.args);
     command.run(args);
@@ -811,6 +815,9 @@
           // title round-trips the label-based filter; roleplay's key is
           // `general` but its title is "Roleplay", so only the title matches.
           autocompleteTo: slashCommandToken(entry.title),
+          disabled: slashBeat && promptBracketsBeat(promptCtx, entry)
+            ? insideBeatReason(characterTitleFromId(slashBeat.characterId))
+            : undefined,
           run: (args?: string[]) => {
             clearSlashTrigger();
             const resolved = args && args.length > 0
@@ -843,6 +850,10 @@
             }
           },
         })),
+      ...(slashBeat ? [roleplaySplitCommand(characterTitleFromId(slashBeat.characterId), () => {
+        clearSlashTrigger();
+        if (editor) splitBeatAtCursor(editor.view);
+      })] : []),
     ];
   }
 
@@ -1127,7 +1138,8 @@
         proseStarterKit(),
         AppClipboardMarker,
         AISuggestion,
-        CharacterMark,
+        BeatOpenMarker,
+        BeatClose,
         MutationMark,
         MutationCloseMark,
         TodoAnchor,
@@ -1143,7 +1155,7 @@
           // so it can't keep an ignore-here (ADR-0102 §4).
           nodeId: () => (readOnlyInPlace(scene) ? null : (scene?.id ?? null)),
         }),
-        InteriorityReveal.configure({ colorForId: characterColorFromId }),
+        InteriorityReveal.configure({ colorForId: characterColorFromId, titleForId: characterTitleFromId }),
       ],
       content: "",
       editorProps: {
@@ -1253,10 +1265,18 @@
     hiddenPromptIds: $hiddenLibraryStore,
   });
   // ---------- Reactives ----------
+  // The beat around the cursor while the slash menu is open (ADR-0070 Amendment
+  // 1): the selection isn't reactive, so this re-reads it as the menu opens and
+  // on every keystroke of its filter.
+  let slashBeat = $derived.by(() => {
+    if (!slashMenu.visible) return null;
+    void slashFilterText;
+    return editor ? beatAt(editor.state, editor.state.selection.from) : null;
+  });
   let slashCommands = $derived(editor ? slashCommandsForKind(getSlashCommands(), documentKind) : []);
   let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });
   let slashArgTokens = $derived(tokenizeSlashArgs(parsedSlash.args));
-  let filteredSlashCommands = $derived(filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0));
+  let filteredSlashCommands = $derived(filterSlashCommands(slashCommands, parsedSlash));
   let activeSlashCommand = $derived(filteredSlashCommands[slashMenu.selectedIndex]);
   $effect.pre(() => {
     clampSlashSelectedIndex(filteredSlashCommands.length);

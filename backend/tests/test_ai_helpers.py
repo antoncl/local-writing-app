@@ -68,7 +68,7 @@ class ProseTests(unittest.TestCase):
         self.assertEqual(prose(body), "He knelt.\n\nShe wept.")
 
     def test_keeps_a_roleplay_beat_but_drops_its_interiority(self) -> None:
-        body = "<!-- character:id=c1;internal=c2VjcmV0 -->Hello.<!-- /character -->"
+        body = "<!-- character:id=c1 -->Hello.<!-- /character:id=c1;internal=c2VjcmV0 -->"
         self.assertEqual(prose(body), "Hello.")
 
     def test_none_returns_empty(self) -> None:

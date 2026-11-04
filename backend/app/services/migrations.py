@@ -58,13 +58,14 @@ from app.services.atomic_io import atomic_write_text
 from app.services.migration_levels import migrate_layer_levels
 from app.services.migration_plot_cards import migrate_layer_plot_cards
 from app.services.migration_tree_placement import migrate_layer_tree_placement
+from app.services.migrations_beat_markers import beat_markers_bracket_a_beat
 from app.services.migrations_mutation_anchors import migrate_layer_mutation_anchors
 from app.services.yaml_io import load_yaml
 
 # Independent of MIGRATIONS on purpose: it is the version the code represents,
 # not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
 # would throw on an empty registry and take the stamp-forward path down with it.
-CURRENT_VERSION = 16
+CURRENT_VERSION = 17
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 # `snapshots/` is excluded because migrations never touch it: snapshots are
@@ -1186,6 +1187,12 @@ MIGRATIONS: list[MigrationStep] = [
         "offer project-owned inline prompts on manuscript scenes: inline prompts now honour "
         "offer_on, and empty means nowhere (#2475)",
         _offer_inline_prompts_on_scenes,
+    ),
+    DocumentMigration(
+        17,
+        "bracket each roleplay beat with an open and a close marker, its interiority once on the "
+        "close (ADR-0070 Amendment 1)",
+        beat_markers_bracket_a_beat,
     ),
 ]
 

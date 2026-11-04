@@ -27,6 +27,7 @@ import {
   effectivePromptInputs,
   findPromptEntry,
   promptOnAccept,
+  promptBracketsBeat,
   characterIdFromInputValue,
   resolutionSceneIdFromInputs,
   promptOffersOn,
@@ -77,6 +78,7 @@ import {
 } from "@/lib/editor-core/mutationMarkers";
 import { joinAtCursor } from "@/lib/editor-core/cursorJoin";
 import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
+import { BEAT_CLOSE, BEAT_OPEN, beatAt, insideBeatReason, modelLeafText } from "@/lib/editor-core/beats";
 import type {
   ChatUsage,
   CheckedEntry,
@@ -357,7 +359,7 @@ export class AiSuggestionController {
     }
     const lastEntry = findPromptEntry(promptCtx, this.#lastInvokedEntryId);
     // The prompt's type may DECLARE an accept-time mark-stamp (#954): roleplay
-    // stamps the `character` mark from its `character` input. Read off the declared
+    // brackets the reply as a beat of its `character` input. Read off the declared
     // capability, not an `entry_type == roleplay` branch.
     const onAccept = promptOnAccept(promptCtx, lastEntry);
     const characterId =
@@ -366,13 +368,19 @@ export class AiSuggestionController {
         : null;
     if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
-      if (characterId && onAccept) {
-        // ADR-0070: bind the beat's private interiority to the same character
-        // mark, so it rides with the beat (and dies with it on rewind).
+      let end = range.to;
+      if (characterId && promptBracketsBeat(promptCtx, lastEntry)) {
+        // ADR-0070 Amendment 1: the reply becomes one beat, however many
+        // paragraphs it has: an open marker before it and a close marker after
+        // it carrying the interiority once. The close goes in first so `range.from`
+        // stays put.
         const internal = this.#pendingInternal ?? "";
-        chain = chain.setMark(onAccept.mark, { characterId, internal });
+        chain = chain
+          .insertContentAt(range.to, { type: BEAT_CLOSE, attrs: { characterId, internal } })
+          .insertContentAt(range.from, { type: BEAT_OPEN, attrs: { characterId } });
+        end = range.to + 2;
       }
-      chain.setTextSelection(range.to).run();
+      chain.setTextSelection(end).run();
     }
     this.#persistAcceptedInvocation(lastEntry, characterId);
     this.suggestionId = null;
@@ -548,6 +556,14 @@ export class AiSuggestionController {
     // ""), re-resolving against the prompt and roster as they are then.
     const runAssistantId = assistantId || assistantForPrompt(entry, get(assistantEntriesStore));
     const ctx = this.#deps.getPromptCtx();
+    // Beats never nest (ADR-0070 Amendment 1, decision 5): a turn that would be
+    // bracketed as a beat can't start inside one, whichever path started it.
+    const enclosing = promptBracketsBeat(ctx, entry) ? beatAt(editor.state, editor.state.selection.from) : null;
+    if (enclosing) {
+      const title = ctx.loreEntries.find((e) => e.id === enclosing.characterId)?.title || "a character";
+      this.#deps.onNotice?.(insideBeatReason(title));
+      return;
+    }
     const surface = promptSurfaceFor(ctx, entry);
     if (surface === "cursor" || surface === "selection") {
       const run: OutputRun = { entry, inputs, assistantId: runAssistantId, scene };
@@ -830,7 +846,7 @@ export class AiSuggestionController {
         this.error = res.error || "Unknown error";
         return;
       }
-      if (editor.state.doc.textBetween(from, to, "\n\n", " ") !== selectionText) {
+      if (editor.state.doc.textBetween(from, to, "\n\n", modelLeafText) !== selectionText) {
         this.error = "Document changed during the AI call. Re-select the text and retry.";
         return;
       }
@@ -1086,7 +1102,7 @@ export class AiSuggestionController {
     // A beat-marking prompt (roleplay, via on_accept) may deliver two parts —
     // visible prose then `[[interiority]]` then private inner state (ADR-0070).
     // Only the external part is ever rendered; the internal is stashed for accept.
-    const carriesInteriority = Boolean(promptOnAccept(this.#deps.getPromptCtx(), entry));
+    const carriesInteriority = promptBracketsBeat(this.#deps.getPromptCtx(), entry);
     this.#pendingInternal = null;
 
     const suggestionId = `ai-${this.#nextSuggestionId++}`;
@@ -1139,7 +1155,7 @@ export class AiSuggestionController {
     const ensureStreamingStarted = () => {
       if (streamingActive || !editor) return;
       if (destination === "selection") {
-        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+        const currentText = editor.state.doc.textBetween(from, to, "\n\n", modelLeafText);
         if (currentText !== selectionText) {
           this.error = "Document changed during the AI call. Re-select the text and retry.";
           streamErrored = true;
@@ -1150,6 +1166,13 @@ export class AiSuggestionController {
         this.#suggestionOriginal = selectionText!;
       } else {
         startPos = editor.state.selection.from;
+        // The reply lands where the cursor is NOW, which the author may have moved
+        // since the send: a beat still can't start inside another (decision 5).
+        if (carriesInteriority && beatAt(editor.state, startPos)) {
+          this.error = "The cursor moved into a beat during the AI call. Move it outside the beat and retry.";
+          streamErrored = true;
+          return;
+        }
         // The caret's own block around it (#2459); a leaf (a pill, a line
         // break) reads as U+FFFC, which never asks for a space.
         const caret = editor.state.doc.resolve(startPos);

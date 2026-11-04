@@ -1,6 +1,6 @@
 # ADR-0070: A roleplay beat carries private interiority; a final stage projects the clean scene
 
-- Status: **Accepted** — 2026-08-22 (Anton). Design complete; all open questions resolved (the reveal affordance settled by mockup). Only behavioural prompt-tuning is deferred to live testing. Implementation proceeds as vertical slices; nothing built yet. **Amendment 1 (proposed 2026-11-03)** brackets a beat with two markers and moves its interiority to the close marker (#2665).
+- Status: **Accepted** — 2026-08-22 (Anton). Design complete; all open questions resolved (the reveal affordance settled by mockup). Only behavioural prompt-tuning is deferred to live testing. Implementation proceeds as vertical slices; nothing built yet. **Amendment 1 (accepted 2026-11-03)** brackets a beat with two markers and moves its interiority to the close marker (#2665).
 - Issue: #844 (spun out of the roleplay intent-vs-impl review)
 - Follows: ADR-0051 (a node owns its conversations — roleplay stays a scene-hosted prompt, **not** a node), ADR-0046 (an AI proposal is author-reviewable — author authority over AI writes), the character mark + comment-marker round-trip (`proseMarks.ts` / `markdown.ts`), and the Dynamics scene-direction field.
 - **Non-goal of this ADR:** it decides the *model and its invariants*, not the generation/handler mechanism — those are listed as open questions and deferred to a first slice.
@@ -72,7 +72,7 @@ A dedicated roleplay coordinating node was considered and rejected as YAGNI; rol
 
 ## Amendment 1 — A beat is bracketed by two markers, and its interiority rides the close marker
 
-**Proposed** 2026-11-03, awaiting Anton's approval; nothing is built against it until it is accepted. From Anton's first test of roleplay and its interiority on a real scene (#2665, #2666, #2669). It revisits Resolved-in-review 4 ("nested vs. paired-with-atomic-delete"), which the first slice answered with an attribute on the character mark. The invariants and the cleanup stage don't change.
+**Accepted** 2026-11-03 (Anton); built in #2665. From Anton's first test of roleplay and its interiority on a real scene (#2665, #2666, #2669). It revisits Resolved-in-review 4 ("nested vs. paired-with-atomic-delete"), which the first slice answered with an attribute on the character mark. The invariants and the cleanup stage don't change.
 
 ### What prompted it
 

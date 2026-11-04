@@ -17,6 +17,14 @@ from app.services.ai.helpers import (
 )
 
 
+def _no_lore() -> object:
+    class _NoLore:
+        def read_node(self, node_id: str) -> None:
+            raise KeyError(node_id)
+
+    return _NoLore()
+
+
 class _Obj:
     def __init__(self, **kw: object) -> None:
         self.__dict__.update(kw)
@@ -112,8 +120,8 @@ class InteriorityPrivacyTests(unittest.TestCase):
     def test_split_body_captures_and_decodes_interiority(self) -> None:
         body = (
             "Narration. "
-            "<!-- character:id=c1;internal=I%20can%27t%20miss. -->She fired.<!-- /character -->"
-            "<!-- character:id=c2 -->He grins.<!-- /character -->"
+            "<!-- character:id=c1 -->She fired.<!-- /character:id=c1;internal=I%20can%27t%20miss. -->"
+            "<!-- character:id=c2 -->He grins.<!-- /character:id=c2 -->"
         )
         self.assertEqual(
             _split_body_by_character_markers(body),
@@ -123,6 +131,50 @@ class InteriorityPrivacyTests(unittest.TestCase):
                 ("c2", "He grins.", ""),
             ],
         )
+
+    def test_multi_paragraph_beat_is_one_turn_with_interiority_once(self) -> None:
+        text = "One.\n\nTwo.\n\nThree.\n\nFour."
+        body = f"<!-- character:id=c1 -->{text}<!-- /character:id=c1;internal=Steady%20now. -->"
+        segments = _split_body_by_character_markers(body)
+        self.assertEqual(segments, [("c1", text, "Steady now.")])
+        parts = _thread_parts(segments, focus_id="c1", titles={})
+        self.assertEqual(len(parts), 1)
+        self.assertEqual(parts[0].count("Steady now."), 1)
+
+    def test_orphan_open_marker_attributes_nothing(self) -> None:
+        body = "Before. <!-- character:id=c1 -->Stray text."
+        self.assertEqual(
+            _split_body_by_character_markers(body),
+            [(None, body, "")],
+        )
+
+    def test_orphan_close_marker_attributes_nothing(self) -> None:
+        body = "Stray text.<!-- /character:id=x;internal=x --> After."
+        self.assertEqual(_split_body_by_character_markers(body), [(None, body, "")])
+
+    def test_open_marker_pairs_with_the_next_close_only(self) -> None:
+        body = (
+            "<!-- character:id=c1 -->Orphan. "
+            "<!-- character:id=c2 -->Real.<!-- /character:id=c2 -->"
+        )
+        segments = _split_body_by_character_markers(body)
+        self.assertEqual(
+            segments,
+            [(None, "<!-- character:id=c1 -->Orphan. ", ""), ("c2", "Real.", "")],
+        )
+
+    def test_a_mismatched_pair_never_reattributes_interiority(self) -> None:
+        # Deleting from inside A's text to past B's open marker splices A's open
+        # onto B's close: the ids disagree, so neither marker attributes anything.
+        spliced = "<!-- character:id=A -->a<!-- /character:id=B;internal=Y -->"
+        self.assertEqual(_split_body_by_character_markers(spliced), [(None, spliced, "")])
+        parts = _thread_parts(_split_body_by_character_markers(spliced), focus_id="A", titles={})
+        self.assertNotIn("Y", "".join(parts))
+
+    def test_orphan_markers_never_reach_the_model(self) -> None:
+        body = "A <!-- character:id=c1 -->b <!-- /character:id=c1 --> c<!-- /character:id=c1 --> d"
+        out = _roleplay_beats(_no_lore(), {"body": body})
+        self.assertNotIn("<!--", out)
 
 
 class RoleplayBeatsTests(unittest.TestCase):
@@ -138,8 +190,8 @@ class RoleplayBeatsTests(unittest.TestCase):
     def test_lays_out_beats_with_decoded_interiority(self) -> None:
         body = (
             "Narration here. "
-            "<!-- character:id=annie;internal=Steady%20now. -->She fired.<!-- /character -->"
-            "<!-- character:id=bill -->He grins.<!-- /character -->"
+            "<!-- character:id=annie -->She fired.<!-- /character:id=annie;internal=Steady%20now. -->"
+            "<!-- character:id=bill -->He grins.<!-- /character:id=bill -->"
         )
         out = _roleplay_beats(self._NoLore(), {"body": body})
         self.assertIn("[Narration] Narration here.", out)
@@ -156,9 +208,9 @@ class RoleplayBeatsTests(unittest.TestCase):
         alone = "<!-- mutate:set=mutation_set_abc;id=mut_alone -->"
         close = "<!-- mutate:close;ref=mut_in1;id=mut_close -->"
         body = (
-            f"<!-- character:id=annie;internal=Steady%20now. -->She {anchor}fired.<!-- /character -->"
+            f"<!-- character:id=annie -->She {anchor}fired.<!-- /character:id=annie;internal=Steady%20now. -->"
             f"{alone}"
-            f"<!-- character:id=bill -->He grins.{close}<!-- /character -->"
+            f"<!-- character:id=bill -->He grins.{close}<!-- /character:id=bill -->"
         )
         out = _roleplay_beats(self._NoLore(), {"body": body})
         self.assertIn("[annie] She ⟦mut_in1⟧fired.", out)

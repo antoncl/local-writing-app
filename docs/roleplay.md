@@ -39,7 +39,7 @@ Every character sees the whole Dynamics block on every invocation — mirror wha
 1. Put the cursor on a blank line in the scene body.
 2. Type `/roleplay Bob` (or `/rol` then Tab to autocomplete, then the name).
 3. If the name resolves to exactly one character, the generation fires immediately. If ambiguous or unresolved, an inputs dialog opens so you can pick.
-4. The AI proposes Bob's next beat as a tracked suggestion (what a beat is: see below). **Accept** wraps it in a `data-character` mark and a coloured underline; **Retry** regenerates; **Reject** removes it.
+4. The AI proposes Bob's next beat as a tracked suggestion (what a beat is: see below). **Accept** brackets it as one beat, however many paragraphs it has, with a coloured underline; **Retry** regenerates; **Reject** removes it.
 5. Write narration between beats. Type `/roleplay Alice` for the next turn.
 
 Slash conveniences:
@@ -48,6 +48,8 @@ Slash conveniences:
 - `/roleplay Annie Oakley` → an unquoted multi-word name resolves fine (the character slot absorbs the trailing words).
 - `/roleplay "Honor Harrington"` → quotes also work, and are handy to disambiguate.
 - `/roleplay Nobody` (unresolved) → the dialog opens with the field cleared and a red error naming the failed token.
+- Inside a beat, `/roleplay` is listed but disabled, with the reason on the hint line: a turn can't start inside another beat. Move the cursor outside it, or split the beat.
+- `/roleplay split` (offered only inside a beat) → ends the beat at the cursor and starts a new beat for the same character right after it. Both halves keep a copy of the interiority, and both are opened so you can trim each to its half.
 
 ## What a turn is
 
@@ -56,11 +58,14 @@ A turn is **one beat of the played character**: their reaction to the last thing
 - **Only that character.** Bob's turn never makes Alice act or speak, even when Alice has no lore entry of her own. When someone else would respond, the beat stops, and the response is yours to write or that character's own `/roleplay` turn.
 - **It continues from the last line.** The beat picks up where the scene stands. It doesn't retell what you already wrote or run ahead to finish the scene.
 
-## How marks behave in the editor
+## How beats behave in the editor
 
-- Each character beat gets a 2px coloured underline plus a faint wash, its colour derived from the character's lore id (same id → same colour), set as `--character-color` on the span.
-- Marks are `inclusive: false` — typing at the boundary of Bob's beat does NOT extend the mark over your narration. Editing inside the beat keeps the mark; deleting it removes the mark.
-- Marks round-trip through markdown as HTML comment markers: `<!-- character:id=lore_abc -->text<!-- /character -->`. Safe inside tables, lists, and code fences — comment markers survive every markdown parser.
+- **A beat is two markers.** A thin coloured bar where the beat starts, and the interiority eye where it ends. Everything between them is that character's, including text you type there and paragraph breaks, so one reply of several paragraphs is one beat.
+- **Who said what** is the 2px coloured underline plus a faint wash between the markers, in the character's colour (its lore colour, or a stable hue from its id). Hover it for the character's name.
+- **The interiority** is the character's private inner state for that beat, stored once, on the end marker. Click the eye to open it in a tinted box under the line, and edit it there like any long-text field: it is spell- and grammar-checked with the scene. Every keystroke is saved to the marker, so closing the box loses nothing. The eye in the editor header (Alt+I) opens or closes every beat's interiority at once.
+- **Beats never nest.** See the slash conveniences above for what `/roleplay` does inside a beat.
+- **Deleting a beat** (both markers) removes its attribution and its interiority. A marker left without its partner attributes nothing: it shows in the danger colour, and validation lists it, until you delete it or add its partner.
+- **On disk** the markers are HTML comments: `<!-- character:id=lore_abc -->text<!-- /character:id=lore_abc -->`, the end marker carrying the interiority once when there is any (`<!-- /character:id=lore_abc;internal=… -->`). Both markers name the character, so a mismatched pair (say, after a deletion splices two beats together) attributes nothing. A beat may span paragraphs. Comment markers survive every markdown parser.
 
 ## How the thread is reconstructed (send-time)
 
@@ -120,4 +125,3 @@ If you clone the prompt and change this, the template's `entry(inputs.character)
 
 - **Title collisions in lore** break name resolution. `/roleplay Bob` fires directly only when exactly one character has that exact title; two "Bob"s fall back to the inputs dialog for you to pick.
 - **Multi-character (3+) scenes work**, just slower to cache — every additional character adds another stable persona to cache. Two-character battles are the sweet spot.
-- **The colour is the only who-said-what cue** on a span today; there is no hover tooltip yet.

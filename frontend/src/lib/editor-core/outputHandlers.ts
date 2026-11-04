@@ -43,6 +43,7 @@
 // so `outputHandlerFor` is now a pure registry lookup.
 
 import type { Editor } from "@tiptap/core";
+import { modelLeafText, rangeHasBeatMarker } from "@/lib/editor-core/beats";
 import { markerIdsBefore } from "@/lib/editor-core/markersBefore";
 import { markdownOffsetAt } from "@/lib/editor-core/markdownOffset";
 import type {
@@ -138,6 +139,22 @@ export interface InlineHost {
   runLineNotes(gathered: InlineGathered): Promise<void>;
 }
 
+// The gather for a selection run that REWRITES its range (`inline` on a
+// selection, `inline_edits`): refused when the range holds a beat marker, which
+// the rewrite would delete along with its interiority (ADR-0070 Amendment 1).
+function gatherRevisableSelection(
+  host: Pick<InlineHost, "getEditor" | "setError">,
+): InlineGathered | null {
+  const editor = host.getEditor();
+  if (!editor) return null;
+  const { from, to } = editor.state.selection;
+  if (rangeHasBeatMarker(editor.state.doc, from, to)) {
+    host.setError("The selection crosses a roleplay beat marker. Select inside the beat, or outside it.", from);
+    return null;
+  }
+  return gatherSelection(host);
+}
+
 // The revise gather shared by `inline` (selection destination) and `inline_edits`:
 // the selected text plus REVISE_CONTEXT_CHARS of prose either side. Null (with the
 // reason surfaced via the host) when nothing usable is selected.
@@ -153,7 +170,7 @@ export function gatherSelection(
     host.setError("Select text to revise.", from);
     return null;
   }
-  const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+  const selectionText = editor.state.doc.textBetween(from, to, "\n\n", modelLeafText);
   if (!selectionText.trim()) {
     host.setError("Select non-empty text to revise.", from);
     return null;
@@ -161,8 +178,8 @@ export function gatherSelection(
   const docSize = editor.state.doc.content.size;
   const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
   const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
-  const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
-  const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
+  const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", modelLeafText);
+  const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", modelLeafText);
   const markersBefore = markerIdsBefore(editor.state.doc, from);
   return { destination: "selection", from, to, textBefore, textAfter, selectionText, markersBefore };
 }
@@ -190,12 +207,12 @@ export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   produce(host) {
     const editor = host.getEditor();
     if (!editor) return null;
-    if (host.destination === "selection") return gatherSelection(host);
+    if (host.destination === "selection") return gatherRevisableSelection(host);
     const from = editor.state.selection.from;
     const to = from;
     const docSize = editor.state.doc.content.size;
-    const textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
-    const textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
+    const textBefore = editor.state.doc.textBetween(0, from, "\n\n", modelLeafText);
+    const textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", modelLeafText);
     const markersBefore = markerIdsBefore(editor.state.doc, from);
     let cursorOffset: number | undefined;
     try {
@@ -221,7 +238,7 @@ export const inlineEditsHandler: OutputHandler<InlineHost, InlineGathered> = {
   review: "edit_list",
   activation: "inline",
   surface: () => "selection",
-  produce: (host) => gatherSelection(host),
+  produce: (host) => gatherRevisableSelection(host),
   apply: (gathered, host) => host.runLineEdits(gathered),
 };
 

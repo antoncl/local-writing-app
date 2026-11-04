@@ -1,10 +1,7 @@
 // Custom TipTap marks used by ProseBodyView.
 //
 // - AISuggestion / TodoAnchor are self-contained (no project data needed).
-// - CharacterMark needs to resolve a lore entry's display colour + title at
-//   render time, so it's built via a factory that takes those resolvers — the
-//   component keeps ownership of the reactive lore/schema lookups and passes
-//   them in (same pattern as ImplicitContextHighlight's matcher option).
+// - The roleplay beat markers live in beatMarkers.ts (ADR-0070 Amendment 1).
 import { Mark, mergeAttributes, Node } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
@@ -38,59 +35,6 @@ export const AISuggestion = Mark.create({
     return ["span", mergeAttributes(HTMLAttributes, { class: "ai-suggestion" }), 0];
   },
 });
-
-export interface CharacterMarkResolvers {
-  /** Resolve a lore entry id to a CSS colour (hex or hsl). */
-  colorForId: (id: string) => string;
-  /** Resolve a lore entry id to a human-readable tooltip title. */
-  titleForId: (id: string) => string;
-}
-
-/**
- * Build the per-character mark. The resolvers are read at renderHTML time, so
- * the component can hand in closures over its reactive `loreEntries` /
- * `metadataSchema` and colours/titles stay live.
- */
-export function createCharacterMark({ colorForId, titleForId }: CharacterMarkResolvers) {
-  return Mark.create({
-    name: "character",
-    inclusive: false,
-    excludes: "",
-    addAttributes() {
-      return {
-        characterId: {
-          default: null,
-          parseHTML: (element) => element.getAttribute("data-character"),
-          renderHTML: (attributes) => {
-            if (!attributes.characterId) return {};
-            const id = String(attributes.characterId);
-            return {
-              "data-character": id,
-              title: titleForId(id),
-              style: `--character-color: ${colorForId(id)}`,
-            };
-          },
-        },
-        // The character's private interiority for this beat (ADR-0070) — hidden
-        // inner state bound to the beat, carried through the markdown round-trip
-        // (markdown.ts) and kept per-character-private by the backend
-        // (character_turns). No reveal UI yet (S2); it just rides the mark.
-        internal: {
-          default: "",
-          parseHTML: (element) => element.getAttribute("data-internal") ?? "",
-          renderHTML: (attributes) =>
-            attributes.internal ? { "data-internal": String(attributes.internal) } : {},
-        },
-      };
-    },
-    parseHTML() {
-      return [{ tag: "span[data-character]" }];
-    },
-    renderHTML({ HTMLAttributes }) {
-      return ["span", mergeAttributes(HTMLAttributes, { class: "character-mark" }), 0];
-    },
-  });
-}
 
 // ADR-0095 §1: a pill is a pure ANCHOR — `{ setId, anchorId }` — and its
 // label reads the mutation-sets STORE live, via a ProseMirror NodeView
@@ -149,8 +93,8 @@ mutationSetRosterLoadedStore.subscribe((loaded) => {
 });
 
 /**
- * Build the mid-scene mutation-anchor pill (#33, ADR-0095 §1). Unlike
- * CharacterMark it wraps no prose — a mutation is a *point* ("the change
+ * Build the mid-scene mutation-anchor pill (#33, ADR-0095 §1). It wraps no
+ * prose — a mutation is a *point* ("the change
  * takes effect here") — so it's an inline atom Node, not a Mark. It
  * round-trips to `<!-- mutate:set=SET;id=ANCHOR -->` (lib/utils/markdown).
  */

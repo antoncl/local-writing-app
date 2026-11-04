@@ -1004,9 +1004,14 @@ class ProjectLifecycleMixin:
 
         # ADR-0095 §Verify: anchor/close/set problems the per-record scan above
         # can't see (a dangling anchor or a duplicate never produces a record).
+        # Both checks scan the same scene prose for markers: read it once.
+        bodies = self._manuscript_bodies(node_index)
         warnings.extend(
-            self._validate_mutation_anchors_and_sets(node_index, self._mutation_set_views(node_index))
+            self._validate_mutation_anchors_and_sets(node_index, self._mutation_set_views(node_index), bodies)
         )
+
+        # ADR-0070 A1: a roleplay beat's open or close marker with no partner.
+        warnings.extend(self._validate_beat_markers(node_index, bodies))
 
         lore_errors, lore_warnings, code_fenced_bodies = self._validate_lore_entries(node_index, metadata_schema)
         errors.extend(lore_errors)

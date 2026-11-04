@@ -604,6 +604,16 @@ export function promptOnAccept(
   return { mark: onAccept.mark, fromInput: onAccept.from_input };
 }
 
+// Does accepting this prompt's reply bracket it as a roleplay beat (ADR-0070)?
+// The one test every beat rule reads: the reply's interiority split, the
+// not-inside-a-beat guards, accept, and the slash menu's disabled state.
+export function promptBracketsBeat(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary | null | undefined,
+): boolean {
+  return promptOnAccept(ctx, entry)?.mark === "character";
+}
+
 // The mutation resolution scene from a `scene_ref` input (ADR-0012): the first
 // scene_ref input with a non-empty value wins. Returns "" when the prompt has
 // no scene_ref input or it is unset — the backend then falls back to the

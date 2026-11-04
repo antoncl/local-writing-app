@@ -19,7 +19,7 @@ import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/p
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-import { scanBeats, type BeatScan } from "./beats";
+import { beatPluginKey, scanBeats, type BeatPluginState, type BeatScan } from "./beats";
 
 // The interiority glyph — the stroked "eye" locked from the ADR-0070 mockup
 // (see design-language.md lexicon). One glyph, one meaning: the same mark is the
@@ -41,7 +41,7 @@ export type InteriorityRevealOptions = {
 /** What a marker's node decoration tells its node view. */
 export type BeatMarkerSpec = { characterId: string; revealed: boolean; broken: boolean };
 
-type InteriorityState = {
+type InteriorityState = BeatPluginState & {
   decorations: DecorationSet;
   /** Close-marker positions currently revealed. */
   revealed: Set<number>;
@@ -49,13 +49,9 @@ type InteriorityState = {
   hasBeats: boolean;
 };
 
-const EMPTY: InteriorityState = {
-  decorations: DecorationSet.empty,
-  revealed: new Set(),
-  hasBeats: false,
-};
-
-const pluginKey = new PluginKey<InteriorityState>("interiority-reveal");
+// One key for the plugin and for `beatScanOf`, so every reader of the pairing
+// (the slash menu, the run guard, split) shares this plugin's scan.
+const pluginKey = beatPluginKey as unknown as PluginKey<InteriorityState>;
 
 // Metas the host / handles dispatch to change reveal state.
 const TOGGLE_ONE = "interiority-toggle-one"; // payload: close-marker position
@@ -149,6 +145,7 @@ export function createInteriorityPlugin(options: InteriorityRevealOptions): Plug
         const scan = scanBeats(state.doc);
         const revealed = new Set<number>();
         return {
+          scan,
           decorations: buildDecorations(state.doc, scan, revealed, options),
           revealed,
           hasBeats: scan.beats.length > 0,
@@ -192,6 +189,7 @@ export function createInteriorityPlugin(options: InteriorityRevealOptions): Plug
         }
 
         return {
+          scan,
           decorations: buildDecorations(newState.doc, scan, revealed, options),
           revealed,
           hasBeats: scan.beats.length > 0,

@@ -10,7 +10,7 @@
 // reattributed. An orphan attributes nothing (decision 8).
 
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
+import { PluginKey, TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
 
 export const BEAT_OPEN = "characterOpen";
 export const BEAT_CLOSE = "characterClose";
@@ -63,11 +63,21 @@ export function scanBeats(doc: PMNode): BeatScan {
   return { beats, orphans };
 }
 
+/** The state the beat plugin (`interiorityReveal`) keeps: the scan of the
+ *  current doc, made once per document change. */
+export type BeatPluginState = { scan: BeatScan };
+export const beatPluginKey = new PluginKey<BeatPluginState>("interiority-reveal");
+
+/** The pairing for `state`: the plugin's scan when it is installed, else a walk. */
+export function beatScanOf(state: EditorState): BeatScan {
+  return beatPluginKey.getState(state)?.scan ?? scanBeats(state.doc);
+}
+
 /** The beat whose markers enclose `pos` (strictly after the open marker, at or
  *  before the close marker), or null. A cursor right after the close marker is
  *  outside the beat. */
-export function beatAt(doc: PMNode, pos: number): Beat | null {
-  return scanBeats(doc).beats.find((b) => pos > b.open && pos <= b.close) ?? null;
+export function beatAt(state: EditorState, pos: number): Beat | null {
+  return beatScanOf(state).beats.find((b) => pos > b.open && pos <= b.close) ?? null;
 }
 
 /** Why a roleplay turn can't start at the cursor (decision 5): shown on the
@@ -84,7 +94,7 @@ export function splitBeat(
   state: EditorState,
   pos: number,
 ): { tr: Transaction; closes: [number, number] } | null {
-  const beat = beatAt(state.doc, pos);
+  const beat = beatAt(state, pos);
   if (!beat) return null;
   const { schema } = state;
   const close = schema.nodes[BEAT_CLOSE].create({ characterId: beat.characterId, internal: beat.internal });

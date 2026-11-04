@@ -109,7 +109,7 @@
     promptEntryDescription,
     promptSummary,
     defaultPromptForSurface,
-    promptOnAccept,
+    promptBracketsBeat,
     resolvePromptPositionalArgs,
   } from "@/lib/editor-core/promptResolution";
   import { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
@@ -815,7 +815,7 @@
           // title round-trips the label-based filter; roleplay's key is
           // `general` but its title is "Roleplay", so only the title matches.
           autocompleteTo: slashCommandToken(entry.title),
-          disabled: slashBeat && promptOnAccept(promptCtx, entry)?.mark === "character"
+          disabled: slashBeat && promptBracketsBeat(promptCtx, entry)
             ? insideBeatReason(characterTitleFromId(slashBeat.characterId))
             : undefined,
           run: (args?: string[]) => {
@@ -1271,7 +1271,7 @@
   let slashBeat = $derived.by(() => {
     if (!slashMenu.visible) return null;
     void slashFilterText;
-    return editor ? beatAt(editor.state.doc, editor.state.selection.from) : null;
+    return editor ? beatAt(editor.state, editor.state.selection.from) : null;
   });
   let slashCommands = $derived(editor ? slashCommandsForKind(getSlashCommands(), documentKind) : []);
   let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });

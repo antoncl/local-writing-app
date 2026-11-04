@@ -106,12 +106,12 @@ describe("scanBeats", () => {
   });
 
   it("finds the beat around a position, and none just after its close", () => {
-    const doc = sampleDoc();
-    const [annie] = scanBeats(doc).beats;
-    expect(beatAt(doc, annie.open + 1)?.characterId).toBe("annie");
-    expect(beatAt(doc, annie.close)?.characterId).toBe("annie");
-    expect(beatAt(doc, annie.close + 1)).toBeNull();
-    expect(beatAt(doc, annie.open)).toBeNull();
+    const state = stateOf(sampleDoc());
+    const [annie] = scanBeats(state.doc).beats;
+    expect(beatAt(state, annie.open + 1)?.characterId).toBe("annie");
+    expect(beatAt(state, annie.close)?.characterId).toBe("annie");
+    expect(beatAt(state, annie.close + 1)).toBeNull();
+    expect(beatAt(state, annie.open)).toBeNull();
   });
 });
 

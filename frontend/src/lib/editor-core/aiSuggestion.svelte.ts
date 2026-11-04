@@ -27,6 +27,7 @@ import {
   effectivePromptInputs,
   findPromptEntry,
   promptOnAccept,
+  promptBracketsBeat,
   characterIdFromInputValue,
   resolutionSceneIdFromInputs,
   promptOffersOn,
@@ -368,7 +369,7 @@ export class AiSuggestionController {
     if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
       let end = range.to;
-      if (characterId && onAccept?.mark === "character") {
+      if (characterId && promptBracketsBeat(promptCtx, lastEntry)) {
         // ADR-0070 Amendment 1: the reply becomes one beat, however many
         // paragraphs it has: an open marker before it and a close marker after
         // it carrying the interiority once. The close goes in first so `range.from`
@@ -557,9 +558,7 @@ export class AiSuggestionController {
     const ctx = this.#deps.getPromptCtx();
     // Beats never nest (ADR-0070 Amendment 1, decision 5): a turn that would be
     // bracketed as a beat can't start inside one, whichever path started it.
-    const enclosing = promptOnAccept(ctx, entry)?.mark === "character"
-      ? beatAt(editor.state.doc, editor.state.selection.from)
-      : null;
+    const enclosing = promptBracketsBeat(ctx, entry) ? beatAt(editor.state, editor.state.selection.from) : null;
     if (enclosing) {
       const title = ctx.loreEntries.find((e) => e.id === enclosing.characterId)?.title || "a character";
       this.#deps.onNotice?.(insideBeatReason(title));
@@ -1103,7 +1102,7 @@ export class AiSuggestionController {
     // A beat-marking prompt (roleplay, via on_accept) may deliver two parts —
     // visible prose then `[[interiority]]` then private inner state (ADR-0070).
     // Only the external part is ever rendered; the internal is stashed for accept.
-    const carriesInteriority = Boolean(promptOnAccept(this.#deps.getPromptCtx(), entry));
+    const carriesInteriority = promptBracketsBeat(this.#deps.getPromptCtx(), entry);
     this.#pendingInternal = null;
 
     const suggestionId = `ai-${this.#nextSuggestionId++}`;
@@ -1169,7 +1168,7 @@ export class AiSuggestionController {
         startPos = editor.state.selection.from;
         // The reply lands where the cursor is NOW, which the author may have moved
         // since the send: a beat still can't start inside another (decision 5).
-        if (carriesInteriority && beatAt(editor.state.doc, startPos)) {
+        if (carriesInteriority && beatAt(editor.state, startPos)) {
           this.error = "The cursor moved into a beat during the AI call. Move it outside the beat and retry.";
           streamErrored = true;
           return;

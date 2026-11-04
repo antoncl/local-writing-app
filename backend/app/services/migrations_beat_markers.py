@@ -33,7 +33,6 @@ class _Beat(NamedTuple):
     end: int
     # Each merged span's text, with the original separator between neighbours.
     pieces: tuple[str, ...]
-    originals: int
 
 
 def _render(beat: _Beat) -> str:
@@ -53,10 +52,10 @@ def bracket_beats(body: str) -> str:
             sep = body[last.end : match.start()]
             if last.char_id == char_id and last.enc == enc and "\n" in sep and not sep.strip():
                 beats[-1] = last._replace(
-                    end=match.end(), pieces=(*last.pieces, sep, text), originals=last.originals + 1
+                    end=match.end(), pieces=(*last.pieces, sep, text)
                 )
                 continue
-        beats.append(_Beat(char_id, enc, match.start(), match.end(), (text,), 1))
+        beats.append(_Beat(char_id, enc, match.start(), match.end(), (text,)))
     out: list[str] = []
     cursor = 0
     for beat in beats:

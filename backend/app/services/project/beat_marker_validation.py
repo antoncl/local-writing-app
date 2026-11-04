@@ -48,17 +48,15 @@ def orphan_beat_markers(body: str) -> tuple[list[str], int]:
 class BeatMarkerValidationMixin:
     """Composed onto `ProjectService`; reads scene files through its siblings."""
 
-    def _validate_beat_markers(self, node_index: Any) -> list[str]:
-        """One warning per orphan beat marker, across every manuscript scene."""
+    def _validate_beat_markers(self, node_index: Any, bodies: dict[str, str]) -> list[str]:
+        """One warning per orphan beat marker, across every manuscript scene.
+        `bodies` is each scene's raw body by id, read once for the pass."""
         by_id = getattr(node_index, "by_id", {})
         warnings: list[str] = []
-        for entry in sorted((e for e in by_id.values() if e.kind == "manuscript"), key=lambda e: e.id):
-            try:
-                _, body = self._read_markdown_with_front_matter(entry.path)  # type: ignore[attr-defined]
-            except OSError:
-                continue
+        for scene_id, body in bodies.items():
+            entry = by_id.get(scene_id)
+            name = (entry.title if entry else "") or scene_id
             opens, closes = orphan_beat_markers(body)
-            name = entry.title or entry.id
             for char_id in opens:
                 who = by_id.get(char_id)
                 warnings.append(
